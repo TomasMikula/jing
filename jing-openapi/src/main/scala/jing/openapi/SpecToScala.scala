@@ -1,0 +1,318 @@
+package jing.openapi
+
+import io.swagger.parser.OpenAPIParser
+import jing.openapi.model.{HttpEndpoint, HttpMethod, Obj, OpenApiSpec, RequestSchema, Schema}
+import scala.collection.immutable.{:: as NonEmptyList}
+import scala.collection.JavaConverters.*
+import scala.quoted.*
+
+private[openapi] object SpecToScala {
+  def apply(location: String)(using Quotes): Expr[Any] = {
+    import quotes.reflect.*
+
+    val spec = new OpenAPIParser().readLocation(location, null, null).getOpenAPI()
+
+    val schemas: List[(String, io.swagger.v3.oas.models.media.Schema[?])] = {
+      val b = List.newBuilder[(String, io.swagger.v3.oas.models.media.Schema[?])]
+      spec.getComponents().getSchemas().forEach { (name, schema) => b += ((name, schema)) }
+      b.result()
+    }
+
+    val paths: List[(String, io.swagger.v3.oas.models.PathItem)] = {
+      val b = List.newBuilder[(String, io.swagger.v3.oas.models.PathItem)]
+      spec.getPaths().forEach { (name, path) => b += ((name, path)) }
+      b.result()
+    }
+
+    newRefinedObject[OpenApiSpec](
+      owner = Symbol.spliceOwner,
+      opaqTypes = Nil,
+      vals = List(
+        ("schemas", { (ctx: Map[String, TypeRef]) =>
+          newRefinedObject_[AnyRef](
+            opaqTypes = schemas.map { case (name, s) => (name, ctx1 => schemaToType(ctx ++ ctx1, s)) },
+            vals = Nil, // TODO: companion vals with smart constructors
+          )
+        }),
+        ("paths", { (ctx: Map[String, TypeRef]) =>
+          newRefinedObject_[AnyRef](
+            opaqTypes = Nil,
+            vals = paths.map { case (path, pathItem) =>
+              (path, ctx1 => pathToObject(ctx ++ ctx1, path, pathItem))
+            },
+          )
+        }),
+      ),
+    ).asExpr
+  }
+
+  private transparent inline def qr(using q: Quotes): q.reflect.type =
+    q.reflect
+
+  private def schemaToType(using Quotes)(
+    ctx: Map[String, qr.TypeRef],
+    schema: io.swagger.v3.oas.models.media.Schema[?],
+  ): qr.TypeRepr = {
+    // TODO
+    qr.TypeRepr.of[Unit]
+  }
+
+  private def pathToObject(using Quotes)(
+    ctx: Map[String, qr.TypeRef],
+    path: String,
+    pathItem: io.swagger.v3.oas.models.PathItem,
+  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+    val operations =
+      HttpMethod.values.toList
+        .flatMap { m => pathOperation(pathItem, m).map((m, _)) }
+
+    newRefinedObject_[AnyRef](
+      opaqTypes = Nil,
+      vals = operations.map { case (meth, op) =>
+        (meth.toString, ctx1 => operationToObject(ctx ++ ctx1, path, meth, op))
+      },
+    )
+  }
+
+  private def pathOperation(
+    path: io.swagger.v3.oas.models.PathItem,
+    method: HttpMethod,
+  ): Option[io.swagger.v3.oas.models.Operation] =
+    Option(method match
+        case HttpMethod.Get     => path.getGet()
+        case HttpMethod.Post    => path.getPost()
+        case HttpMethod.Put     => path.getPut()
+        case HttpMethod.Delete  => path.getDelete()
+        case HttpMethod.Head    => path.getHead()
+        case HttpMethod.Options => path.getOptions()
+        case HttpMethod.Patch   => path.getPatch()
+        case HttpMethod.Trace   => path.getTrace()
+    )
+
+  private type ObjSchema[A] = Schema[Obj[A]]
+
+  private def operationToObject(using Quotes)(
+    ctx: Map[String, qr.TypeRef],
+    path: String,
+    method: HttpMethod,
+    op: io.swagger.v3.oas.models.Operation,
+  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+    import qr.*
+
+    val paramSchema: Option[Exists[ObjSchema]] =
+      Option(op.getParameters())
+        .map(_.asScala.toList)
+        .collect { case p :: ps => NonEmptyList(p, ps) }
+        .map(parametersSchema)
+
+    val reqBodySchema =
+      Option(op.getRequestBody())
+        .map(requestBodySchema)
+
+    val reqSchema: RequestSchema[?] =
+      requestSchema(paramSchema, reqBodySchema)
+
+    val responseSchema =
+      // op.getResponses()
+      Schema.S // TODO
+
+    val endpoint = HttpEndpoint(path, method, reqSchema, responseSchema)
+
+    val (expr, tpe) = quotedHttpEndpoint(endpoint)
+    (TypeRepr.of(using tpe), _ => expr.asTerm)
+  }
+
+  private def parametersSchema(
+    params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
+  ): Exists[ObjSchema] = {
+    Exists.Some(
+      params.foldLeft[Schema.Object[?]](Schema.Object.Empty) { (acc, p) =>
+        Schema.Object.snoc(acc, p.getName(), schemaToSchema(p.getSchema()))
+      }
+    )
+  }
+
+  private def requestBodySchema(
+    requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
+  ): Schema[?] = {
+    // TODO: proper handling of media types
+    val (mediaTypeName, mediaType) = requestBody.getContent().asScala.head
+    val schema = mediaType.getSchema()
+    schemaToSchema(schema)
+  }
+
+  private def requestSchema(
+    paramsSchema: Option[Exists[ObjSchema]],
+    reqBodySchema: Option[Schema[?]],
+  ): RequestSchema[?] =
+    (paramsSchema, reqBodySchema) match
+      case (Some(ps), Some(bs)) => RequestSchema.ParamsAndBody(ps.value, bs)
+      case (Some(ps), None    ) => RequestSchema.Params(ps.value)
+      case (None    , Some(bs)) => RequestSchema.Body(bs)
+      case (None    , None    ) => RequestSchema.NoInput
+
+  private def schemaToSchema(
+    schema: io.swagger.v3.oas.models.media.Schema[?],
+  ): Schema[?] = {
+    // TODO
+    Schema.S
+  }
+
+  private def newRefinedObject[Base](using Quotes, Type[Base])(
+    owner      : qr.Symbol,
+    opaqTypes  : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => qr.TypeRepr)],
+    vals       : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => (qr.TypeRepr, (owner: qr.Symbol) => qr.Term))],
+    // TODO: add support for methods
+  ): qr.Term = {
+    import qr.*
+
+    val (tpe, termFn) = newRefinedObject_[Base](opaqTypes, vals)
+    val term = termFn(owner)
+    Typed(term, TypeTree.of(using tpe.asType))
+  }
+
+  // TODO: shorthand version for when there are no types to introduce
+  private def newRefinedObject_[Base](using Quotes, Type[Base])(
+    opaqTypes  : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => qr.TypeRepr)],
+    vals       : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => (qr.TypeRepr, (owner: qr.Symbol) => qr.Term))],
+    // TODO: add support for methods
+  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+    import qr.*
+
+    val superClass = TypeRepr.of[Base]
+
+    (
+      refinementType(superClass) { b =>
+        val (definedTypes, b1) =
+          opaqTypes.foldLeft((Map.empty[String, TypeRef], b)) {
+            case ((alreadyDefinedTypes, b), (name, _)) =>
+              val (b1, ref) = b.addAbstractType(name)
+              (alreadyDefinedTypes.updated(name, ref), b1)
+          }
+
+        val b2 =
+          vals
+            .map { case (name, fn) => (name, fn(definedTypes)) }
+            .foldLeft(b1) { case (b, (name, (tpe, _))) => b.addMember(name, tpe) }
+
+        b2.result
+      },
+
+      { (owner: Symbol) =>
+        val clsSym =
+          Symbol.newClass(
+            owner,
+            name = "$anon",
+            parents = List(superClass),
+            decls = selfSym => {
+              val (declaredTypes, typeSymsRev) =
+                opaqTypes.foldLeft((
+                  Map.empty[String, qr.TypeRef],
+                  List[qr.Symbol](),
+                )) { case ((alreadyDefinedTypes, acc), (name, fn)) =>
+                  val tp = fn(alreadyDefinedTypes)
+                  val tpSym =
+                    Symbol.newTypeAlias(
+                      parent = selfSym,
+                      name = name,
+                      flags = Flags.EmptyFlags,
+                      tpe = tp,
+                      privateWithin = Symbol.noSymbol,
+                    )
+                  (alreadyDefinedTypes.updated(name, tpSym.typeRef), tpSym :: acc)
+                }
+
+              val declaredVals: List[Symbol] =
+                vals
+                  .map { case (name, fn) => (name, fn(declaredTypes)) }
+                  .map { case (name, (tpe, body)) =>
+                    Symbol.newVal(
+                      parent = selfSym,
+                      name = name,
+                      tpe = tpe,
+                      flags = Flags.EmptyFlags,
+                      privateWithin = Symbol.noSymbol,
+                    )
+                  }
+
+              typeSymsRev reverse_::: declaredVals
+            },
+            selfType = None,
+          )
+
+        val definedTypeSymbols: List[Symbol] =
+          clsSym.declaredTypes
+
+        val definedTypesMap: Map[String, TypeRef] =
+          definedTypeSymbols.map(sym => (sym.name, sym.typeRef)).toMap
+
+        val typeDefs =
+          definedTypeSymbols.map(TypeDef(_))
+
+        val valDefs =
+          vals
+            .map { case (name, fn) =>
+              (name, fn(definedTypesMap))
+            }
+            .map { case (name, (tpe, body)) =>
+              val sym = clsSym.declaredField(name)
+              ValDef(sym, Some(body(owner = sym)))
+            }
+
+        val clsDef = ClassDef(
+          clsSym,
+          parents = List(TypeTree.of(using superClass.asType)),
+          body = typeDefs ++ valDefs,
+        )
+
+        val instance =
+          Apply(Select(New(TypeIdent(clsSym)), clsSym.primaryConstructor), Nil)
+
+        Block(
+          List(clsDef),
+          instance,
+        )
+      },
+    )
+  }
+
+  private def refinementType(using q: Quotes)(
+    baseClass: qr.TypeRepr,
+  )(
+    f: RefinementTypeBuilder[q.type] => qr.TypeRepr
+  ): qr.TypeRepr =
+    qr.RecursiveType { self =>
+      f(RefinementTypeBuilder[q.type](q)(self, baseClass))
+    }
+
+  private class RefinementTypeBuilder[Q <: Quotes](
+    val q: Q,
+  )(
+    self: q.reflect.RecursiveType,
+    acc: q.reflect.TypeRepr
+  ) {
+    import q.reflect.*
+
+    def addAbstractType(name: String): (RefinementTypeBuilder[Q], TypeRef) = {
+      // XXX: using compiler internals will backfire at some point
+      import dotty.tools.dotc.core.{Names, Types}
+
+      val acc1 = Refinement(acc, name, TypeBounds.empty)
+      val ref =
+
+        Types.TypeRef(
+          self.recThis.asInstanceOf[Types.Type],
+          Names.typeName(name),
+        )(using
+          q.asInstanceOf[scala.quoted.runtime.impl.QuotesImpl].ctx
+        ).asInstanceOf[TypeRef]
+      (RefinementTypeBuilder(q)(self, acc1), ref)
+    }
+
+    def addMember(name: String, tpe: TypeRepr): RefinementTypeBuilder[Q] =
+      RefinementTypeBuilder(q)(self, Refinement(acc, name, tpe))
+
+    def result: TypeRepr =
+      acc
+  }
+}
