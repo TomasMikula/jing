@@ -142,12 +142,15 @@ private[openapi] object SpecToScala {
 
   private def requestBodySchema(
     requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
-  ): Schema[?] = {
-    // TODO: proper handling of media types, don't just take the first media type
-    val (mediaTypeName, mediaType) = requestBody.getContent().asScala.head
-    val schema = mediaType.getSchema()
-    schemaToSchema(schema)
-  }
+  ): BodySchema[?] =
+    bodySchema(requestBody.getContent())
+
+  private def bodySchema(
+    nullableContent: io.swagger.v3.oas.models.media.Content,
+  ): BodySchema[?] =
+    bodyVariants(nullableContent)
+      .map(BodySchema.Variants(_))
+      .getOrElse(BodySchema.EmptyBody)
 
   private def bodyVariants(
     nullableContent: io.swagger.v3.oas.models.media.Content,
@@ -163,21 +166,18 @@ private[openapi] object SpecToScala {
     ResponseSchema(
       byStatus
         .mapToProduct[BodySchema] { apiResponse =>
-          Exists(responseBodyVariants(apiResponse))
+          Exists(responseBodySchema(apiResponse))
         },
     )
 
-  private def responseBodyVariants(
+  private def responseBodySchema(
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
-  ): BodySchema[?] = {
-    bodyVariants(apiResponse.getContent())
-      .map(BodySchema.Variants(_))
-      .getOrElse(BodySchema.EmptyBody)
-  }
+  ): BodySchema[?] =
+    bodySchema(apiResponse.getContent())
 
   private def requestSchema(
     paramsSchema: Option[Exists[ObjSchema]],
-    reqBodySchema: Option[Schema[?]],
+    reqBodySchema: Option[BodySchema[?]],
   ): RequestSchema[?] =
     (paramsSchema, reqBodySchema) match
       case (Some(ps), Some(bs)) => RequestSchema.ParamsAndBody(ps.value, bs)

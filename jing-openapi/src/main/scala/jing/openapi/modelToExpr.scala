@@ -47,13 +47,13 @@ def quotedRequestSchema[T](
       given Type[ps] = t
       ('{ RequestSchema.Params($s) }, Type.of[Obj[ps]])
     case RequestSchema.Body(schema) =>
-      val (s, t) = quotedSchema(schema)
+      val (s, t) = quotedBodySchema(schema)
       given Type[T] = t
       ('{ RequestSchema.Body($s)}, t)
     case pb: RequestSchema.ParamsAndBody[ps, b] =>
       summon[T =:= Obj[{} || "params" :: Obj[ps] || "body" :: b]]
       val (ps, pst) = quotedObjectSchema(pb.params)
-      val (b, bt) = quotedSchema(pb.body)
+      val (b, bt) = quotedBodySchema(pb.body)
       given Type[ps] = pst
       given Type[b] = bt
       (
