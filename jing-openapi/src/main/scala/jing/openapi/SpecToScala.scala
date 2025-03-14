@@ -188,8 +188,13 @@ private[openapi] object SpecToScala {
   private def schemaToSchema(
     schema: io.swagger.v3.oas.models.media.Schema[?],
   ): Schema[?] = {
-    // TODO
-    Schema.S
+    schema.getType() match {
+      case "string" =>
+        // TODO: look for modifiers such as format and enum
+        Schema.S
+      case other =>
+        Schema.unknown(reason = s"Type '$other' no yet supported.")
+    }
   }
 
   extension [A](as: NonEmptyList[(String, A)]) {

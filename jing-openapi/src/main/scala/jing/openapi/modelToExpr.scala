@@ -100,9 +100,13 @@ def quotedBodySchema[T](
 def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
   s match
     case Schema.I64 =>
-        ???
+      ('{ Schema.I64 }, Type.of[Int64])
     case Schema.S =>
       ('{ Schema.S }, Type.of[Str])
+    case u: Schema.Unknown[reason] =>
+      val (exp, tpe) = quotedSingletonString(u.reason)
+      given Type[reason] = tpe
+      ('{ Schema.Unknown($exp) }, Type.of[Oops[reason]])
     case o: Schema.Object[ps] =>
       val (s, t) = quotedObjectSchema(o)
       given Type[ps] = t

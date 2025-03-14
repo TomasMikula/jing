@@ -1,10 +1,19 @@
 package jing.openapi.model
 
+import libretto.lambda.util.SingletonValue
+
 sealed trait Schema[A]
 
 object Schema {
   case object I64 extends Schema[Int64]
   case object S extends Schema[Str]
+
+  case class Unknown[S <: String](
+    reason: SingletonValue[S],
+  ) extends Schema[Oops[S]]
+
+  def unknown(reason: String): Unknown[reason.type] =
+    Unknown(SingletonValue(reason))
 
   sealed trait Object[Ps] extends Schema[Obj[Ps]]
   object Object {
