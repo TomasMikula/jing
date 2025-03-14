@@ -13,6 +13,11 @@ ThisBuild / scmInfo := Some(
 
 lazy val jingOpenApiModel = project
   .in(file("jing-openapi-model"))
+  .settings(
+    libraryDependencies ++= Seq(
+      "dev.continuously.libretto" %% "libretto-lambda" % "0.3.4-SNAPSHOT",
+    )
+  )
 
 lazy val jingOpenApi = project
   .in(file("jing-openapi"))
@@ -32,7 +37,7 @@ lazy val jingOpenApi = project
 lazy val jingOpenApiExamples = project
   .in(file("jing-openapi-examples"))
   .dependsOn(
-    jingOpenApi % Provided,
+    jingOpenApi,
   )
   .settings(
     scalacOptions ++= Seq(

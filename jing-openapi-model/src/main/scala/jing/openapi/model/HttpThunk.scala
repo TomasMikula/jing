@@ -14,7 +14,7 @@ object HttpThunk {
   case class Impl[I, O](
     path: String,
     input: RequestInput[I],
-    responseSchema: Schema[O],
+    responseSchema: ResponseSchema[O],
   ) extends HttpThunk[O] {
     override type InputType = I
   }
@@ -23,7 +23,7 @@ object HttpThunk {
     path: String,
     method: HttpMethod,
     input: RequestInput[I],
-    responseSchema: Schema[O],
+    responseSchema: ResponseSchema[O],
   ): HttpThunk[O] =
     Impl(path, input, responseSchema)
 }

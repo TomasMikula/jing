@@ -5,3 +5,4 @@ sealed trait Str
 sealed trait Obj[Props]
 sealed trait ||[A, B]
 sealed trait ::[A, B]
+sealed trait DiscriminatedUnion[Variants]

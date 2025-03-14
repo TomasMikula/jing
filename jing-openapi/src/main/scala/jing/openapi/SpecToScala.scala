@@ -1,10 +1,13 @@
 package jing.openapi
 
 import io.swagger.parser.OpenAPIParser
-import jing.openapi.model.{HttpEndpoint, HttpMethod, Obj, OpenApiSpec, RequestSchema, Schema}
+import jing.openapi.model.{||, ::, BodySchema, HttpEndpoint, HttpMethod, Obj, OpenApiSpec, RequestSchema, ResponseSchema, Schema}
+import libretto.lambda.Items1Named
+import libretto.lambda.util.{Exists, SingletonValue}
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.collection.JavaConverters.*
 import scala.quoted.*
+import scala.annotation.tailrec
 
 private[openapi] object SpecToScala {
   def apply(location: String)(using Quotes): Expr[Any] = {
@@ -113,8 +116,13 @@ private[openapi] object SpecToScala {
       requestSchema(paramSchema, reqBodySchema)
 
     val responseSchema =
-      // op.getResponses()
-      Schema.S // TODO
+      Option(op.getResponses())
+        .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
+        .collect { case r :: rs => NonEmptyList(r, rs) }
+        .map(responseBodyByStatus)
+        .getOrElse {
+          report.errorAndAbort(s"No response defined for $method $path")
+        }
 
     val endpoint = HttpEndpoint(path, method, reqSchema, responseSchema)
 
@@ -135,10 +143,36 @@ private[openapi] object SpecToScala {
   private def requestBodySchema(
     requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
   ): Schema[?] = {
-    // TODO: proper handling of media types
+    // TODO: proper handling of media types, don't just take the first media type
     val (mediaTypeName, mediaType) = requestBody.getContent().asScala.head
     val schema = mediaType.getSchema()
     schemaToSchema(schema)
+  }
+
+  private def bodyVariants(
+    nullableContent: io.swagger.v3.oas.models.media.Content,
+  ): Option[Items1Named.Product[||, ::, Schema, ?]] =
+    Option(nullableContent)
+      .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
+      .collect { case r :: rs => NonEmptyList(r, rs) }
+      .map { _.mapToProduct(mt => Exists(schemaToSchema(mt.getSchema()))) }
+
+  private def responseBodyByStatus(
+    byStatus: NonEmptyList[(String, io.swagger.v3.oas.models.responses.ApiResponse)],
+  ): ResponseSchema[?] =
+    ResponseSchema(
+      byStatus
+        .mapToProduct[BodySchema] { apiResponse =>
+          Exists(responseBodyVariants(apiResponse))
+        },
+    )
+
+  private def responseBodyVariants(
+    apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
+  ): BodySchema[?] = {
+    bodyVariants(apiResponse.getContent())
+      .map(BodySchema.Variants(_))
+      .getOrElse(BodySchema.EmptyBody)
   }
 
   private def requestSchema(
@@ -156,6 +190,37 @@ private[openapi] object SpecToScala {
   ): Schema[?] = {
     // TODO
     Schema.S
+  }
+
+  extension [A](as: NonEmptyList[(String, A)]) {
+
+    private def mapToProduct[F[_]](
+      f: A => Exists[F],
+    ): Items1Named.Product[||, ::, F, ?] = {
+
+      @tailrec
+      def go[Init](
+        acc: Items1Named.Product[||, ::, F, Init],
+        remaining: List[(String, A)],
+      ): Items1Named.Product[||, ::, F, ?] =
+        remaining match
+          case Nil => acc
+          case (tag, a) :: as =>
+            f(a) match
+              case Exists.Some(fa) =>
+                go(
+                  Items1Named.Product.Snoc(acc, SingletonValue(tag), fa),
+                  as,
+                )
+
+      val NonEmptyList((tag, a), tail) = as
+
+      go(
+        Items1Named.Product.Single(SingletonValue(tag), f(a).value),
+        tail,
+      )
+    }
+
   }
 
   private def newRefinedObject[Base](using Quotes, Type[Base])(

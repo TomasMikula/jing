@@ -2,6 +2,8 @@ package jing.openapi
 
 import jing.openapi.model.*
 import scala.quoted.*
+import libretto.lambda.Items1Named
+import libretto.lambda.util.SingletonValue
 
 given ToExpr[HttpMethod] with {
   override def apply(x: HttpMethod)(using Quotes): Expr[HttpMethod] =
@@ -24,7 +26,7 @@ def quotedHttpEndpoint[I, O](
 ): (Expr[HttpEndpoint[I, O]], Type[HttpEndpoint[I, O]]) =
   val HttpEndpoint(path, meth, req, resp) = x
   val (reqExpr, reqType) = quotedRequestSchema(req)
-  val (respExpr, respType) = quotedSchema(resp)
+  val (respExpr, respType) = quotedResponseSchema(resp)
 
   given Type[I] = reqType
   given Type[O] = respType
@@ -59,6 +61,42 @@ def quotedRequestSchema[T](
         Type.of[Obj[{} || "params" :: Obj[ps] || "body" :: b]]
       )
 
+def quotedResponseSchema[T](
+  x: ResponseSchema[T],
+)(using
+  Quotes,
+): (Expr[ResponseSchema[T]], Type[T]) =
+  x match
+    case ResponseSchema(byStatusCode) =>
+      val (e, t) =
+        quotedProduct(
+          byStatusCode,
+          [A] => bs => quotedBodySchema(bs),
+        )
+      given Type[T] = t
+      ('{ ResponseSchema($e) }, t)
+
+def quotedBodySchema[T](
+  s: BodySchema[T],
+)(using
+  Quotes,
+): (Expr[BodySchema[T]], Type[T]) =
+  s match
+    case BodySchema.EmptyBody =>
+      ('{ BodySchema.EmptyBody }, Type.of[Unit])
+    case v: BodySchema.Variants[cases] =>
+      val (e, t) =
+        quotedProduct(
+          v.byMediaType,
+          [A] => s => quotedSchema(s),
+        )
+      given Type[cases] = t
+      (
+        '{ BodySchema.Variants($e) },
+        Type.of[DiscriminatedUnion[cases]],
+      )
+
+
 def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
   s match
     case Schema.I64 =>
@@ -70,6 +108,39 @@ def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
       given Type[ps] = t
       (s, Type.of[Obj[ps]])
 
+def quotedProduct[F[_], Items](
+  p: Items1Named.Product[||, ::, F, Items],
+  f: [A] => F[A] => (Expr[F[A]], Type[A]),
+)(using
+  Quotes,
+  Type[F],
+): (Expr[Items1Named.Product[||, ::, F, Items]], Type[Items]) =
+  p match
+    case s: Items1Named.Product.Single[sep, of, f, lbl, a] =>
+      val (fa, ta) = f(s.value)
+      given Type[a] = ta
+
+      val (l, tl) = quotedSingletonString(s.label)
+      given Type[lbl] = tl
+
+      (
+        '{ Items1Named.Product.Single[sep, of, f, lbl, a]($l, $fa)},
+        Type.of[lbl :: a]
+      )
+    case s: Items1Named.Product.Snoc[sep, of, f, init, lbl, a] =>
+      val (fInit, tInit) = quotedProduct(s.init, f)
+      given Type[init] = tInit
+
+      val (fa, ta) = f(s.lastElem)
+      given Type[a] = ta
+
+      val (l, tl) = quotedSingletonString(s.lastName)
+      given Type[lbl] = tl
+
+      (
+        '{ Items1Named.Product.Snoc[sep, of, f, init, lbl, a]($fInit, $l, $fa) },
+        Type.of[init || lbl :: a]
+      )
 
 def quotedObjectSchema[Ps](s: Schema[Obj[Ps]])(using Quotes): (Expr[Schema[Obj[Ps]]], Type[Ps]) =
   s match
@@ -91,31 +162,67 @@ private def quotedObjectSnocSchema[Init, PropName <: String, PropType](
 
   given Type[Init] = ti
   given Type[PropType] = tl
-  given nt0: Type[snoc.pname.type] = stringLiteralType(snoc.pname)
+  val (_, nt0) = quotedStringLiteral(snoc.pname)
 
   given nt: Type[PropName] =
     snoc.singletonPropName.substituteContra(
       nt0
     )
 
+  val spn: SingletonValue[PropName] =
+    SingletonValue(snoc.pname)
+      .as[PropName](using snoc.singletonPropName.flip)
+
   val expr: Expr[Schema[Obj[Init || PropName :: PropType]]] =
     '{
-      Schema.Object.snoc[Init, PropType](
+      schemaObjSnoc[Init, PropName, PropType](
         $si,
-        ${Expr(snoc.pname)},
+        ${Expr(spn)},
         $sl,
       )
     }
-      .asExprOf[Schema[Obj[Init || PropName :: PropType]]]
 
   (
     expr,
     Type.of[Init || PropName :: PropType],
   )
 
-private def stringLiteralType(s: String)(using Quotes): Type[s.type] =
+private def schemaObjSnoc[Init, PropName <: String, PropType](
+  init: Schema[Obj[Init]],
+  pname: SingletonValue[PropName],
+  ptype: Schema[PropType],
+): Schema.Object.Snoc[Init, PropName, PropType] =
+  Schema.Object.Snoc(init, pname.value, ptype)(using pname.witness)
+
+private def prodSingle[F[_], Label <: String, T](
+  label: SingletonValue[Label],
+  value: F[T],
+): Items1Named.Product[||, ::, F, Label :: T] =
+  Items1Named.Product.Single(label, value)
+
+private def quotedSingletonString[T <: String](x: SingletonValue[T])(using
+  Quotes,
+): (Expr[SingletonValue[T]], Type[T]) = {
   import quotes.reflect.*
 
-  Literal(StringConstant(s)).tpe.asType
-    .asInstanceOf[Type[s.type]]
+  val (trm, tpe) = quotedStringLiteral(x.value)
+  given Type[T] = x.witness.substituteContra(tpe)
 
+  (
+    '{ SingletonValue($trm) }.asExprOf[SingletonValue[T]],
+    Type.of[T],
+  )
+}
+
+given stringSingletonToExpr[T <: String]: ToExpr[SingletonValue[T]] with {
+  override def apply(x: SingletonValue[T])(using Quotes): Expr[SingletonValue[T]] =
+    quotedSingletonString(x)._1
+}
+
+private def quotedStringLiteral(s: String)(using Quotes): (Expr[s.type], Type[s.type]) = {
+  import quotes.reflect.*
+
+  val term = Literal(StringConstant(s))
+  val tpe = term.tpe.asType.asInstanceOf[Type[s.type]]
+  (term.asExprOf(using tpe), tpe)
+}
