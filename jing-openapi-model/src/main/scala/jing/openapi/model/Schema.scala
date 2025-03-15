@@ -7,6 +7,7 @@ sealed trait Schema[A]
 object Schema {
   case object I64 extends Schema[Int64]
   case object S extends Schema[Str]
+  case class Array[T](elem: Schema[T]) extends Schema[Arr[T]]
 
   case class Unknown[S <: String](
     reason: SingletonValue[S],

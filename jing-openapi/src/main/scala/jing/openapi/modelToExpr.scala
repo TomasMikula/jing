@@ -103,6 +103,10 @@ def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
       ('{ Schema.I64 }, Type.of[Int64])
     case Schema.S =>
       ('{ Schema.S }, Type.of[Str])
+    case a: Schema.Array[a] =>
+      val (sa, ta) = quotedSchema(a.elem)
+      given Type[a] = ta
+      ('{ Schema.Array($sa) }, Type.of[Arr[a]])
     case u: Schema.Unknown[reason] =>
       val (exp, tpe) = quotedSingletonString(u.reason)
       given Type[reason] = tpe

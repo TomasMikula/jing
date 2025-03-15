@@ -189,9 +189,18 @@ private[openapi] object SpecToScala {
     schema: io.swagger.v3.oas.models.media.Schema[?],
   ): Schema[?] = {
     schema.getType() match {
+      case null =>
+        schema.get$ref() match
+          case null =>
+            Schema.unknown(reason = "Schema with no type or $ref")
+          case ref =>
+            Schema.unknown(reason = s"Schema $$ref not yet supported: $ref")
       case "string" =>
         // TODO: look for modifiers such as format and enum
         Schema.S
+      case "array" =>
+        val itemSchema = schemaToSchema(schema.getItems())
+        Schema.Array(itemSchema)
       case other =>
         Schema.unknown(reason = s"Type '$other' no yet supported.")
     }
