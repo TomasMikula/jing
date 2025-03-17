@@ -31,17 +31,17 @@ private[openapi] object SpecToScala {
       owner = Symbol.spliceOwner,
       opaqTypes = Nil,
       vals = List(
-        ("schemas", { (ctx: Map[String, TypeRef]) =>
+        ("schemas", { (ctx: Map[String, TypeRef], _) =>
           newRefinedObject_[AnyRef](
             opaqTypes = schemas.map { case (name, s) => (name, ctx1 => schemaToType(ctx ++ ctx1, s)) },
             vals = Nil, // TODO: companion vals with smart constructors
           )
         }),
-        ("paths", { (ctx: Map[String, TypeRef]) =>
+        ("paths", { (ctx: Map[String, TypeRef], _) =>
           newRefinedObject_[AnyRef](
             opaqTypes = Nil,
             vals = paths.map { case (path, pathItem) =>
-              (path, ctx1 => pathToObject(ctx ++ ctx1, path, pathItem))
+              (path, (ctx1, _) => pathToObject(ctx ++ ctx1, path, pathItem))
             },
           )
         }),
@@ -72,7 +72,7 @@ private[openapi] object SpecToScala {
     newRefinedObject_[AnyRef](
       opaqTypes = Nil,
       vals = operations.map { case (meth, op) =>
-        (meth.toString, ctx1 => operationToObject(ctx ++ ctx1, path, meth, op))
+        (meth.toString, (ctx1, _) => operationToObject(ctx ++ ctx1, path, meth, op))
       },
     )
   }
@@ -239,8 +239,8 @@ private[openapi] object SpecToScala {
 
   private def newRefinedObject[Base](using Quotes, Type[Base])(
     owner      : qr.Symbol,
-    opaqTypes  : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => qr.TypeRepr)],
-    vals       : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => (qr.TypeRepr, (owner: qr.Symbol) => qr.Term))],
+    opaqTypes  : List[(String, (prevTypeSiblings: Map[String, qr.TypeRef]) => qr.TypeRepr)],
+    vals       : List[(String, (prevTypeSiblings: Map[String, qr.TypeRef], prevTermSiblings: Map[String, qr.TermRef]) => (qr.TypeRepr, (selfSym: qr.Symbol) => qr.Term))],
     // TODO: add support for methods
   ): qr.Term = {
     import qr.*
@@ -252,8 +252,8 @@ private[openapi] object SpecToScala {
 
   // TODO: shorthand version for when there are no types to introduce
   private def newRefinedObject_[Base](using Quotes, Type[Base])(
-    opaqTypes  : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => qr.TypeRepr)],
-    vals       : List[(String, (alreadyDefinedTypes: Map[String, qr.TypeRef]) => (qr.TypeRepr, (owner: qr.Symbol) => qr.Term))],
+    opaqTypes  : List[(String, (prevTypeSiblings: Map[String, qr.TypeRef]) => qr.TypeRepr)],
+    vals       : List[(String, (prevTypeSiblings: Map[String, qr.TypeRef], prevTermSiblings: Map[String, qr.TermRef]) => (qr.TypeRepr, (selfSym: qr.Symbol) => qr.Term))],
     // TODO: add support for methods
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
     import qr.*
@@ -269,10 +269,14 @@ private[openapi] object SpecToScala {
               (alreadyDefinedTypes.updated(name, ref), b1)
           }
 
-        val b2 =
+        val (_, b2) =
           vals
-            .map { case (name, fn) => (name, fn(definedTypes)) }
-            .foldLeft(b1) { case (b, (name, (tpe, _))) => b.addMember(name, tpe) }
+            .foldLeft((Map.empty[String, TermRef], b1)) {
+              case ((alreadyDefinedTerms, b), (name, fn)) =>
+                val (tpe, _) = fn(definedTypes, alreadyDefinedTerms)
+                val (b1, ref) = b.addMember(name, tpe)
+                (alreadyDefinedTerms.updated(name, ref), b1)
+            }
 
         b2.result
       },
@@ -286,8 +290,8 @@ private[openapi] object SpecToScala {
             decls = selfSym => {
               val (declaredTypes, typeSymsRev) =
                 opaqTypes.foldLeft((
-                  Map.empty[String, qr.TypeRef],
-                  List[qr.Symbol](),
+                  Map.empty[String, TypeRef],
+                  List.empty[Symbol],
                 )) { case ((alreadyDefinedTypes, acc), (name, fn)) =>
                   val tp = fn(alreadyDefinedTypes)
                   val tpSym =
@@ -301,20 +305,25 @@ private[openapi] object SpecToScala {
                   (alreadyDefinedTypes.updated(name, tpSym.typeRef), tpSym :: acc)
                 }
 
-              val declaredVals: List[Symbol] =
+              val (_, valSymsRev) =
                 vals
-                  .map { case (name, fn) => (name, fn(declaredTypes)) }
-                  .map { case (name, (tpe, body)) =>
-                    Symbol.newVal(
-                      parent = selfSym,
-                      name = name,
-                      tpe = tpe,
-                      flags = Flags.EmptyFlags,
-                      privateWithin = Symbol.noSymbol,
-                    )
+                  .foldLeft((
+                    Map.empty[String, TermRef],
+                    List.empty[Symbol],
+                  )) { case ((alreadyDefinedVals, acc), (name, fn)) =>
+                    val (tpe, body) = fn(declaredTypes, alreadyDefinedVals)
+                    val sym =
+                      Symbol.newVal(
+                        parent = selfSym,
+                        name = name,
+                        tpe = tpe,
+                        flags = Flags.EmptyFlags,
+                        privateWithin = Symbol.noSymbol,
+                      )
+                    (alreadyDefinedVals.updated(name, sym.termRef), sym :: acc)
                   }
 
-              typeSymsRev reverse_::: declaredVals
+              typeSymsRev reverse_::: valSymsRev.reverse
             },
             selfType = None,
           )
@@ -330,13 +339,17 @@ private[openapi] object SpecToScala {
 
         val valDefs =
           vals
-            .map { case (name, fn) =>
-              (name, fn(definedTypesMap))
-            }
-            .map { case (name, (tpe, body)) =>
+            .foldLeft((
+              Map.empty[String, TermRef],
+              List.empty[ValDef],
+            )) { case ((prevTermSiblings, acc), (name, fn)) =>
+              val (tpe, body) = fn(definedTypesMap, prevTermSiblings)
               val sym = clsSym.declaredField(name)
-              ValDef(sym, Some(body(owner = sym)))
-            }
+              (
+                prevTermSiblings.updated(name, sym.termRef),
+                ValDef(sym, Some(body(selfSym = sym))) :: acc
+              )
+            }._2.reverse
 
         val clsDef = ClassDef(
           clsSym,
@@ -371,25 +384,34 @@ private[openapi] object SpecToScala {
     acc: q.reflect.TypeRepr
   ) {
     import q.reflect.*
+    import dotty.tools.dotc.core.{Names, Types} // XXX: using compiler internals will backfire at some point
+
 
     def addAbstractType(name: String): (RefinementTypeBuilder[Q], TypeRef) = {
-      // XXX: using compiler internals will backfire at some point
-      import dotty.tools.dotc.core.{Names, Types}
-
       val acc1 = Refinement(acc, name, TypeBounds.empty)
       val ref =
-
         Types.TypeRef(
           self.recThis.asInstanceOf[Types.Type],
           Names.typeName(name),
         )(using
           q.asInstanceOf[scala.quoted.runtime.impl.QuotesImpl].ctx
         ).asInstanceOf[TypeRef]
+
       (RefinementTypeBuilder(q)(self, acc1), ref)
     }
 
-    def addMember(name: String, tpe: TypeRepr): RefinementTypeBuilder[Q] =
-      RefinementTypeBuilder(q)(self, Refinement(acc, name, tpe))
+    def addMember(name: String, tpe: TypeRepr): (RefinementTypeBuilder[Q], TermRef) = {
+      val acc1 = Refinement(acc, name, tpe)
+      val ref =
+        Types.TermRef(
+          self.recThis.asInstanceOf[Types.Type],
+          Names.termName(name),
+        )(using
+          q.asInstanceOf[scala.quoted.runtime.impl.QuotesImpl].ctx
+        ).asInstanceOf[TermRef]
+
+      (RefinementTypeBuilder(q)(self, acc1), ref)
+    }
 
     def result: TypeRepr =
       acc
