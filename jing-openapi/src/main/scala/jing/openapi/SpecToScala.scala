@@ -37,11 +37,12 @@ private[openapi] object SpecToScala {
             vals = Nil, // TODO: companion vals with smart constructors
           )
         }),
-        ("paths", { (ctx: Map[String, TypeRef], _) =>
+        ("paths", { (_, prevVals: Map[String, TermRef]) =>
+          val schemas = prevVals.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
           newRefinedObject_[AnyRef](
             opaqTypes = Nil,
             vals = paths.map { case (path, pathItem) =>
-              (path, (ctx1, _) => pathToObject(ctx ++ ctx1, path, pathItem))
+              (path, (_, _) => pathToObject(schemas, path, pathItem))
             },
           )
         }),
@@ -61,7 +62,7 @@ private[openapi] object SpecToScala {
   }
 
   private def pathToObject(using Quotes)(
-    ctx: Map[String, qr.TypeRef],
+    schemas: qr.TermRef,
     path: String,
     pathItem: io.swagger.v3.oas.models.PathItem,
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
@@ -72,7 +73,7 @@ private[openapi] object SpecToScala {
     newRefinedObject_[AnyRef](
       opaqTypes = Nil,
       vals = operations.map { case (meth, op) =>
-        (meth.toString, (ctx1, _) => operationToObject(ctx ++ ctx1, path, meth, op))
+        (meth.toString, (_, _) => operationToObject(schemas, path, meth, op))
       },
     )
   }
@@ -95,7 +96,7 @@ private[openapi] object SpecToScala {
   private type ObjSchema[A] = Schema[Obj[A]]
 
   private def operationToObject(using Quotes)(
-    ctx: Map[String, qr.TypeRef],
+    schemaNamespace: qr.TermRef,
     path: String,
     method: HttpMethod,
     op: io.swagger.v3.oas.models.Operation,
@@ -106,11 +107,11 @@ private[openapi] object SpecToScala {
       Option(op.getParameters())
         .map(_.asScala.toList)
         .collect { case p :: ps => NonEmptyList(p, ps) }
-        .map(parametersSchema)
+        .map(parametersSchema(schemaNamespace, _))
 
     val reqBodySchema =
       Option(op.getRequestBody())
-        .map(requestBodySchema)
+        .map(requestBodySchema(schemaNamespace, _))
 
     val reqSchema: RequestSchema[?] =
       requestSchema(paramSchema, reqBodySchema)
@@ -119,7 +120,7 @@ private[openapi] object SpecToScala {
       Option(op.getResponses())
         .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
         .collect { case r :: rs => NonEmptyList(r, rs) }
-        .map(responseBodyByStatus)
+        .map(responseBodyByStatus(schemaNamespace, _))
         .getOrElse {
           report.errorAndAbort(s"No response defined for $method $path")
         }
@@ -130,50 +131,56 @@ private[openapi] object SpecToScala {
     (TypeRepr.of(using tpe), _ => expr.asTerm)
   }
 
-  private def parametersSchema(
+  private def parametersSchema(using Quotes)(
+    schemaNamespace: qr.TermRef,
     params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
   ): Exists[ObjSchema] = {
     Exists.Some(
       params.foldLeft[Schema.Object[?]](Schema.Object.Empty) { (acc, p) =>
-        Schema.Object.snoc(acc, p.getName(), schemaToSchema(p.getSchema()))
+        Schema.Object.snoc(acc, p.getName(), schemaToSchema(schemaNamespace, p.getSchema()))
       }
     )
   }
 
-  private def requestBodySchema(
+  private def requestBodySchema(using Quotes)(
+    schemaNamespace: qr.TermRef,
     requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
   ): BodySchema[?] =
-    bodySchema(requestBody.getContent())
+    bodySchema(schemaNamespace, requestBody.getContent())
 
-  private def bodySchema(
+  private def bodySchema(using Quotes)(
+    schemaNamespace: qr.TermRef,
     nullableContent: io.swagger.v3.oas.models.media.Content,
   ): BodySchema[?] =
-    bodyVariants(nullableContent)
+    bodyVariants(schemaNamespace, nullableContent)
       .map(BodySchema.Variants(_))
       .getOrElse(BodySchema.EmptyBody)
 
-  private def bodyVariants(
+  private def bodyVariants(using Quotes)(
+    schemaNamespace: qr.TermRef,
     nullableContent: io.swagger.v3.oas.models.media.Content,
   ): Option[Items1Named.Product[||, ::, Schema, ?]] =
     Option(nullableContent)
       .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
       .collect { case r :: rs => NonEmptyList(r, rs) }
-      .map { _.mapToProduct(mt => Exists(schemaToSchema(mt.getSchema()))) }
+      .map { _.mapToProduct(mt => Exists(schemaToSchema(schemaNamespace, mt.getSchema()))) }
 
-  private def responseBodyByStatus(
+  private def responseBodyByStatus(using Quotes)(
+    schemaNamespace: qr.TermRef,
     byStatus: NonEmptyList[(String, io.swagger.v3.oas.models.responses.ApiResponse)],
   ): ResponseSchema[?] =
     ResponseSchema(
       byStatus
         .mapToProduct[BodySchema] { apiResponse =>
-          Exists(responseBodySchema(apiResponse))
+          Exists(responseBodySchema(schemaNamespace, apiResponse))
         },
     )
 
-  private def responseBodySchema(
+  private def responseBodySchema(using Quotes)(
+    schemaNamespace: qr.TermRef,
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
   ): BodySchema[?] =
-    bodySchema(apiResponse.getContent())
+    bodySchema(schemaNamespace, apiResponse.getContent())
 
   private def requestSchema(
     paramsSchema: Option[Exists[ObjSchema]],
@@ -185,21 +192,25 @@ private[openapi] object SpecToScala {
       case (None    , Some(bs)) => RequestSchema.Body(bs)
       case (None    , None    ) => RequestSchema.NoInput
 
-  private def schemaToSchema(
+  private def schemaToSchema(using Quotes)(
+    schemaNamespace: qr.TermRef,
     schema: io.swagger.v3.oas.models.media.Schema[?],
   ): Schema[?] = {
+    val LocalSchema = "#/components/schemas/(.*)".r
     schema.getType() match {
       case null =>
         schema.get$ref() match
           case null =>
             Schema.unknown(reason = "Schema with no type or $ref")
+          case LocalSchema(name) =>
+            Schema.unknown(reason = s"Local schema $name not yet supported")
           case ref =>
-            Schema.unknown(reason = s"Schema $$ref not yet supported: $ref")
+            Schema.unknown(reason = s"The following $$ref format not yet supported: $ref")
       case "string" =>
         // TODO: look for modifiers such as format and enum
         Schema.S
       case "array" =>
-        val itemSchema = schemaToSchema(schema.getItems())
+        val itemSchema = schemaToSchema(schemaNamespace, schema.getItems())
         Schema.Array(itemSchema)
       case other =>
         Schema.unknown(reason = s"Type '$other' no yet supported.")
