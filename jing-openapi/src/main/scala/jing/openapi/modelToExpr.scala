@@ -164,36 +164,22 @@ private def quotedObjectSnocSchema[Init, PropName <: String, PropType](
 ): (
   Expr[Schema[Obj[Init || PropName :: PropType]]],
   Type[Init || PropName :: PropType],
-) =
+) = {
   val (si, ti) = quotedObjectSchema(snoc.init.value)
   val (sl, tl) = quotedSchema(snoc.ptype)
 
   given Type[Init] = ti
   given Type[PropType] = tl
-  val (_, nt0) = quotedStringLiteral(snoc.pname)
 
-  given nt: Type[PropName] =
-    snoc.singletonPropName.substituteContra(
-      nt0
-    )
+  val (spn, nt) = quotedSingletonString(snoc.pname)
 
-  val spn: SingletonValue[PropName] =
-    SingletonValue(snoc.pname)
-      .as[PropName](using snoc.singletonPropName.flip)
+  given Type[PropName] = nt
 
   val expr: Expr[Schema[Obj[Init || PropName :: PropType]]] =
-    '{
-      Schema.objectSnoc[Init, PropName, PropType](
-        $si,
-        ${Expr(spn)},
-        $sl,
-      )
-    }
+    '{ Schema.objectSnoc[Init, PropName, PropType]($si, $spn, $sl) }
 
-  (
-    expr,
-    Type.of[Init || PropName :: PropType],
-  )
+  (expr, Type.of[Init || PropName :: PropType])
+}
 
 private def prodSingle[F[_], Label <: String, T](
   label: SingletonValue[Label],

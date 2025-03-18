@@ -21,7 +21,7 @@ object Schema {
     pname: SingletonValue[PropName],
     ptype: Schema[PropType],
   ): Schema[Obj[Init || PropName :: PropType]] =
-    Schema(tic.Object.Snoc(init, pname.value, ptype)(using pname.witness))
+    Schema(tic.Object.Snoc(init, pname, ptype))
 
   def unknown[S <: String](reason: SingletonValue[S]): Schema[Oops[S]] =
     Schema(tic.Unknown(reason))

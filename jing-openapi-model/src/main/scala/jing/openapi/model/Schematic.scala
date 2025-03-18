@@ -22,13 +22,11 @@ object Schematic {
 
     case class Snoc[F[_], Init, PropName <: String, PropType](
       init: F[Obj[Init]],
-      pname: PropName,
+      pname: SingletonValue[PropName],
       ptype: F[PropType],
-    )(using
-      val singletonPropName: PropName =:= pname.type
     ) extends Object[F, Init || PropName :: PropType] {
       def widen(n: String)(using PropName <:< n.type): Snoc[F, Init, n.type, PropType] =
-        Snoc(init, n, ptype)
+        Snoc(init, SingletonValue(n), ptype)
     }
 
     def snoc[F[_], Init, PropType](
@@ -36,6 +34,6 @@ object Schematic {
       pname: String,
       ptype: F[PropType],
     ): Snoc[F, Init, pname.type, PropType] =
-      Snoc(init, pname, ptype)
+      Snoc(init, SingletonValue(pname), ptype)
   }
 }
