@@ -2,40 +2,30 @@ package jing.openapi.model
 
 import libretto.lambda.util.SingletonValue
 
-sealed trait Schema[A]
+case class Schema[A](value: Schematic[Schema, A])
 
 object Schema {
-  case object I64 extends Schema[Int64]
-  case object S extends Schema[Str]
-  case class Array[T](elem: Schema[T]) extends Schema[Arr[T]]
+  import jing.openapi.model.{Schematic as tic}
 
-  case class Unknown[S <: String](
-    reason: SingletonValue[S],
-  ) extends Schema[Oops[S]]
+  def i64: Schema[Int64] = Schema(tic.I64())
+  def str: Schema[Str]   = Schema(tic.S())
 
-  def unknown(reason: String): Unknown[reason.type] =
-    Unknown(SingletonValue(reason))
+  def arr[A](sa: Schema[A]): Schema[Arr[A]] =
+    Schema(tic.Array(sa))
 
-  sealed trait Object[Ps] extends Schema[Obj[Ps]]
-  object Object {
-    case object Empty extends Object[{}]
+  def objectEmpty: Schema[Obj[{}]] =
+    Schema(tic.Object.Empty())
 
-    case class Snoc[Init, PropName <: String, PropType](
-      init: Schema[Obj[Init]],
-      pname: PropName,
-      ptype: Schema[PropType],
-    )(using
-      val singletonPropName: PropName =:= pname.type
-    ) extends Object[Init || PropName :: PropType] {
-      def widen(n: String)(using PropName <:< n.type): Snoc[Init, n.type, PropType] =
-        Snoc(init, n, ptype)
-    }
+  def objectSnoc[Init, PropName <: String, PropType](
+    init: Schema[Obj[Init]],
+    pname: SingletonValue[PropName],
+    ptype: Schema[PropType],
+  ): Schema[Obj[Init || PropName :: PropType]] =
+    Schema(tic.Object.Snoc(init, pname.value, ptype)(using pname.witness))
 
-    def snoc[Init, PropType](
-      init: Schema[Obj[Init]],
-      pname: String,
-      ptype: Schema[PropType],
-    ): Snoc[Init, pname.type, PropType] =
-      Snoc(init, pname, ptype)
-  }
+  def unknown[S <: String](reason: SingletonValue[S]): Schema[Oops[S]] =
+    Schema(tic.Unknown(reason))
+
+  def unknown(reason: String): Schema[Oops[reason.type]] =
+    Schema(tic.unknown(reason))
 }

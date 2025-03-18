@@ -1,7 +1,7 @@
 package jing.openapi
 
 import io.swagger.parser.OpenAPIParser
-import jing.openapi.model.{||, ::, BodySchema, HttpEndpoint, HttpMethod, Obj, OpenApiSpec, RequestSchema, ResponseSchema, Schema}
+import jing.openapi.model.{||, ::, BodySchema, HttpEndpoint, HttpMethod, Obj, OpenApiSpec, RequestSchema, ResponseSchema, Schema, Schematic}
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Exists, SingletonValue}
 import scala.collection.immutable.{:: as NonEmptyList}
@@ -135,11 +135,11 @@ private[openapi] object SpecToScala {
     schemaNamespace: qr.TermRef,
     params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
   ): Exists[ObjSchema] = {
-    Exists.Some(
-      params.foldLeft[Schema.Object[?]](Schema.Object.Empty) { (acc, p) =>
-        Schema.Object.snoc(acc, p.getName(), schemaToSchema(schemaNamespace, p.getSchema()))
+    val res =
+      params.foldLeft[Schematic.Object[Schema, ?]](Schematic.Object.Empty()) { (acc, p) =>
+        Schematic.Object.snoc(Schema(acc), p.getName(), schemaToSchema(schemaNamespace, p.getSchema()))
       }
-    )
+    Exists.Some(Schema(res))
   }
 
   private def requestBodySchema(using Quotes)(
@@ -208,10 +208,10 @@ private[openapi] object SpecToScala {
             Schema.unknown(reason = s"The following $$ref format not yet supported: $ref")
       case "string" =>
         // TODO: look for modifiers such as format and enum
-        Schema.S
+        Schema.str
       case "array" =>
         val itemSchema = schemaToSchema(schemaNamespace, schema.getItems())
-        Schema.Array(itemSchema)
+        Schema.arr(itemSchema)
       case other =>
         Schema.unknown(reason = s"Type '$other' no yet supported.")
     }
