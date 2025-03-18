@@ -9,13 +9,6 @@ object Schematic {
   case class S[F[_]]() extends Schematic[F, Str]
   case class Array[F[_], T](elem: F[T]) extends Schematic[F, Arr[T]]
 
-  case class Unknown[F[_], S <: String](
-    reason: SingletonValue[S],
-  ) extends Schematic[F, Oops[S]]
-
-  def unknown[F[_]](reason: String): Unknown[F, reason.type] =
-    Unknown(SingletonValue(reason))
-
   sealed trait Object[F[_], Ps] extends Schematic[F, Obj[Ps]]
   object Object {
     case class Empty[F[_]]() extends Object[F, {}]
@@ -36,4 +29,8 @@ object Schematic {
     ): Snoc[F, Init, pname.type, PropType] =
       Snoc(init, SingletonValue(pname), ptype)
   }
+
+  def asObject[F[_], Ps](s: Schematic[F, Obj[Ps]]): Schematic.Object[F, Ps] =
+    s match
+      case o: Object[F, Ps] => o
 }

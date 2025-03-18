@@ -137,9 +137,9 @@ private[openapi] object SpecToScala {
   ): Exists[ObjSchema] = {
     val res =
       params.foldLeft[Schematic.Object[Schema, ?]](Schematic.Object.Empty()) { (acc, p) =>
-        Schematic.Object.snoc(Schema(acc), p.getName(), schemaToSchema(schemaNamespace, p.getSchema()))
+        Schematic.Object.snoc(Schema.Proper(acc), p.getName(), schemaToSchema(schemaNamespace, p.getSchema()))
       }
-    Exists.Some(Schema(res))
+    Exists.Some(Schema.Proper(res))
   }
 
   private def requestBodySchema(using Quotes)(

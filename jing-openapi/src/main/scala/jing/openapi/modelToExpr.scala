@@ -43,7 +43,7 @@ def quotedRequestSchema[T](
       summon[Unit =:= T]
       ('{ RequestSchema.NoInput }, Type.of[Unit])
     case ps: RequestSchema.Params[ps] =>
-      val (s, t) = quotedObjectSchema(ps.schema.value)
+      val (s, t) = quotedObjectSchema(ps.schema)
       given Type[ps] = t
       ('{ RequestSchema.Params($s) }, Type.of[Obj[ps]])
     case RequestSchema.Body(schema) =>
@@ -52,7 +52,7 @@ def quotedRequestSchema[T](
       ('{ RequestSchema.Body($s)}, t)
     case pb: RequestSchema.ParamsAndBody[ps, b] =>
       summon[T =:= Obj[{} || "params" :: Obj[ps] || "body" :: b]]
-      val (ps, pst) = quotedObjectSchema(pb.params.value)
+      val (ps, pst) = quotedObjectSchema(pb.params)
       val (b, bt) = quotedBodySchema(pb.body)
       given Type[ps] = pst
       given Type[b] = bt
@@ -98,7 +98,16 @@ def quotedBodySchema[T](
 
 
 def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
-  s.value match
+  s match
+    case Schema.Proper(s) =>
+      quotedSchemaProper(s)
+    case u: Schema.Unknown[reason] =>
+      val (exp, tpe) = quotedSingletonString(u.reason)
+      given Type[reason] = tpe
+      ('{ Schema.unknown($exp) }, Type.of[Oops[reason]])
+
+def quotedSchemaProper[T](s: Schematic[Schema, T])(using Quotes): (Expr[Schema[T]], Type[T]) =
+  s match
     case Schematic.I64() =>
       ('{ Schema.i64 }, Type.of[Int64])
     case Schematic.S() =>
@@ -107,10 +116,6 @@ def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
       val (sa, ta) = quotedSchema(a.elem)
       given Type[a] = ta
       ('{ Schema.arr($sa) }, Type.of[Arr[a]])
-    case u: Schematic.Unknown[s, reason] =>
-      val (exp, tpe) = quotedSingletonString(u.reason)
-      given Type[reason] = tpe
-      ('{ Schema.unknown($exp) }, Type.of[Oops[reason]])
     case o: Schematic.Object[s, ps] =>
       val (s, t) = quotedObjectSchema(o)
       given Type[ps] = t
@@ -150,7 +155,10 @@ def quotedProduct[F[_], Items](
         Type.of[init || lbl :: a]
       )
 
-def quotedObjectSchema[Ps](s: Schematic[Schema, Obj[Ps]])(using Quotes): (Expr[Schema[Obj[Ps]]], Type[Ps]) =
+def quotedObjectSchema[Ps](s: Schema[Obj[Ps]])(using Quotes): (Expr[Schema[Obj[Ps]]], Type[Ps]) =
+  quotedObjectSchema(Schema.asObject(s))
+
+def quotedObjectSchema[Ps](s: Schematic.Object[Schema, Ps])(using Quotes): (Expr[Schema[Obj[Ps]]], Type[Ps]) =
   s match
     case Schematic.Object.Empty() =>
       ('{ Schema.objectEmpty }, Type.of[{}])
@@ -165,7 +173,7 @@ private def quotedObjectSnocSchema[Init, PropName <: String, PropType](
   Expr[Schema[Obj[Init || PropName :: PropType]]],
   Type[Init || PropName :: PropType],
 ) = {
-  val (si, ti) = quotedObjectSchema(snoc.init.value)
+  val (si, ti) = quotedObjectSchema(snoc.init)
   val (sl, tl) = quotedSchema(snoc.ptype)
 
   given Type[Init] = ti
