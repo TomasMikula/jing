@@ -15,9 +15,9 @@ private[openapi] object SpecToScala {
 
     val spec = new OpenAPIParser().readLocation(location, null, null).getOpenAPI()
 
-    val schemas: List[(String, io.swagger.v3.oas.models.media.Schema[?])] = {
-      val b = List.newBuilder[(String, io.swagger.v3.oas.models.media.Schema[?])]
-      spec.getComponents().getSchemas().forEach { (name, schema) => b += ((name, schema)) }
+    val schemas: List[(String, ProtoSchema)] = {
+      val b = List.newBuilder[(String, ProtoSchema)]
+      spec.getComponents().getSchemas().forEach { (name, schema) => b += ((name, protoSchema(schema))) }
       b.result()
     }
 
@@ -31,9 +31,9 @@ private[openapi] object SpecToScala {
       owner = Symbol.spliceOwner,
       opaqTypes = Nil,
       vals = List(
-        ("schemas", { (ctx: Map[String, TypeRef], _) =>
+        ("schemas", { (_, _) =>
           newRefinedObject_[AnyRef](
-            opaqTypes = schemas.map { case (name, s) => (name, ctx1 => schemaToType(ctx ++ ctx1, s)) },
+            opaqTypes = schemas.map { case (name, s) => (name, ctx => schemaToType(ctx, s)) },
             vals = Nil, // TODO: companion vals with smart constructors
           )
         }),
@@ -55,7 +55,7 @@ private[openapi] object SpecToScala {
 
   private def schemaToType(using Quotes)(
     ctx: Map[String, qr.TypeRef],
-    schema: io.swagger.v3.oas.models.media.Schema[?],
+    schema: ProtoSchema,
   ): qr.TypeRepr = {
     // TODO
     qr.TypeRepr.of[Unit]
@@ -137,7 +137,8 @@ private[openapi] object SpecToScala {
   ): Exists[ObjSchema] = {
     val res =
       params.foldLeft[Schematic.Object[Schema, ?]](Schematic.Object.Empty()) { (acc, p) =>
-        Schematic.Object.snoc(Schema.Proper(acc), p.getName(), schemaToSchema(schemaNamespace, p.getSchema()))
+        val pSchema = protoSchemaToSchema(schemaNamespace, protoSchema(p.getSchema()))
+        Schematic.Object.snoc(acc, p.getName(), pSchema)
       }
     Exists.Some(Schema.Proper(res))
   }
@@ -163,7 +164,7 @@ private[openapi] object SpecToScala {
     Option(nullableContent)
       .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
       .collect { case r :: rs => NonEmptyList(r, rs) }
-      .map { _.mapToProduct(mt => Exists(schemaToSchema(schemaNamespace, mt.getSchema()))) }
+      .map { _.mapToProduct(mt => Exists(protoSchemaToSchema(schemaNamespace, protoSchema(mt.getSchema())))) }
 
   private def responseBodyByStatus(using Quotes)(
     schemaNamespace: qr.TermRef,
@@ -192,29 +193,43 @@ private[openapi] object SpecToScala {
       case (None    , Some(bs)) => RequestSchema.Body(bs)
       case (None    , None    ) => RequestSchema.NoInput
 
-  private def schemaToSchema(using Quotes)(
-    schemaNamespace: qr.TermRef,
+  private def protoSchema(using Quotes)(
     schema: io.swagger.v3.oas.models.media.Schema[?],
-  ): Schema[?] = {
+  ): ProtoSchema = {
     val LocalSchema = "#/components/schemas/(.*)".r
     schema.getType() match {
       case null =>
         schema.get$ref() match
           case null =>
-            Schema.unknown(reason = "Schema with no type or $ref")
+            ProtoSchema.Unsupported("Swagger schema with no type or $ref")
           case LocalSchema(name) =>
-            Schema.unknown(reason = s"Local schema $name not yet supported")
+            ProtoSchema.Ref(name)
           case ref =>
-            Schema.unknown(reason = s"The following $$ref format not yet supported: $ref")
+            ProtoSchema.Unsupported(s"The following $$ref format not yet supported: $ref")
       case "string" =>
         // TODO: look for modifiers such as format and enum
-        Schema.str
+        ProtoSchema.str
       case "array" =>
-        val itemSchema = schemaToSchema(schemaNamespace, schema.getItems())
-        Schema.arr(itemSchema)
+        val itemSchema = protoSchema(schema.getItems())
+        ProtoSchema.arr(itemSchema)
       case other =>
-        Schema.unknown(reason = s"Type '$other' no yet supported.")
+        ProtoSchema.Unsupported(s"Type '$other' no yet supported.")
     }
+  }
+
+  private def protoSchemaToSchema(using Quotes)(
+    schemaNamespace: qr.TermRef,
+    schema: ProtoSchema,
+  ): Schema[?] = {
+    schema match
+      case ProtoSchema.Proper(value) =>
+        Schema.Proper(
+          value.wipeTranslate[Schema]([A] => sa => Exists(protoSchemaToSchema(schemaNamespace, sa)))
+        )
+      case ProtoSchema.Ref(name) =>
+        Schema.unknown(reason = s"Local schema $name not yet supported")
+      case ProtoSchema.Unsupported(details) =>
+        Schema.unknown(reason = details)
   }
 
   extension [A](as: NonEmptyList[(String, A)]) {

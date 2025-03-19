@@ -1,20 +1,50 @@
 package jing.openapi.model
 
-import libretto.lambda.util.SingletonValue
+import libretto.lambda.util.{Exists, SingletonValue}
 
-sealed trait Schematic[F[_], A]
+/** Schema structure parametric in the type of nested schemas.
+ *
+ * @tparam F representation of nested schemas. In [[Schema]],
+ *   [[Schematic]] is used with `F` recursively instantiated to [[Schema]] itself.
+ */
+sealed trait Schematic[F[_], A] {
+  import Schematic.*
+
+  def translate[G[_]](h: [X] => F[X] => G[X]): Schematic[G, A] =
+    this match
+      case I64() => I64()
+      case S() => S()
+      case Array(elem) => Array(h(elem))
+      case Object.Empty() => Object.Empty()
+      case Object.Snoc(init, pname, ptype) => Object.Snoc(asObject(init.translate(h)), pname, h(ptype))
+
+  def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): Schematic[G, ?] =
+    this match
+      case I64() => I64()
+      case S() => S()
+      case Array(elem) => Array(h(elem).value)
+      case o: Object[f, ps] => o.wipeTranslateObj(h).value
+
+}
 
 object Schematic {
   case class I64[F[_]]() extends Schematic[F, Int64]
   case class S[F[_]]() extends Schematic[F, Str]
   case class Array[F[_], T](elem: F[T]) extends Schematic[F, Arr[T]]
 
-  sealed trait Object[F[_], Ps] extends Schematic[F, Obj[Ps]]
+  sealed trait Object[F[_], Ps] extends Schematic[F, Obj[Ps]] {
+    private[Schematic] def wipeTranslateObj[G[_]](h: [X] => F[X] => Exists[G]): Exists[[X] =>> Schematic[G, Obj[X]]] =
+      this match
+        case Object.Empty() =>
+          Exists(Object.Empty())
+        case Object.Snoc(init, pname, ptype) =>
+          Exists(Object.Snoc(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
+  }
   object Object {
     case class Empty[F[_]]() extends Object[F, {}]
 
     case class Snoc[F[_], Init, PropName <: String, PropType](
-      init: F[Obj[Init]],
+      init: Object[F, Init],
       pname: SingletonValue[PropName],
       ptype: F[PropType],
     ) extends Object[F, Init || PropName :: PropType] {
@@ -23,11 +53,11 @@ object Schematic {
     }
 
     def snoc[F[_], Init, PropType](
-      init: F[Obj[Init]],
+      init: Schematic[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
     ): Snoc[F, Init, pname.type, PropType] =
-      Snoc(init, SingletonValue(pname), ptype)
+      Snoc(asObject(init), SingletonValue(pname), ptype)
   }
 
   def asObject[F[_], Ps](s: Schematic[F, Obj[Ps]]): Schematic.Object[F, Ps] =
