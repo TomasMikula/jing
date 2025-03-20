@@ -1,6 +1,6 @@
 package jing.openapi.model
 
-import libretto.lambda.util.{Exists, SingletonValue}
+import libretto.lambda.util.{Applicative, Exists, SingletonValue}
 
 /** Schema structure parametric in the type of nested schemas.
  *
@@ -25,6 +25,13 @@ sealed trait Schematic[F[_], A] {
       case Array(elem) => Array(h(elem).value)
       case o: Object[f, ps] => o.wipeTranslateObj(h).value
 
+  def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[Schematic[H, ?]] =
+    this match
+      case I64() => G.pure(I64())
+      case S() => G.pure(S())
+      case Array(elem) => h(elem).map(el => Array(el.value))
+      case o: Object[f, ps] => o.wipeTranslateObjA(h).map(_.value)
+
 }
 
 object Schematic {
@@ -39,6 +46,22 @@ object Schematic {
           Exists(Object.Empty())
         case Object.Snoc(init, pname, ptype) =>
           Exists(Object.Snoc(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
+
+    private[Schematic] def wipeTranslateObjA[G[_], H[_]](
+      h: [X] => F[X] => G[Exists[H]],
+    )(using
+      G: Applicative[G],
+    ): G[Exists[[X] =>> Schematic[H, Obj[X]]]] =
+      this match
+        case Object.Empty() =>
+          G.pure(Exists(Object.Empty()))
+        case Object.Snoc(init, pname, ptype) =>
+          G.map2(
+            init.wipeTranslateObjA(h),
+            h(ptype),
+          ) { (init, ptype) =>
+            Exists(Object.Snoc(asObject(init.value), pname, ptype.value))
+          }
   }
   object Object {
     case class Empty[F[_]]() extends Object[F, {}]

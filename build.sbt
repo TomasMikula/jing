@@ -11,9 +11,15 @@ ThisBuild / scmInfo := Some(
   )
 )
 
+val scalacOptionsCommon =
+  Seq(
+    "-Ykind-projector:underscores",
+  )
+
 lazy val jingOpenApiModel = project
   .in(file("jing-openapi-model"))
   .settings(
+    scalacOptions ++= scalacOptionsCommon,
     libraryDependencies ++= Seq(
       "dev.continuously.libretto" %% "libretto-lambda" % "0.3.4-SNAPSHOT",
     )
@@ -29,9 +35,11 @@ lazy val jingOpenApi = project
       "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
       "io.swagger.parser.v3" % "swagger-parser" % "2.1.25",
     ),
-    scalacOptions ++= Seq(
-      "-experimental",
-    ),
+    scalacOptions ++=
+      scalacOptionsCommon ++
+      Seq(
+        "-experimental",
+      ),
   )
 
 lazy val jingOpenApiExamples = project
@@ -40,7 +48,9 @@ lazy val jingOpenApiExamples = project
     jingOpenApi,
   )
   .settings(
-    scalacOptions ++= Seq(
-      "-experimental",
-    ),
+    scalacOptions ++=
+      scalacOptionsCommon ++
+      Seq(
+        "-experimental",
+      ),
   )

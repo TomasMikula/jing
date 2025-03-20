@@ -15,11 +15,14 @@ private[openapi] object SpecToScala {
 
     val spec = new OpenAPIParser().readLocation(location, null, null).getOpenAPI()
 
-    val schemas: List[(String, ProtoSchema)] = {
+    val schemas0: List[(String, ProtoSchema)] = {
       val b = List.newBuilder[(String, ProtoSchema)]
       spec.getComponents().getSchemas().forEach { (name, schema) => b += ((name, protoSchema(schema))) }
       b.result()
     }
+
+    val schemas: List[(String, ProtoSchema.Oriented)] =
+      ProtoSchema.Oriented.sortTopologically(schemas0)
 
     val paths: List[(String, io.swagger.v3.oas.models.PathItem)] = {
       val b = List.newBuilder[(String, io.swagger.v3.oas.models.PathItem)]
@@ -33,7 +36,7 @@ private[openapi] object SpecToScala {
       vals = List(
         ("schemas", { (_, _) =>
           newRefinedObject_[AnyRef](
-            opaqTypes = schemas.map { case (name, s) => (name, ctx => schemaToType(ctx, s)) },
+            opaqTypes = schemas.map { case (name, s) => (name, ctx => protoSchemaToType(ctx, s)) },
             vals = Nil, // TODO: companion vals with smart constructors
           )
         }),
@@ -53,9 +56,9 @@ private[openapi] object SpecToScala {
   private transparent inline def qr(using q: Quotes): q.reflect.type =
     q.reflect
 
-  private def schemaToType(using Quotes)(
+  private def protoSchemaToType(using Quotes)(
     ctx: Map[String, qr.TypeRef],
-    schema: ProtoSchema,
+    schema: ProtoSchema.Oriented,
   ): qr.TypeRepr = {
     // TODO
     qr.TypeRepr.of[Unit]
