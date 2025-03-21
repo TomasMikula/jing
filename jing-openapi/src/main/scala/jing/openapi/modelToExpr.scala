@@ -104,9 +104,34 @@ def quotedSchema[T](s: Schema[T])(using Quotes): (Expr[Schema[T]], Type[T]) =
       given Type[T] = tpe
       ('{ Schema.Proper($exp) }, tpe)
     case u: Schema.Unknown[reason] =>
-      val (exp, tpe) = quotedSingletonString(u.reason)
-      given Type[reason] = tpe
-      ('{ Schema.unknown($exp) }, Type.of[Oops[reason]])
+      quotedSchemaOops(u.reason)
+
+private def quotedSchemaOops[S <: String](s: SingletonValue[S])(using Quotes): (Expr[Schema[Oops[S]]], Type[Oops[S]]) =
+  val (exp, tpe) = quotedSingletonString(s)
+  given Type[S] = tpe
+  ('{ Schema.unknown($exp) }, Type.of[Oops[S]])
+
+private transparent inline def qr(using q: Quotes): q.reflect.type =
+  q.reflect
+
+def quotedSchemaFromProto(using Quotes)(
+  types: Map[String, qr.TypeRepr],
+  prevSchemas: Map[String, qr.TermRef],
+  schema: ProtoSchema.Oriented,
+): Exists[[T] =>> (Expr[Schema[T]], Type[T])] =
+  schema match
+    case ProtoSchema.Oriented.Proper(value) =>
+      ???
+    case ProtoSchema.Oriented.BackwardRef(schemaName) =>
+      ???
+    case ProtoSchema.Oriented.ForwardRef(schemaName, cycle) =>
+      val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
+      Exists(quotedSchemaOops(SingletonValue(msg)))
+    case ProtoSchema.Oriented.UnresolvedRef(schemaName) =>
+      val msg = s"Unresolved schema $schemaName"
+      Exists(quotedSchemaOops(SingletonValue(msg)))
+    case ProtoSchema.Oriented.Unsupported(details) =>
+      Exists(quotedSchemaOops(SingletonValue(details)))
 
 def quotedSchematic[F[_], T](
   s: Schematic[F, T],

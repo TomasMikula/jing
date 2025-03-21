@@ -10,7 +10,7 @@ import scala.quoted.*
 import scala.annotation.tailrec
 
 private[openapi] object SpecToScala {
-  def apply(location: String)(using Quotes): Expr[Any] = {
+  def apply(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
 
     val spec = new OpenAPIParser().readLocation(location, null, null).getOpenAPI()
@@ -33,41 +33,58 @@ private[openapi] object SpecToScala {
     newRefinedObject[OpenApiSpec](
       owner = Symbol.spliceOwner,
       members = List(
-        ("schemas", { _ =>
+        "schemas" -> { _ =>
+          def resolveSchema(ctx: PreviousSiblings[q.type], s: ProtoSchema.Oriented): Exists[[T] =>> (Expr[Schema[T]], Type[T])] =
+            quotedSchemaFromProto(
+              ctx.types,
+              ctx.terms.view.mapValues(ref => TermRef(ref, "schema")).toMap,
+              s,
+            )
+
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
-            members = schemas.map { case (name, s) =>
-              // TODO: companion vals with smart constructors
-              (name, ctx => MemberDef.Type(protoSchemaToType(ctx.types, s)))
+            members = schemas.flatMap { case (name, s) =>
+              List(
+                name -> { ctx =>
+                  val tpe = resolveSchema(ctx, s).value._2
+                  MemberDef.Type(TypeRepr.of(using tpe))
+                },
+                name -> { ctx =>
+                  val (tp, bodyFn) = newRefinedObject_[AnyRef](
+                    members = List(
+                      "schema" -> { _ =>
+                        resolveSchema(ctx, s) match
+                          case e @ Exists.Some((exp, _)) =>
+                            val tpe = ctx.types.getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it was just defined") })
+                            MemberDef.Val(TypeRepr.of[Schema].appliedTo(tpe), _ => exp.asTerm)
+                      },
+                      // TODO: smart constructor and deconstructor
+                    ),
+                  )
+                  MemberDef.Val(tp, bodyFn)
+                },
+              )
             },
           )
           MemberDef.Val(tpe, bodyFn)
-        }),
-        ("paths", { prevSiblings =>
+        },
+        "paths" -> { prevSiblings =>
           val schemas = prevSiblings.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
             members = paths.map { case (path, pathItem) =>
-              (path, { _ =>
+              path -> { _ =>
                 val (tpe, bodyFn) = pathToObject(schemas, path, pathItem)
                 MemberDef.Val(tpe, bodyFn)
-              })
+              }
             },
           )
           MemberDef.Val(tpe, bodyFn)
-        }),
+        },
       ),
     ).asExpr
   }
 
   private transparent inline def qr(using q: Quotes): q.reflect.type =
     q.reflect
-
-  private def protoSchemaToType(using Quotes)(
-    ctx: Map[String, qr.TypeRef],
-    schema: ProtoSchema.Oriented,
-  ): qr.TypeRepr = {
-    // TODO
-    qr.TypeRepr.of[Unit]
-  }
 
   private def pathToObject(using Quotes)(
     schemas: qr.TermRef,
@@ -438,7 +455,6 @@ private[openapi] object SpecToScala {
   ) {
     import q.reflect.*
     import dotty.tools.dotc.core.{Names, Types} // XXX: using compiler internals will backfire at some point
-
 
     def addAbstractType(name: String): (RefinementTypeBuilder[Q], TypeRef) = {
       val acc1 = Refinement(acc, name, TypeBounds.empty)
