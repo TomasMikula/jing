@@ -1,7 +1,20 @@
 package jing.openapi
 
 import io.swagger.parser.OpenAPIParser
-import jing.openapi.model.{||, ::, BodySchema, HttpEndpoint, HttpMethod, Obj, OpenApiSpec, RequestSchema, ResponseSchema, Schema, Schematic}
+import jing.openapi.model.{
+  ||,
+  ::,
+  BodySchema,
+  HttpEndpoint,
+  HttpMethod,
+  Obj,
+  OpenApiSpec,
+  RequestSchema,
+  ResponseSchema,
+  Schema,
+  Schematic,
+  Value,
+}
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Exists, SingletonValue}
 import scala.collection.immutable.{:: as NonEmptyList}
@@ -44,20 +57,54 @@ private[openapi] object SpecToScala {
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
             members = schemas.flatMap { case (name, s) =>
               List(
+                // "opaque" type alias
                 name -> { ctx =>
                   val tpe = resolveSchema(ctx, s).value._2
                   MemberDef.Type(TypeRepr.of(using tpe))
                 },
+
+                // companion "object"
                 name -> { ctx =>
+                  val e @ Exists.Some((exp, tpe)) = resolveSchema(ctx, s)
+                  type T = e.T
+                  given Type[T] = e.value._2
+                  val tpeAlias = ctx.types.getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it was just defined") })
                   val (tp, bodyFn) = newRefinedObject_[AnyRef](
                     members = List(
+                      // schema of the "opaque" type
                       "schema" -> { _ =>
-                        resolveSchema(ctx, s) match
-                          case e @ Exists.Some((exp, _)) =>
-                            val tpe = ctx.types.getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it was just defined") })
-                            MemberDef.Val(TypeRepr.of[Schema].appliedTo(tpe), _ => exp.asTerm)
+                        MemberDef.Val(TypeRepr.of[Schema].appliedTo(tpeAlias), _ => exp.asTerm)
                       },
-                      // TODO: smart constructor and deconstructor
+
+                      // constructor of the "opaque" type
+                      "apply" -> { _ =>
+                        MemberDef.Method(
+                          MethodType(paramNames = List("x"))(
+                            self => List(TypeRepr.of[Value[T]]),
+                            self => TypeRepr.of[Value].appliedTo(tpeAlias),
+                          ),
+                          body = { (self, argss) =>
+                            // implementation is just identity
+                            val List(List(x)) = argss
+                            x.asExpr.asTerm
+                          },
+                        )
+                      },
+
+                      // deconstructor
+                      "unapply" -> { _ =>
+                        MemberDef.Method(
+                          MethodType(paramNames = List("x"))(
+                            self => List(TypeRepr.of[Value].appliedTo(tpeAlias)),
+                            self => TypeRepr.of[Some[Value[T]]],
+                          ),
+                          body = { (self, argss) =>
+                            // implementation is just wrapping the argument in Some
+                            val List(List(x)) = argss
+                            '{ Some(${x.asExprOf[Value[T]]}) }.asTerm
+                          }
+                        )
+                      },
                     ),
                   )
                   MemberDef.Val(tp, bodyFn)
@@ -300,7 +347,7 @@ private[openapi] object SpecToScala {
         terms,
       )
 
-    def addVal(name: String, value: qr.TermRef): PreviousSiblings[Q] =
+    def addTerm(name: String, value: qr.TermRef): PreviousSiblings[Q] =
       PreviousSiblings(
         types,
         terms.updated(name, value),
@@ -314,9 +361,19 @@ private[openapi] object SpecToScala {
 
   private sealed trait MemberDef[Q <: Quotes]
   private object MemberDef {
-    class Type[Q <: Quotes & Singleton](using val q: Q)(val body: qr.TypeRepr) extends MemberDef[Q]
-    class Val[Q <: Quotes & Singleton](using val q: Q)(val tpe: qr.TypeRepr, val body: (selfSym: qr.Symbol) => qr.Term) extends MemberDef[Q]
-    // TODO: add support for methods
+    class Type[Q <: Quotes & Singleton](using val q: Q)(
+      val body: qr.TypeRepr,
+    ) extends MemberDef[Q]
+
+    class Val[Q <: Quotes & Singleton](using val q: Q)(
+      val tpe: qr.TypeRepr,
+      val body: (selfSym: qr.Symbol) => qr.Term,
+    ) extends MemberDef[Q]
+
+    class Method[Q <: Quotes & Singleton](using val q: Q)(
+      val tpe: qr.MethodType,
+      val body: (selfSym: qr.Symbol, argss: List[List[qr.Tree]]) => qr.Term,
+    ) extends MemberDef[Q]
   }
 
   private def newRefinedObject[Base](using q: Quotes, baseType: Type[Base])(
@@ -349,7 +406,10 @@ private[openapi] object SpecToScala {
                   (ctx.addType(name, ref), b1)
                 case tm: MemberDef.Val[q] =>
                   val (b1, ref) = b.addMember(name, tm.tpe)
-                  (ctx.addVal(name, ref), b1)
+                  (ctx.addTerm(name, ref), b1)
+                case md: MemberDef.Method[q] =>
+                  val (b1, ref) = b.addMember(name, md.tpe)
+                  (ctx.addTerm(name, ref), b1)
           }
 
         b1.result
@@ -388,7 +448,17 @@ private[openapi] object SpecToScala {
                           flags = Flags.EmptyFlags,
                           privateWithin = Symbol.noSymbol,
                         )
-                      (ctx.addVal(name, sym.termRef), sym :: acc)
+                      (ctx.addTerm(name, sym.termRef), sym :: acc)
+                    case md: MemberDef.Method[q] =>
+                      val sym =
+                        Symbol.newMethod(
+                          parent = selfSym,
+                          name = name,
+                          tpe = md.tpe,
+                          flags = Flags.EmptyFlags,
+                          privateWithin = Symbol.noSymbol,
+                        )
+                      (ctx.addTerm(name, sym.termRef), sym :: acc)
                 }
 
               symsRev.reverse
@@ -419,6 +489,13 @@ private[openapi] object SpecToScala {
               case vd: MemberDef.Val[q] =>
                 val sym = clsSym.declaredField(name)
                 Some(ValDef(sym, Some(vd.body(selfSym = sym))))
+              case md: MemberDef.Method[q] =>
+                val sym =
+                  clsSym.declaredMethod(name) match
+                    case m :: Nil => m
+                    case Nil => report.errorAndAbort(s"Bug: Method `$name` not found in declared methods")
+                    case _ => report.errorAndAbort(s"Bug: Multiple methods named `$name` found in declared methods")
+                Some(DefDef(sym, argss => Some(md.body(sym, argss))))
           }
 
         val clsDef = ClassDef(
