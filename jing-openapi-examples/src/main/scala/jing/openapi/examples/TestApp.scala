@@ -12,8 +12,8 @@ object TestApp extends App {
   import api.schemas.Pet
 
   private def petRewrap(x: Value[Pet]): Value[Pet] =
-    Pet.unapply(x) match // structural unapply not supported
-      case Some(y) => Pet(y)
+    x match
+      case Pet(y) => Pet(y)
 
   val result =
     api

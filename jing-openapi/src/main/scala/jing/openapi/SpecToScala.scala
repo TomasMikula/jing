@@ -13,6 +13,7 @@ import jing.openapi.model.{
   ResponseSchema,
   Schema,
   Schematic,
+  TotalExtractor,
   Value,
 }
 import libretto.lambda.Items1Named
@@ -105,7 +106,7 @@ private[openapi] object SpecToScala {
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
     import qr.*
 
-    newRefinedObject_[AnyRef](
+    newRefinedObject_[TotalExtractor[Value[A], Value[T]]](
       members = List(
         // schema of the "opaque" type
         "schema" -> { _ =>
@@ -127,7 +128,7 @@ private[openapi] object SpecToScala {
           )
         },
 
-        // deconstructor
+        // deconstructor, overrides unapply from TotalExtractor
         "unapply" -> { _ =>
           MemberDef.Method(
             MethodType(paramNames = List("x"))(
@@ -408,10 +409,10 @@ private[openapi] object SpecToScala {
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
     import qr.*
 
-    val superClass = TypeRepr.of[Base]
+    val baseTypeRepr = TypeRepr.of[Base]
 
     (
-      refinementType(superClass) { b =>
+      refinementType(baseTypeRepr) { b =>
         val (_, b1) =
           members.foldLeft((PreviousSiblings.empty(using q), b)) {
             case ((ctx, b), (name, defn)) =>
@@ -435,7 +436,11 @@ private[openapi] object SpecToScala {
           Symbol.newClass(
             owner,
             name = "$anon",
-            parents = List(superClass),
+            parents =
+              if (baseTypeRepr.typeSymbol.flags.is(Flags.Trait))
+                List(TypeRepr.of[Object], baseTypeRepr)
+              else
+                List(baseTypeRepr),
             decls = selfSym => {
               val (_, symsRev) =
                 members.foldLeft((
@@ -515,7 +520,7 @@ private[openapi] object SpecToScala {
 
         val clsDef = ClassDef(
           clsSym,
-          parents = List(TypeTree.of(using superClass.asType)),
+          parents = List(TypeTree.of(using baseTypeRepr.asType)),
           body = typeDefs ++ valDefs,
         )
 
