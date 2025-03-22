@@ -65,48 +65,14 @@ private[openapi] object SpecToScala {
 
                 // companion "object"
                 name -> { ctx =>
-                  val e @ Exists.Some((exp, tpe)) = resolveSchema(ctx, s)
-                  type T = e.T
-                  given Type[T] = e.value._2
-                  val tpeAlias = ctx.types.getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it was just defined") })
-                  val (tp, bodyFn) = newRefinedObject_[AnyRef](
-                    members = List(
-                      // schema of the "opaque" type
-                      "schema" -> { _ =>
-                        MemberDef.Val(TypeRepr.of[Schema].appliedTo(tpeAlias), _ => exp.asTerm)
-                      },
-
-                      // constructor of the "opaque" type
-                      "apply" -> { _ =>
-                        MemberDef.Method(
-                          MethodType(paramNames = List("x"))(
-                            self => List(TypeRepr.of[Value[T]]),
-                            self => TypeRepr.of[Value].appliedTo(tpeAlias),
-                          ),
-                          body = { (self, argss) =>
-                            // implementation is just identity
-                            val List(List(x)) = argss
-                            x.asExpr.asTerm
-                          },
-                        )
-                      },
-
-                      // deconstructor
-                      "unapply" -> { _ =>
-                        MemberDef.Method(
-                          MethodType(paramNames = List("x"))(
-                            self => List(TypeRepr.of[Value].appliedTo(tpeAlias)),
-                            self => TypeRepr.of[Some[Value[T]]],
-                          ),
-                          body = { (self, argss) =>
-                            // implementation is just wrapping the argument in Some
-                            val List(List(x)) = argss
-                            '{ Some(${x.asExprOf[Value[T]]}) }.asTerm
-                          }
-                        )
-                      },
-                    ),
-                  )
+                  val ex = resolveSchema(ctx, s)
+                  given Type[ex.T] = ex.value._2
+                  val tpeAlias =
+                    ctx.types
+                      .getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it should have just been defined") })
+                      .asType
+                      .asInstanceOf[Type[? <: Any]]
+                  val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(ex.value._1)
                   MemberDef.Val(tp, bodyFn)
                 },
               )
@@ -128,6 +94,55 @@ private[openapi] object SpecToScala {
         },
       ),
     ).asExpr
+  }
+
+  /**
+    * @tparam A the abstract ("opaque") alias (of `T`) for which we are creating the companion object
+    * @tparam T the definition of `A`
+    */
+  private def schemaCompanion[A, T](using Quotes, Type[A], Type[T])(
+    schema: Expr[Schema[T]],
+  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+    import qr.*
+
+    newRefinedObject_[AnyRef](
+      members = List(
+        // schema of the "opaque" type
+        "schema" -> { _ =>
+          MemberDef.Val(TypeRepr.of[Schema[A]], _ => schema.asTerm)
+        },
+
+        // constructor of the "opaque" type
+        "apply" -> { _ =>
+          MemberDef.Method(
+            MethodType(paramNames = List("x"))(
+              self => List(TypeRepr.of[Value[T]]),
+              self => TypeRepr.of[Value[A]],
+            ),
+            body = { (self, argss) =>
+              // implementation is just identity
+              val List(List(x)) = argss
+              x.asExpr.asTerm
+            },
+          )
+        },
+
+        // deconstructor
+        "unapply" -> { _ =>
+          MemberDef.Method(
+            MethodType(paramNames = List("x"))(
+              self => List(TypeRepr.of[Value[A]]),
+              self => TypeRepr.of[Some[Value[T]]],
+            ),
+            body = { (self, argss) =>
+              // implementation is just wrapping the argument in Some
+              val List(List(x)) = argss
+              '{ Some(${x.asExprOf[Value[T]]}) }.asTerm
+            }
+          )
+        },
+      ),
+    )
   }
 
   private transparent inline def qr(using q: Quotes): q.reflect.type =
