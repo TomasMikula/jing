@@ -82,11 +82,16 @@ private[openapi] object SpecToScala {
           MemberDef.Val(tpe, bodyFn)
         },
         "paths" -> { prevSiblings =>
-          val schemas = prevSiblings.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
+          val schemasField = prevSiblings.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
+          val schemaTerms: Map[String, TermRef] =
+            schemas
+              .map { case (name, _) => (name, TermRef(TermRef(schemasField, name), "schema")) }
+              .toMap
+
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
             members = paths.map { case (path, pathItem) =>
               path -> { _ =>
-                val (tpe, bodyFn) = pathToObject(schemas, path, pathItem)
+                val (tpe, bodyFn) = pathToObject(schemaTerms, path, pathItem)
                 MemberDef.Val(tpe, bodyFn)
               }
             },
@@ -150,7 +155,7 @@ private[openapi] object SpecToScala {
     q.reflect
 
   private def pathToObject(using Quotes)(
-    schemas: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     path: String,
     pathItem: io.swagger.v3.oas.models.PathItem,
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
@@ -186,7 +191,7 @@ private[openapi] object SpecToScala {
   private type ObjSchema[A] = Schema[Obj[A]]
 
   private def operationToObject(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     path: String,
     method: HttpMethod,
     op: io.swagger.v3.oas.models.Operation,
@@ -197,11 +202,11 @@ private[openapi] object SpecToScala {
       Option(op.getParameters())
         .map(_.asScala.toList)
         .collect { case p :: ps => NonEmptyList(p, ps) }
-        .map(parametersSchema(schemaNamespace, _))
+        .map(parametersSchema(schemas, _))
 
     val reqBodySchema =
       Option(op.getRequestBody())
-        .map(requestBodySchema(schemaNamespace, _))
+        .map(requestBodySchema(schemas, _))
 
     val reqSchema: RequestSchema[?] =
       requestSchema(paramSchema, reqBodySchema)
@@ -210,7 +215,7 @@ private[openapi] object SpecToScala {
       Option(op.getResponses())
         .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
         .collect { case r :: rs => NonEmptyList(r, rs) }
-        .map(responseBodyByStatus(schemaNamespace, _))
+        .map(responseBodyByStatus(schemas, _))
         .getOrElse {
           report.errorAndAbort(s"No response defined for $method $path")
         }
@@ -222,56 +227,56 @@ private[openapi] object SpecToScala {
   }
 
   private def parametersSchema(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
   ): Exists[ObjSchema] = {
     val res =
       params.foldLeft[Schematic.Object[Schema, ?]](Schematic.Object.Empty()) { (acc, p) =>
-        val pSchema = protoSchemaToSchema(schemaNamespace, protoSchema(p.getSchema()))
+        val pSchema = protoSchemaToSchema(schemas, protoSchema(p.getSchema()))
         Schematic.Object.snoc(acc, p.getName(), pSchema)
       }
     Exists.Some(Schema.Proper(res))
   }
 
   private def requestBodySchema(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
   ): BodySchema[?] =
-    bodySchema(schemaNamespace, requestBody.getContent())
+    bodySchema(schemas, requestBody.getContent())
 
   private def bodySchema(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     nullableContent: io.swagger.v3.oas.models.media.Content,
   ): BodySchema[?] =
-    bodyVariants(schemaNamespace, nullableContent)
+    bodyVariants(schemas, nullableContent)
       .map(BodySchema.Variants(_))
       .getOrElse(BodySchema.EmptyBody)
 
   private def bodyVariants(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     nullableContent: io.swagger.v3.oas.models.media.Content,
   ): Option[Items1Named.Product[||, ::, Schema, ?]] =
     Option(nullableContent)
       .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
       .collect { case r :: rs => NonEmptyList(r, rs) }
-      .map { _.mapToProduct(mt => Exists(protoSchemaToSchema(schemaNamespace, protoSchema(mt.getSchema())))) }
+      .map { _.mapToProduct(mt => Exists(protoSchemaToSchema(schemas, protoSchema(mt.getSchema())))) }
 
   private def responseBodyByStatus(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     byStatus: NonEmptyList[(String, io.swagger.v3.oas.models.responses.ApiResponse)],
   ): ResponseSchema[?] =
     ResponseSchema(
       byStatus
         .mapToProduct[BodySchema] { apiResponse =>
-          Exists(responseBodySchema(schemaNamespace, apiResponse))
+          Exists(responseBodySchema(schemas, apiResponse))
         },
     )
 
   private def responseBodySchema(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
   ): BodySchema[?] =
-    bodySchema(schemaNamespace, apiResponse.getContent())
+    bodySchema(schemas, apiResponse.getContent())
 
   private def requestSchema(
     paramsSchema: Option[Exists[ObjSchema]],
@@ -308,13 +313,13 @@ private[openapi] object SpecToScala {
   }
 
   private def protoSchemaToSchema(using Quotes)(
-    schemaNamespace: qr.TermRef,
+    schemas: Map[String, qr.TermRef],
     schema: ProtoSchema,
   ): Schema[?] = {
     schema match
       case ProtoSchema.Proper(value) =>
         Schema.Proper(
-          value.wipeTranslate[Schema]([A] => sa => Exists(protoSchemaToSchema(schemaNamespace, sa)))
+          value.wipeTranslate[Schema]([A] => sa => Exists(protoSchemaToSchema(schemas, sa)))
         )
       case ProtoSchema.Ref(name) =>
         Schema.unknown(reason = s"Local schema $name not yet supported")
@@ -568,14 +573,7 @@ private[openapi] object SpecToScala {
 
     def addMember(name: String, tpe: TypeRepr): (RefinementTypeBuilder[Q], TermRef) = {
       val acc1 = Refinement(acc, name, tpe)
-      val ref =
-        Types.TermRef(
-          self.recThis.asInstanceOf[Types.Type],
-          Names.termName(name),
-        )(using
-          q.asInstanceOf[scala.quoted.runtime.impl.QuotesImpl].ctx
-        ).asInstanceOf[TermRef]
-
+      val ref = TermRef(self.recThis, name)
       (RefinementTypeBuilder(q)(self, acc1), ref)
     }
 
