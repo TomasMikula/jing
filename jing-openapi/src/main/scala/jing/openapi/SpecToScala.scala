@@ -227,7 +227,7 @@ private[openapi] object SpecToScala {
 
     val endpoint = HttpEndpoint(path, method, reqSchema, responseSchema)
 
-    val (expr, tpe) = quotedHttpEndpoint(endpoint)
+    val (tpe, expr) = quotedHttpEndpoint(endpoint)
     (TypeRepr.of(using tpe), _ => expr.asTerm)
   }
 
