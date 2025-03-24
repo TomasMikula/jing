@@ -3,7 +3,8 @@ package jing.openapi
 import jing.openapi.model.*
 import scala.quoted.*
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Exists, SingletonValue}
+import libretto.lambda.util.{Applicative, Exists, SingletonValue}
+import libretto.lambda.util.Applicative.*
 
 given ToExpr[HttpMethod] with {
   override def apply(x: HttpMethod)(using Quotes): Expr[HttpMethod] =
@@ -114,24 +115,48 @@ private def quotedSchemaOops[S <: String](s: SingletonValue[S])(using Quotes): (
 private transparent inline def qr(using q: Quotes): q.reflect.type =
   q.reflect
 
+trait SchemaLookup {
+  def lookup(schemaName: String): Exists[[T] =>> (Type[T], Expr[Schema[T]])]
+}
+
 def quotedSchemaFromProto(using Quotes)(
-  types: Map[String, qr.TypeRepr],
-  prevSchemas: Map[String, qr.TermRef],
   schema: ProtoSchema.Oriented,
-): Exists[[T] =>> (Expr[Schema[T]], Type[T])] =
+): Reader[SchemaLookup, Exists[[T] =>> (Type[T], Expr[Schema[T]])]] = {
+  import quotes.reflect.*
+
   schema match
     case ProtoSchema.Oriented.Proper(value) =>
-      ???
+      quotedSchematicRelA(
+        value,
+        [A] => ps => quotedSchemaFromProto(ps) map {
+          case Exists.Some((e, t)) => Exists((Unrelated(), (t, e)))
+        },
+      ) map {
+        case ex @ Exists.Some(_, (expr, tpe)) =>
+          given Type[ex.T] = tpe
+          Exists((tpe, '{ Schema.Proper($expr) }))
+        }
+
     case ProtoSchema.Oriented.BackwardRef(schemaName) =>
-      ???
+      Reader(_.lookup(schemaName))
+
     case ProtoSchema.Oriented.ForwardRef(schemaName, cycle) =>
       val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
-      Exists(quotedSchemaOops(SingletonValue(msg)))
+      Reader.pure(
+        Exists(quotedSchemaOops(SingletonValue(msg)).swap)
+      )
+
     case ProtoSchema.Oriented.UnresolvedRef(schemaName) =>
       val msg = s"Unresolved schema $schemaName"
-      Exists(quotedSchemaOops(SingletonValue(msg)))
+      Reader.pure(
+        Exists(quotedSchemaOops(SingletonValue(msg)).swap)
+      )
+
     case ProtoSchema.Oriented.Unsupported(details) =>
-      Exists(quotedSchemaOops(SingletonValue(details)))
+      Reader.pure(
+        Exists(quotedSchemaOops(SingletonValue(details)).swap)
+      )
+}
 
 def quotedSchematic[F[_], T](
   s: Schematic[F, T],
@@ -140,31 +165,47 @@ def quotedSchematic[F[_], T](
   Quotes,
   Type[F],
 ): (Expr[Schematic[F, T]], Type[T]) =
-  quotedSchematicRel[F, T, =:=](s, [A] => fa => Exists(summon[A =:= A], f(fa))) match
+  quotedSchematicRel[F, T, F, =:=](s, [A] => fa => Exists(summon[A =:= A], f(fa))) match
     case Exists.Some((ev, res)) =>
       ev.substituteContra[[X] =>> (Expr[Schematic[F, X]], Type[X])](res)
 
-def quotedSchematicRel[F[_], T, Rel[_, _]](
+def quotedSchematicRel[F[_], T, G[_], Rel[_, _]](
   s: Schematic[F, T],
-  f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Expr[F[B]], Type[B]))],
+  f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Expr[G[B]], Type[B]))],
 )(using
   Quotes,
-  Type[F],
+  Type[G],
   Substitutive[Rel],
-): Exists[[U] =>> (Rel[T, U], (Expr[Schematic[F, U]], Type[U]))] =
+): Exists[[U] =>> (Rel[T, U], (Expr[Schematic[G, U]], Type[U]))] =
+  quotedSchematicRelA[F, T, G, Rel, [x] =>> x](s, f)
+
+def quotedSchematicRelA[F[_], T, G[_], Rel[_, _], M[_]](
+  s: Schematic[F, T],
+  f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Expr[G[B]], Type[B]))]],
+)(using
+  Quotes,
+  Type[G],
+  Substitutive[Rel],
+  Applicative[M],
+): M[Exists[[U] =>> (Rel[T, U], (Expr[Schematic[G, U]], Type[U]))]] =
   val Rel = summon[Substitutive[Rel]]
+  val M = summon[Applicative[M]]
   s match
     case Schematic.I64() =>
-      Exists((Rel.refl[Int64], ('{ Schematic.I64() }, Type.of[Int64])))
+      M.pure(
+        Exists((Rel.refl[Int64], ('{ Schematic.I64() }, Type.of[Int64])))
+      )
     case Schematic.S() =>
-      Exists((Rel.refl[Str], ('{ Schematic.S() }, Type.of[Str])))
+      M.pure(
+        Exists((Rel.refl[Str], ('{ Schematic.S() }, Type.of[Str])))
+      )
     case a: Schematic.Array[s, a] =>
-      f(a.elem) match
+      f(a.elem) map:
         case e @ Exists.Some((rel, (sb, tb))) =>
           given Type[e.T] = tb
           Exists((rel.lift[Arr], ('{ Schematic.Array($sb) }, Type.of[Arr[e.T]])))
     case o: Schematic.Object[s, ps] =>
-      quotedObjectSchematicRel(o, f) match
+      quotedObjectSchematicRelA(o, f) map:
         case e @ Exists.Some((rel, (s, t))) =>
           given Type[e.T] = t
           Exists(rel.lift[Obj], (s, Type.of[Obj[e.T]]))
@@ -215,43 +256,56 @@ def quotedObjectSchematic[F[_], Ps](
   Quotes,
   Type[F],
 ): (Expr[Schematic.Object[F, Ps]], Type[Ps]) =
-  quotedObjectSchematicRel[F, Ps, =:=](s, [A] => fa => Exists((summon[A =:= A], f(fa)))) match
+  quotedObjectSchematicRel[F, Ps, F, =:=](s, [A] => fa => Exists((summon[A =:= A], f(fa)))) match
     case Exists.Some((ev, res)) =>
       ev.substituteContra[[Qs] =>> (Expr[Schematic.Object[F, Qs]], Type[Qs])](res)
 
-def quotedObjectSchematicRel[F[_], Ps, Rel[_, _]](
+def quotedObjectSchematicRel[F[_], Ps, G[_], Rel[_, _]](
   s: Schematic.Object[F, Ps],
-  f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Expr[F[B]], Type[B]))],
+  f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Expr[G[B]], Type[B]))],
 )(using
-  Quotes,
-  Type[F],
-  Substitutive[Rel],
-): Exists[[Qs] =>> (Rel[Ps, Qs], (Expr[Schematic.Object[F, Qs]], Type[Qs]))] =
-  val Rel = summon[Substitutive[Rel]]
+  q: Quotes,
+  tg: Type[G],
+  Rel: Substitutive[Rel],
+): Exists[[Qs] =>> (Rel[Ps, Qs], (Expr[Schematic.Object[G, Qs]], Type[Qs]))] =
+  quotedObjectSchematicRelA[F, Ps, G, Rel, [x] =>> x](s, f)
+
+def quotedObjectSchematicRelA[F[_], Ps, G[_], Rel[_, _], M[_]](
+  s: Schematic.Object[F, Ps],
+  f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Expr[G[B]], Type[B]))]],
+)(using
+  q: Quotes,
+  tg: Type[G],
+  Rel: Substitutive[Rel],
+  M: Applicative[M],
+): M[Exists[[Qs] =>> (Rel[Ps, Qs], (Expr[Schematic.Object[G, Qs]], Type[Qs]))]] =
   s match
     case Schematic.Object.Empty() =>
-      Exists(Rel.refl[{}], ('{ Schematic.Object.Empty() }, Type.of[{}]))
+      M.pure(
+        Exists(Rel.refl[{}], ('{ Schematic.Object.Empty() }, Type.of[{}]))
+      )
     case snoc @ Schematic.Object.Snoc(init, pname, ptype) =>
-      quotedObjectSnocSchematicRel(snoc, f)
+      quotedObjectSnocSchematicRelA(snoc, f)
 
-private def quotedObjectSnocSchematicRel[F[_], Init, PropName <: String, PropType, Rel[_, _]](
+private def quotedObjectSnocSchematicRelA[F[_], Init, PropName <: String, PropType, G[_], Rel[_, _], M[_]](
   snoc: Schematic.Object.Snoc[F, Init, PropName, PropType],
-  f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Expr[F[B]], Type[B]))],
+  f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Expr[G[B]], Type[B]))]],
 )(using
   Quotes,
-  Type[F],
+  Type[G],
   Substitutive[Rel],
-): Exists[[Qs] =>> (
+  Applicative[M],
+): M[Exists[[Qs] =>> (
   Rel[Init || PropName :: PropType, Qs],
   (
-    Expr[Schematic.Object[F, Qs]],
+    Expr[Schematic.Object[G, Qs]],
     Type[Qs],
   )
-)] = {
-  (
-    quotedObjectSchematicRel(snoc.init, f),
+)]] = {
+  summon[Applicative[M]].map2(
+    quotedObjectSchematicRelA(snoc.init, f),
     f(snoc.ptype),
-  ) match {
+  ) {
     case (e1 @ Exists.Some((ri, (si, ti))), e2 @ Exists.Some((rl, (sl, tl)))) =>
       type As = e1.T
       type B  = e2.T
@@ -262,8 +316,8 @@ private def quotedObjectSnocSchematicRel[F[_], Init, PropName <: String, PropTyp
 
       given Type[PropName] = nt
 
-      val expr: Expr[Schematic.Object[F, As || PropName :: B]] =
-        '{ Schematic.Object.Snoc[F, As, PropName, B]($si, $spn, $sl) }
+      val expr: Expr[Schematic.Object[G, As || PropName :: B]] =
+        '{ Schematic.Object.Snoc[G, As, PropName, B]($si, $spn, $sl) }
 
       Exists((
         ri.lift[[X] =>> X || PropName :: PropType] andThen rl.lift[[Y] =>> As || PropName :: Y],

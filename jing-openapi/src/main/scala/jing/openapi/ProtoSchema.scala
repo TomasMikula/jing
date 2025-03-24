@@ -1,6 +1,6 @@
 package jing.openapi
 
-import jing.openapi.model.Schematic
+import jing.openapi.model.{Obj, Schematic}
 import libretto.lambda.util.Exists
 import scala.annotation.tailrec
 
@@ -19,6 +19,19 @@ private[openapi] object ProtoSchema {
 
   def arr(elemSchema: ProtoSchema): ProtoSchema =
     Proper(tic.Array(elemSchema))
+
+  def obj(props: List[(String, ProtoSchema)]): ProtoSchema = {
+    @tailrec
+    def go(
+      acc: tic.Object[[A] =>> ProtoSchema, ?],
+      remaining: List[(String, ProtoSchema)],
+    ): tic.Object[[A] =>> ProtoSchema, ?] =
+      remaining match
+        case Nil          => acc
+        case (n, s) :: ps => go(tic.Object.snoc(acc, n, s), ps)
+
+    Proper(go(tic.Object.Empty(), props))
+  }
 
   /** Schema with unresolved references categorized as backward or forward,
    *  resulting from topological sort (where presence of forward references

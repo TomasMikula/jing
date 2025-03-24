@@ -34,6 +34,5 @@ private[openapi] object ReaderState {
         val (s1, a) = fa(r, s)
         val (s2, b) = fb(r, s1)
         (s2, (a, b))
-}
-
+  }
 }

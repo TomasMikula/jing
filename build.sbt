@@ -13,7 +13,7 @@ ThisBuild / scmInfo := Some(
 
 val scalacOptionsCommon =
   Seq(
-    "-Ykind-projector:underscores",
+    "-Xkind-projector:underscores",
   )
 
 lazy val jingOpenApiModel = project

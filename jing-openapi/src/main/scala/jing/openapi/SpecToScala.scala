@@ -48,32 +48,37 @@ private[openapi] object SpecToScala {
       owner = Symbol.spliceOwner,
       members = List(
         "schemas" -> { _ =>
-          def resolveSchema(ctx: PreviousSiblings[q.type], s: ProtoSchema.Oriented): Exists[[T] =>> (Expr[Schema[T]], Type[T])] =
-            quotedSchemaFromProto(
-              ctx.types,
-              ctx.terms.view.mapValues(ref => TermRef(ref, "schema")).toMap,
-              s,
-            )
+          class SchemaLookupImpl(ctx: PreviousSiblings[q.type]) extends SchemaLookup {
+            override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
+              val tpe = ctx.types(schemaName).asType.asInstanceOf[Type[Any]]
+              val trm = Ref.term(TermRef(ctx.terms(schemaName), "schema"))
+              def go[T](trm: Term)(using Type[T]): Expr[Schema[T]] =
+                trm.asExprOf[Schema[T]]
+              Exists((tpe, go(trm)(using tpe)))
+          }
+
+          def resolveSchema(ctx: PreviousSiblings[q.type], s: ProtoSchema.Oriented): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
+            quotedSchemaFromProto(s).run(SchemaLookupImpl(ctx))
 
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
             members = schemas.flatMap { case (name, s) =>
               List(
                 // "opaque" type alias
                 name -> { ctx =>
-                  val tpe = resolveSchema(ctx, s).value._2
+                  val tpe = resolveSchema(ctx, s).value._1
                   MemberDef.Type(TypeRepr.of(using tpe))
                 },
 
                 // companion "object"
                 name -> { ctx =>
                   val ex = resolveSchema(ctx, s)
-                  given Type[ex.T] = ex.value._2
+                  given Type[ex.T] = ex.value._1
                   val tpeAlias =
                     ctx.types
                       .getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it should have just been defined") })
                       .asType
                       .asInstanceOf[Type[? <: Any]]
-                  val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(ex.value._1)
+                  val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(ex.value._2)
                   MemberDef.Val(tp, bodyFn)
                 },
               )
@@ -307,8 +312,13 @@ private[openapi] object SpecToScala {
       case "array" =>
         val itemSchema = protoSchema(schema.getItems())
         ProtoSchema.arr(itemSchema)
+      case "object" =>
+        // TODO: support optionality of properties
+        val b = List.newBuilder[(String, ProtoSchema)]
+        schema.getProperties().forEach { (name, s) => b += ((name, protoSchema(s))) }
+        ProtoSchema.obj(b.result())
       case other =>
-        ProtoSchema.Unsupported(s"Type '$other' no yet supported.")
+        ProtoSchema.Unsupported(s"Type '$other' not yet supported.")
     }
   }
 
