@@ -48,7 +48,7 @@ private[openapi] object SpecToScala {
       owner = Symbol.spliceOwner,
       members = List(
         "schemas" -> { _ =>
-          class SchemaLookupImpl(ctx: PreviousSiblings[q.type]) extends SchemaLookup {
+          class SchemaLookupImpl(ctx: PreviousSiblings[q.type]) extends SchemaLookup[[x] =>> x] {
             override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
               val tpe = ctx.types(schemaName).asType.asInstanceOf[Type[Any]]
               val trm = Ref.term(TermRef(ctx.terms(schemaName), "schema"))
@@ -57,8 +57,12 @@ private[openapi] object SpecToScala {
               Exists((tpe, go(trm)(using tpe)))
           }
 
-          def resolveSchema(ctx: PreviousSiblings[q.type], s: ProtoSchema.Oriented): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
-            quotedSchemaFromProto(s).run(SchemaLookupImpl(ctx))
+          def resolveSchema(
+            ctx: PreviousSiblings[q.type],
+            s: ProtoSchema.Oriented,
+          ): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
+            quotedSchemaFromProto[[x] =>> x](s)
+              .run(SchemaLookupImpl(ctx))
 
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
             members = schemas.flatMap { case (name, s) =>
