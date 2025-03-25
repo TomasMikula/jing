@@ -3,7 +3,6 @@ package jing.openapi.examples
 import jing.openapi.client.jdk.given
 import jing.openapi.model.Value
 import jing.openapi.model.Value.obj
-import scala.reflect.Selectable.reflectiveSelectable
 
 object TestApp extends App {
 
@@ -14,6 +13,9 @@ object TestApp extends App {
   private def petRewrap(x: Value[Pet]): Value[Pet] =
     x match
       case Pet(y) => Pet(y)
+
+  println(Pet.schema)
+  println()
 
   val result =
     api

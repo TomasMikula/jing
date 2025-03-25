@@ -12,8 +12,8 @@ import jing.openapi.model.{
   RequestSchema,
   ResponseSchema,
   Schema,
+  SchemaCompanion,
   Schematic,
-  TotalExtractor,
   Value,
 }
 import libretto.lambda.Items1Named
@@ -48,20 +48,20 @@ private[openapi] object SpecToScala {
       owner = Symbol.spliceOwner,
       members = List(
         "schemas" -> { _ =>
-          class SchemaLookupImpl(ctx: PreviousSiblings[q.type]) extends SchemaLookup[[x] =>> x] {
-            override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
+          class SchemaLookupImpl(ctx: PreviousSiblings[q.type]) extends SchemaLookup[Function0] {
+            override def lookup(schemaName: String): Exists[[T] =>> (Type[T], () => Expr[Schema[T]])] =
               val tpe = ctx.types(schemaName).asType.asInstanceOf[Type[Any]]
-              val trm = Ref.term(TermRef(ctx.terms(schemaName), "schema"))
-              def go[T](trm: Term)(using Type[T]): Expr[Schema[T]] =
-                trm.asExprOf[Schema[T]]
-              Exists((tpe, go(trm)(using tpe)))
+              def go[T](using Type[T]): Expr[Schema[T]] =
+                Select.unique(Ref.term(ctx.terms(schemaName)), "schema")
+                  .asExprOf[Schema[T]]
+              Exists((tpe, () => go(using tpe)))
           }
 
           def resolveSchema(
             ctx: PreviousSiblings[q.type],
             s: ProtoSchema.Oriented,
-          ): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
-            quotedSchemaFromProto[[x] =>> x](s)
+          ): Exists[[T] =>> (Type[T], Function0[Expr[Schema[T]]])] =
+            quotedSchemaFromProto[Function0](s)
               .run(SchemaLookupImpl(ctx))
 
           val (tpe, bodyFn) = newRefinedObject_[AnyRef](
@@ -82,11 +82,12 @@ private[openapi] object SpecToScala {
                       .getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it should have just been defined") })
                       .asType
                       .asInstanceOf[Type[? <: Any]]
-                  val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(ex.value._2)
+                  val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(name, ex.value._2)
                   MemberDef.Val(tp, bodyFn)
                 },
               )
             },
+            "schemas",
           )
           MemberDef.Val(tpe, bodyFn)
         },
@@ -104,10 +105,12 @@ private[openapi] object SpecToScala {
                 MemberDef.Val(tpe, bodyFn)
               }
             },
+            "paths",
           )
           MemberDef.Val(tpe, bodyFn)
         },
       ),
+      "Api",
     ).asExpr
   }
 
@@ -116,15 +119,16 @@ private[openapi] object SpecToScala {
     * @tparam T the definition of `A`
     */
   private def schemaCompanion[A, T](using Quotes, Type[A], Type[T])(
-    schema: Expr[Schema[T]],
+    name: String,
+    schema: () => Expr[Schema[T]],
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
     import qr.*
 
-    newRefinedObject_[TotalExtractor[Value[A], Value[T]]](
+    newRefinedObject_[SchemaCompanion[A, T]](
       members = List(
         // schema of the "opaque" type
         "schema" -> { _ =>
-          MemberDef.Val(TypeRepr.of[Schema[A]], _ => schema.asTerm)
+          MemberDef.Val(TypeRepr.of[Schema[A]], _ => schema().asTerm)
         },
 
         // constructor of the "opaque" type
@@ -153,10 +157,11 @@ private[openapi] object SpecToScala {
               // implementation is just wrapping the argument in Some
               val List(List(x)) = argss
               '{ Some(${x.asExprOf[Value[T]]}) }.asTerm
-            }
+            },
           )
         },
       ),
+      name,
     )
   }
 
@@ -179,6 +184,7 @@ private[openapi] object SpecToScala {
           MemberDef.Val(tp, bodyFn)
         })
       },
+      path,
     )
   }
 
@@ -318,9 +324,13 @@ private[openapi] object SpecToScala {
         ProtoSchema.arr(itemSchema)
       case "object" =>
         // TODO: support optionality of properties
-        val b = List.newBuilder[(String, ProtoSchema)]
-        schema.getProperties().forEach { (name, s) => b += ((name, protoSchema(s))) }
-        ProtoSchema.obj(b.result())
+        schema.getProperties() match
+          case null =>
+            ProtoSchema.Unsupported("Missing properties field in schema of type 'object'")
+          case props =>
+            val b = List.newBuilder[(String, ProtoSchema)]
+            props.forEach { (name, s) => b += ((name, protoSchema(s))) }
+            ProtoSchema.obj(b.result())
       case other =>
         ProtoSchema.Unsupported(s"Type '$other' not yet supported.")
     }
@@ -412,26 +422,33 @@ private[openapi] object SpecToScala {
   }
 
   private def newRefinedObject[Base](using q: Quotes, baseType: Type[Base])(
-    owner      : qr.Symbol,
-    members  : List[(String, PreviousSiblings[q.type] => MemberDef[q.type])],
+    owner : qr.Symbol,
+    members : List[(String, PreviousSiblings[q.type] => MemberDef[q.type])],
+    anonClassNameSuffix: String,
   ): qr.Term = {
     import qr.*
 
-    val (tpe, termFn) = newRefinedObject_[Base](members)
+    val (tpe, termFn) = newRefinedObject_[Base](members, anonClassNameSuffix)
     val term = termFn(owner)
     Typed(term, TypeTree.of(using tpe.asType))
   }
 
-  // TODO: shorthand version for when there are no types to introduce
   private def newRefinedObject_[Base](using q: Quotes, baseType: Type[Base])(
     members: List[(String, PreviousSiblings[q.type] => MemberDef[q.type])],
+    anonClassNameSuffix: String,
   ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
     import qr.*
 
     val baseTypeRepr = TypeRepr.of[Base]
+    val selectableBase = AndType(baseTypeRepr, TypeRepr.of[reflect.Selectable])
+    val parents =
+      if (baseTypeRepr.typeSymbol.flags.is(Flags.Trait))
+        List(TypeRepr.of[Object], baseTypeRepr, TypeRepr.of[reflect.Selectable])
+      else
+        List(baseTypeRepr, TypeRepr.of[reflect.Selectable])
 
     (
-      refinementType(baseTypeRepr) { b =>
+      refinementType(selectableBase) { b =>
         val (_, b1) =
           members.foldLeft((PreviousSiblings.empty(using q), b)) {
             case ((ctx, b), (name, defn)) =>
@@ -454,12 +471,8 @@ private[openapi] object SpecToScala {
         val clsSym =
           Symbol.newClass(
             owner,
-            name = "$anon",
-            parents =
-              if (baseTypeRepr.typeSymbol.flags.is(Flags.Trait))
-                List(TypeRepr.of[Object], baseTypeRepr)
-              else
-                List(baseTypeRepr),
+            name = "$anon_" + anonClassNameSuffix,
+            parents = parents,
             decls = selfSym => {
               val (_, symsRev) =
                 members.foldLeft((
@@ -539,7 +552,7 @@ private[openapi] object SpecToScala {
 
         val clsDef = ClassDef(
           clsSym,
-          parents = List(TypeTree.of(using baseTypeRepr.asType)),
+          parents = parents.map(t => TypeTree.of(using t.asType)),
           body = typeDefs ++ valDefs,
         )
 
@@ -555,12 +568,12 @@ private[openapi] object SpecToScala {
   }
 
   private def refinementType(using q: Quotes)(
-    baseClass: qr.TypeRepr,
+    baseType: qr.TypeRepr,
   )(
     f: RefinementTypeBuilder[q.type] => qr.TypeRepr
   ): qr.TypeRepr =
     qr.RecursiveType { self =>
-      f(RefinementTypeBuilder[q.type](q)(self, baseClass))
+      f(RefinementTypeBuilder[q.type](q)(self, baseType))
     }
 
   private class RefinementTypeBuilder[Q <: Quotes](

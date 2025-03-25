@@ -305,7 +305,7 @@ private def quotedObjectSnocSchematicRelAA[F[_], Init, PropName <: String, PropT
     N[Expr[Schematic.Object[G, Qs]]],
   )
 )]] = {
-  summon[Applicative[M]].map2(
+  M.map2(
     quotedObjectSchematicRelAA(snoc.init, f),
     f(snoc.ptype),
   ) {
