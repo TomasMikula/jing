@@ -5,6 +5,7 @@ import scala.quoted.*
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Applicative, Exists, SingletonValue}
 import libretto.lambda.util.Applicative.*
+import libretto.lambda.util.Exists.Indeed
 
 given ToExpr[HttpMethod] with {
   override def apply(x: HttpMethod)(using Quotes): Expr[HttpMethod] =
@@ -134,12 +135,12 @@ def quotedSchemaFromProto[F[_]](using Quotes)(
       quotedSchematicRelAA(
         value,
         [A] => ps => quotedSchemaFromProto(ps) map {
-          case Exists.Some(te) => Exists((Unrelated(), te))
+          case Indeed(te) => Indeed((Unrelated(), te))
         },
       ) map {
-        case ex @ Exists.Some(_, (tpe, expr)) =>
+        case ex @ Indeed(_, (tpe, expr)) =>
           given Type[ex.T] = tpe
-          Exists((tpe, expr.map { expr => '{ Schema.Proper($expr) } }))
+          Indeed((tpe, expr.map { expr => '{ Schema.Proper($expr) } }))
         }
 
     case ProtoSchema.Oriented.BackwardRef(schemaName) =>
@@ -168,7 +169,7 @@ def quotedSchematic[F[_], T](
   Type[F],
 ): (Type[T], Expr[Schematic[F, T]]) =
   quotedSchematicRel[F, T, F, =:=](s, [A] => fa => Exists(summon[A =:= A], f(fa))) match
-    case Exists.Some((ev, res)) =>
+    case Indeed((ev, res)) =>
       ev.substituteContra[[X] =>> (Type[X], Expr[Schematic[F, X]])](res)
 
 def quotedSchematicRel[F[_], T, G[_], Rel[_, _]](
@@ -210,12 +211,12 @@ def quotedSchematicRelAA[F[_], T, G[_], Rel[_, _], M[_], N[_]](
       )
     case a: Schematic.Array[s, a] =>
       f(a.elem) map:
-        case e @ Exists.Some((rel, (tb, sb))) =>
+        case e @ Indeed((rel, (tb, sb))) =>
           given Type[e.T] = tb
           Exists((rel.lift[Arr], (Type.of[Arr[e.T]], sb.map { sb => '{ Schematic.Array($sb) } })))
     case o: Schematic.Object[s, ps] =>
       quotedObjectSchematicRelAA(o, f) map:
-        case e @ Exists.Some((rel, (t, s))) =>
+        case e @ Indeed((rel, (t, s))) =>
           given Type[e.T] = t
           Exists(rel.lift[Obj], (Type.of[Obj[e.T]], s.widen))
 
@@ -266,7 +267,7 @@ def quotedObjectSchematic[F[_], Ps](
   Type[F],
 ): (Type[Ps], Expr[Schematic.Object[F, Ps]]) =
   quotedObjectSchematicRel[F, Ps, F, =:=](s, [A] => fa => Exists((summon[A =:= A], f(fa)))) match
-    case Exists.Some((ev, res)) =>
+    case Indeed((ev, res)) =>
       ev.substituteContra[[Qs] =>> (Type[Qs], Expr[Schematic.Object[F, Qs]])](res)
 
 def quotedObjectSchematicRel[F[_], Ps, G[_], Rel[_, _]](
@@ -317,7 +318,7 @@ private def quotedObjectSnocSchematicRelAA[F[_], Init, PropName <: String, PropT
     quotedObjectSchematicRelAA(snoc.init, f),
     f(snoc.ptype),
   ) {
-    case (e1 @ Exists.Some((ri, (ti, si))), e2 @ Exists.Some((rl, (tl, sl)))) =>
+    case (e1 @ Indeed((ri, (ti, si))), e2 @ Indeed((rl, (tl, sl)))) =>
       type As = e1.T
       type B  = e2.T
       given Type[As] = ti

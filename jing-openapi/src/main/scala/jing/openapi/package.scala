@@ -8,7 +8,7 @@ package object openapi {
     ${ go('url) }
 
   private def go(urlExpr: Expr[String])(using Quotes): Expr[Any] = {
-    val url = urlExpr.valueOrError
+    val url = urlExpr.valueOrAbort
 
     SpecToScala.apply(url)
   }

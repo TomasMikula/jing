@@ -18,8 +18,9 @@ import jing.openapi.model.{
 }
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Exists, SingletonValue}
+import libretto.lambda.util.Exists.Indeed
 import scala.collection.immutable.{:: as NonEmptyList}
-import scala.collection.JavaConverters.*
+import scala.jdk.CollectionConverters.*
 import scala.quoted.*
 import scala.annotation.tailrec
 
@@ -250,7 +251,7 @@ private[openapi] object SpecToScala {
         val pSchema = protoSchemaToSchema(schemas, protoSchema(p.getSchema()))
         Schematic.Object.snoc(acc, p.getName(), pSchema)
       }
-    Exists.Some(Schema.Proper(res))
+    Indeed(Schema.Proper(res))
   }
 
   private def requestBodySchema(using Quotes)(
@@ -373,7 +374,7 @@ private[openapi] object SpecToScala {
           case Nil => acc
           case (tag, a) :: as =>
             f(a) match
-              case Exists.Some(fa) =>
+              case Indeed(fa) =>
                 go(
                   Items1Named.Product.Snoc(acc, SingletonValue(tag), fa),
                   as,

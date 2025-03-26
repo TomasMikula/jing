@@ -53,7 +53,7 @@ class ClientJdk extends Client {
           //  - be disallowed by construction; or
           //  - have an associated encoder
           Value.toMap(o)
-            .mapValues(stringify(_))
+            .view.mapValues(stringify(_))
             .iterator
             .map { case (k, v) => s"$k:$v" }
             .mkString("{", ",", "}")

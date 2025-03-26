@@ -13,6 +13,7 @@ ThisBuild / scmInfo := Some(
 
 val scalacOptionsCommon =
   Seq(
+    "-deprecation",
     "-Xkind-projector:underscores",
   )
 
