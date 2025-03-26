@@ -3,9 +3,10 @@ package jing.openapi
 import jing.openapi.model.*
 import scala.quoted.*
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Applicative, Exists, SingletonValue}
+import libretto.lambda.util.{Applicative, Exists, SingletonValue, TypeEq}
 import libretto.lambda.util.Applicative.*
 import libretto.lambda.util.Exists.Indeed
+import libretto.lambda.util.TypeEq.Refl
 
 given ToExpr[HttpMethod] with {
   override def apply(x: HttpMethod)(using Quotes): Expr[HttpMethod] =
@@ -121,11 +122,19 @@ private transparent inline def qr(using q: Quotes): q.reflect.type =
 
 trait SchemaLookup[F[_]] {
   def lookup(schemaName: String): Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]
+
+  def mapK[G[_]](h: [A] => F[A] => G[A]): SchemaLookup[G] =
+    new SchemaLookup {
+      override def lookup(schemaName: String): Exists[[T] =>> (Type[T], G[Expr[Schema[T]]])] =
+        SchemaLookup.this.lookup(schemaName) match
+          case Indeed((t, e)) => Indeed((t, h(e)))
+    }
 }
 
-def quotedSchemaFromProto[F[_]](using Quotes)(
+def quotedSchemaFromProto[F[_]](
   schema: ProtoSchema.Oriented,
 )(using
+  q: Quotes,
   F: Applicative[F],
 ): Reader[SchemaLookup[F], Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]] = {
   import quotes.reflect.*
@@ -160,6 +169,23 @@ def quotedSchemaFromProto[F[_]](using Quotes)(
       val (tpe, trm) = quotedSchemaOops(SingletonValue(details))
       Reader.pure( Exists((tpe, F.pure(trm))) )
 }
+
+def quotedObjectSchemaFromProto[F[_]](
+  schema: Schematic.Object[[x] =>> ProtoSchema.Oriented, ?],
+)(using
+  q: Quotes,
+  F: Applicative[F],
+): Reader[SchemaLookup[F], Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]] =
+  quotedObjectSchematicRelAA(
+    schema,
+    [A] => ps => quotedSchemaFromProto(ps) map {
+      case Indeed(te) => Indeed((Unrelated(), te))
+    }
+  ) map {
+    case ex @ Indeed(_, (tpe, expr)) =>
+      given Type[ex.T] = tpe
+      Indeed((tpe, expr.map { expr => '{ Schema.Proper($expr) } }))
+  }
 
 def quotedSchematic[F[_], T](
   s: Schematic[F, T],
@@ -227,32 +253,87 @@ def quotedProduct[F[_], Items](
   Quotes,
   Type[F],
 ): (Type[Items], Expr[Items1Named.Product[||, ::, F, Items]]) =
-  p match
+  quotedProductRel[F, Items, F, =:=](p, [A] => fa => Exists((summon, f(fa)))) match
+    case Indeed((TypeEq(Refl()), res)) => res
+
+def quotedProductRel[F[_], Items, G[_], Rel[_, _]](
+  p: Items1Named.Product[||, ::, F, Items],
+  f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Type[B], Expr[G[B]]))],
+)(using
+  q: Quotes,
+  G: Type[G],
+  Rel: Substitutive[Rel],
+): Exists[[Elems] =>> (Rel[Items, Elems], (Type[Elems], Expr[Items1Named.Product[||, ::, G, Elems]]))] =
+  quotedProductRelAA[F, Items, G, Rel, [x] =>> x, [x] =>> x](p, f)
+
+def quotedProductUnrelatedAA[F[_], Items, G[_], M[_], N[_]](
+  p: Items1Named.Product[||, ::, F, Items],
+  f: [A] => F[A] => M[Exists[[B] =>> (Type[B], N[Expr[G[B]]])]],
+)(using
+  q: Quotes,
+  G: Type[G],
+  M: Applicative[M],
+  N: Applicative[N],
+): M[Exists[[Elems] =>> (Type[Elems], N[Expr[Items1Named.Product[||, ::, G, Elems]]])]] =
+  quotedProductRelAA[F, Items, G, Unrelated, M, N](
+    p,
+    [A] => fa => f(fa).map { case Indeed(te) => Indeed((Unrelated(), te)) }
+  ) map {
+    case Indeed((_, res)) => Indeed(res)
+  }
+
+def quotedProductRelAA[F[_], Items, G[_], Rel[_, _], M[_], N[_]](
+  p: Items1Named.Product[||, ::, F, Items],
+  f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
+)(using
+  q: Quotes,
+  G: Type[G],
+  Rel: Substitutive[Rel],
+  M: Applicative[M],
+  N: Applicative[N],
+): M[Exists[[Elems] =>> (Rel[Items, Elems], (Type[Elems], N[Expr[Items1Named.Product[||, ::, G, Elems]]]))]] =
+  p match {
     case s: Items1Named.Product.Single[sep, of, f, lbl, a] =>
-      val (ta, fa) = f(s.value)
-      given Type[a] = ta
+      f(s.value) map {
+        case ex @ Indeed((rel, (tb, fb))) =>
+          type B = ex.T
+          given Type[B] = tb
 
-      val (tl, l) = quotedSingletonString(s.label)
-      given Type[lbl] = tl
+          val (tl, l) = quotedSingletonString(s.label)
+          given Type[lbl] = tl
 
-      (
-        Type.of[lbl :: a],
-        '{ Items1Named.Product.Single[sep, of, f, lbl, a]($l, $fa)},
-      )
+          Indeed((
+            rel.lift[[x] =>> lbl :: x],
+            (
+              Type.of[lbl :: B],
+              fb.map { fb =>
+                '{ Items1Named.Product.Single[sep, of, G, lbl, B]($l, $fb) }
+              },
+            )
+          ))
+      }
     case s: Items1Named.Product.Snoc[sep, of, f, init, lbl, a] =>
-      val (tInit, fInit) = quotedProduct(s.init, f)
-      given Type[init] = tInit
+      M.map2(quotedProductRelAA(s.init, f), f(s.lastElem)) {
+        case (ex1 @ Indeed((rel1, (tInit, fInit))), ex2 @ Indeed((rel2, (tb, fb)))) =>
+          type Elems = ex1.T
+          type B = ex2.T
+          given Type[Elems] = tInit
+          given Type[B] = tb
 
-      val (ta, fa) = f(s.lastElem)
-      given Type[a] = ta
+          val (tl, l) = quotedSingletonString(s.lastName)
+          given Type[lbl] = tl
 
-      val (tl, l) = quotedSingletonString(s.lastName)
-      given Type[lbl] = tl
-
-      (
-        Type.of[init || lbl :: a],
-        '{ Items1Named.Product.Snoc[sep, of, f, init, lbl, a]($fInit, $l, $fa) },
-      )
+          Indeed((
+            Rel.biLift(rel1, rel2)[[X, Y] =>> X || lbl :: Y],
+            (
+              Type.of[Elems || lbl :: B],
+              N.map2(fInit, fb) { (fInit, fb) =>
+                '{ Items1Named.Product.Snoc[sep, of, G, Elems, lbl, B]($fInit, $l, $fb) }
+              },
+            )
+          ))
+      }
+  }
 
 def quotedObjectSchema[Ps](s: Schema[Obj[Ps]])(using Quotes): (Type[Ps], Expr[Schema[Obj[Ps]]]) =
   val (tp, expr) = quotedObjectSchematic(Schema.asObject(s), [A] => sa => quotedSchema(sa))
@@ -334,7 +415,7 @@ private def quotedObjectSnocSchematicRelAA[F[_], Init, PropName <: String, PropT
         }
 
       Exists((
-        ri.lift[[X] =>> X || PropName :: PropType] andThen rl.lift[[Y] =>> As || PropName :: Y],
+        Rel.biLift(ri, rl)[[X, Y] =>> X || PropName :: Y],
         (Type.of[As || PropName :: B], expr)
       ))
   }

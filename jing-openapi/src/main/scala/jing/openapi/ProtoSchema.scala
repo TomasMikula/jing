@@ -9,6 +9,16 @@ private[openapi] enum ProtoSchema {
   case Proper(value: Schematic[[A] =>> ProtoSchema, ?])
   case Ref(schemaName: String)
   case Unsupported(details: String)
+
+  import ProtoSchema.Oriented
+
+  /** Translate to oriented schema, such that all references are considered pointing backwards. */
+  def orientBackward: ProtoSchema.Oriented =
+    this match
+      case Proper(value) => Oriented.Proper(value.translate[[x] =>> Oriented]([X] => ps => ps.orientBackward))
+      case Ref(schemaName) => Oriented.BackwardRef(schemaName)
+      case Unsupported(details) => Oriented.Unsupported(details)
+
 }
 
 private[openapi] object ProtoSchema {

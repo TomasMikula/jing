@@ -1,10 +1,13 @@
 package jing.openapi
 
 import io.swagger.parser.OpenAPIParser
+import jing.openapi.Mode.IsSubsumedBy
+import jing.openapi.Mode.IsSubsumedBy.given
 import jing.openapi.model.{
   ||,
   ::,
   BodySchema,
+  DiscriminatedUnion,
   HttpEndpoint,
   HttpMethod,
   Obj,
@@ -17,14 +20,46 @@ import jing.openapi.model.{
   Value,
 }
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Exists, SingletonValue}
+import libretto.lambda.util.{Applicative, Exists, SingletonValue, TypeEq, TypeEqK}
+import libretto.lambda.util.Applicative.pure
 import libretto.lambda.util.Exists.Indeed
+import libretto.lambda.util.TypeEq.Refl
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.CollectionConverters.*
 import scala.quoted.*
 import scala.annotation.tailrec
 
 private[openapi] object SpecToScala {
+  private def schemaLookupForMode[M](using q: Quotes, mode: Mode[q.type, M])(
+    types: Map[String, qr.TypeRepr],
+    terms: mode.OutEff[Map[String, qr.Term]],
+  ): SchemaLookup[mode.OutEff] =
+    mode match
+      case _: Mode.TypeSynth[q] => mode.outEffConstUnit.flip.subst(SchemaLookupForTypeSynth(types))
+      case _: Mode.TermSynth[q] => mode.outEffId.flip.subst(SchemaLookupForTermSynth(types, mode.outEffId.at(terms)))
+
+  private class SchemaLookupForTermSynth(using q: Quotes)(
+    types: Map[String, qr.TypeRepr],
+    terms: Map[String, qr.Term],
+  ) extends SchemaLookup[[x] =>> x] {
+    import quotes.reflect.*
+
+    override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
+      val tpe = types(schemaName).asType.asInstanceOf[Type[Any]]
+      def go[T](using Type[T]): Expr[Schema[T]] =
+        terms(schemaName)
+          .asExprOf[Schema[T]]
+      Exists((tpe, go(using tpe)))
+  }
+
+  private class SchemaLookupForTypeSynth(using q: Quotes)(
+    types: Map[String, qr.TypeRepr],
+  ) extends SchemaLookup[[x] =>> Unit] {
+    override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Unit)] =
+      val tpe = types(schemaName).asType.asInstanceOf[Type[Any]]
+      Exists((tpe, ()))
+  }
+
   def apply(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
 
@@ -48,35 +83,32 @@ private[openapi] object SpecToScala {
     newRefinedObject[OpenApiSpec](
       owner = Symbol.spliceOwner,
       members = List(
-        "schemas" -> { _ =>
-          class SchemaLookupImpl(ctx: PreviousSiblings[q.type]) extends SchemaLookup[Function0] {
-            override def lookup(schemaName: String): Exists[[T] =>> (Type[T], () => Expr[Schema[T]])] =
-              val tpe = ctx.types(schemaName).asType.asInstanceOf[Type[Any]]
-              def go[T](using Type[T]): Expr[Schema[T]] =
-                Select.unique(Ref.term(ctx.terms(schemaName)), "schema")
-                  .asExprOf[Schema[T]]
-              Exists((tpe, () => go(using tpe)))
-          }
+        "schemas" -> MemberDef.poly[q.type, "term-synth"] { [M] => (_, _) ?=> (ctx: PreviousSiblings[q.type, M]) =>
 
-          def resolveSchema(
-            ctx: PreviousSiblings[q.type],
+          def resolveSchema[M](using mode: Mode[q.type, M])(
+            ctx: PreviousSiblings[q.type, M],
             s: ProtoSchema.Oriented,
-          ): Exists[[T] =>> (Type[T], Function0[Expr[Schema[T]]])] =
-            quotedSchemaFromProto[Function0](s)
-              .run(SchemaLookupImpl(ctx))
+          ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
+            quotedSchemaFromProto[mode.OutEff](s)
+              .run(schemaLookupForMode[M](
+                ctx.types,
+                mode.isTermSynth.map { case TypeEq(Refl()) =>
+                  ctx.termsProper.view.mapValues(Select.unique(_, "schema")).toMap
+                },
+              ))
 
-          val (tpe, bodyFn) = newRefinedObject_[AnyRef](
+          val (tpe, bodyFn) = newRefinedObject_[AnyRef, M](
             members = schemas.flatMap { case (name, s) =>
               List(
                 // "opaque" type alias
-                name -> { ctx =>
-                  val tpe = resolveSchema(ctx, s).value._1
+                name -> MemberDef.poly[q.type, M] { [N] => (_, _) ?=> ctx =>
+                  val tpe = resolveSchema[N](ctx, s).value._1
                   MemberDef.Type(TypeRepr.of(using tpe))
                 },
 
                 // companion "object"
-                name -> { ctx =>
-                  val ex = resolveSchema(ctx, s)
+                name -> MemberDef.poly[q.type, M] { [N] => (n, _) ?=> ctx =>
+                  val ex: Exists[[T] =>> (Type[T], n.OutEff[Expr[Schema[T]]])] = resolveSchema[N](ctx, s)
                   given Type[ex.T] = ex.value._1
                   val tpeAlias =
                     ctx.types
@@ -92,54 +124,106 @@ private[openapi] object SpecToScala {
           )
           MemberDef.Val(tpe, bodyFn)
         },
-        "paths" -> { prevSiblings =>
-          val schemasField = prevSiblings.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
-          val schemaTerms: Map[String, TermRef] =
-            schemas
-              .map { case (name, _) => (name, TermRef(TermRef(schemasField, name), "schema")) }
-              .toMap
-
-          val (tpe, bodyFn) = newRefinedObject_[AnyRef](
-            members = paths.map { case (path, pathItem) =>
-              path -> { _ =>
-                val (tpe, bodyFn) = pathToObject(schemaTerms, path, pathItem)
-                MemberDef.Val(tpe, bodyFn)
-              }
-            },
-            "paths",
-          )
-          MemberDef.Val(tpe, bodyFn)
-        },
+        "paths" -> pathsField["term-synth"](schemas, paths),
       ),
       "Api",
     ).asExpr
   }
 
+  private def pathsField[M](using q: Quotes)(
+    schemas: List[(String, ProtoSchema.Oriented)],
+    paths: List[(String, io.swagger.v3.oas.models.PathItem)],
+  ): MemberDef.Poly[q.type, M] = {
+    import quotes.reflect.*
+
+    MemberDef.poly[q.type, M] { [M1] => (m1, _) ?=> ctx =>
+      val schemasField =
+        ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
+
+      val typesAndTerms: (Map[String, TypeRepr], m1.OutEff[Map[String, Term]]) =
+        m1 match
+          case _: Mode.TermSynth[q] =>
+            val schemasFieldTerm: Term =
+              ctx.mode.inTermProper(schemasField)
+            val types =
+              schemas
+                .map { case (name, _) => (name, TypeSelect(schemasFieldTerm, name).tpe) }
+                .toMap
+            val terms: m1.OutEff[Map[String, Term]] =
+              schemas
+                .map { case (name, _) =>
+                  val companionDynamic =
+                    Select.unique(schemasFieldTerm, "selectDynamic")
+                      .appliedTo(Literal(StringConstant(name)))
+                  val companionTyped =
+                    Select
+                      .unique(companionDynamic, "$asInstanceOf$")
+                      .appliedToType(
+                        TypeRepr.of[SchemaCompanion]
+                          .appliedTo(List(
+                            TypeSelect(schemasFieldTerm, name).tpe,
+                            WildcardTypeTree(TypeBounds.empty).tpe)
+                          ),
+                      )
+                  val schemaTerm =
+                    Select.unique(companionTyped, "schema")
+                  (name, schemaTerm)
+                }
+                .toMap
+                .pure[m1.OutEff]
+            (types, terms)
+          case _: Mode.TypeSynth[q] =>
+            val schemasFieldRef: TermRef =
+              ctx.mode.inTermRefOnly(schemasField)
+            (
+              schemas
+                .map { case (name, _) => (name, typeRef(schemasFieldRef, name)) }
+                .toMap,
+              m1.outEffConstUnit.flip.at[Map[String, Term]](()),
+            )
+
+      val schemaLookup: SchemaLookup[m1.OutEff] =
+        schemaLookupForMode[M1](typesAndTerms._1, typesAndTerms._2)
+
+      val (tpe, bodyFn) = newRefinedObject_[AnyRef, M1](
+        members = paths.map { case (path, pathItem) =>
+          path -> MemberDef.poly[q.type, M1] { [M2] => (m2, sub) ?=> _ =>
+            val (tpe, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem)
+            MemberDef.Val(tpe, bodyFn)
+          }
+        },
+        "paths",
+      )
+      MemberDef.Val(tpe, bodyFn)
+    }
+  }
+
   /**
     * @tparam A the abstract ("opaque") alias (of `T`) for which we are creating the companion object
     * @tparam T the definition of `A`
+    * @tparam M mode (`"term-synth"` or `"type-synth"`)
     */
-  private def schemaCompanion[A, T](using Quotes, Type[A], Type[T])(
+  private def schemaCompanion[A, T, M](using q: Quotes, ta: Type[A], tt: Type[T], m: Mode[q.type, M])(
     name: String,
-    schema: () => Expr[Schema[T]],
-  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+    schema: m.OutEff[Expr[Schema[T]]],
+  ): (qr.TypeRepr, m.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import qr.*
 
-    newRefinedObject_[SchemaCompanion[A, T]](
+    newRefinedObject_[SchemaCompanion[A, T], M](
       members = List(
         // schema of the "opaque" type
-        "schema" -> { _ =>
-          MemberDef.Val(TypeRepr.of[Schema[A]], _ => schema().asTerm)
+        "schema" -> MemberDef.poly[q.type, M] { [N] => (_, sub) ?=> ctx =>
+          MemberDef.Val(TypeRepr.of[Schema[A]], sub.downgrader(schema.map { expr => _ => expr.asTerm }))
         },
 
         // constructor of the "opaque" type
-        "apply" -> { _ =>
+        "apply" -> MemberDef.poly[q.type, M] { [N] => (n, _) ?=> _ =>
           MemberDef.Method(
             MethodType(paramNames = List("x"))(
               self => List(TypeRepr.of[Value[T]]),
               self => TypeRepr.of[Value[A]],
             ),
-            body = { (self, argss) =>
+            body = n.applicativeOutEff.pure { (self, argss) =>
               // implementation is just identity
               val List(List(x)) = argss
               x.asExpr.asTerm
@@ -148,13 +232,13 @@ private[openapi] object SpecToScala {
         },
 
         // deconstructor, overrides unapply from TotalExtractor
-        "unapply" -> { _ =>
+        "unapply" -> MemberDef.poly[q.type, M] { [N] => (n, _) ?=> _ =>
           MemberDef.Method(
             MethodType(paramNames = List("x"))(
               self => List(TypeRepr.of[Value[A]]),
               self => TypeRepr.of[Some[Value[T]]],
             ),
-            body = { (self, argss) =>
+            body = n.applicativeOutEff.pure { (self, argss) =>
               // implementation is just wrapping the argument in Some
               val List(List(x)) = argss
               '{ Some(${x.asExprOf[Value[T]]}) }.asTerm
@@ -169,21 +253,24 @@ private[openapi] object SpecToScala {
   private transparent inline def qr(using q: Quotes): q.reflect.type =
     q.reflect
 
-  private def pathToObject(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def pathToObject[M](using q: Quotes, mode: Mode[q.type, M])(
+    schemas: SchemaLookup[mode.OutEff],
     path: String,
     pathItem: io.swagger.v3.oas.models.PathItem,
-  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+  ): (qr.TypeRepr, mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
+    import quotes.reflect.*
+
     val operations =
       HttpMethod.values.toList
         .flatMap { m => pathOperation(pathItem, m).map((m, _)) }
 
-    newRefinedObject_[AnyRef](
+    newRefinedObject_[AnyRef, M](
       members = operations.map { case (meth, op) =>
-        (meth.toString, _ => {
-          val (tp, bodyFn) = operationToObject(schemas, path, meth, op)
-          MemberDef.Val(tp, bodyFn)
-        })
+        meth.toString -> MemberDef.poly[q.type, M] { [N] => (_, sub) ?=> _ =>
+          operationToObject(schemas.mapK(sub.downgrader), path, meth, op) match
+            case Indeed((tp, body)) =>
+              MemberDef.Val(TypeRepr.of(using tp), body.map { b => (_: Symbol) => b.asTerm })
+        }
       },
       path,
     )
@@ -204,27 +291,28 @@ private[openapi] object SpecToScala {
         case HttpMethod.Trace   => path.getTrace()
     )
 
-  private type ObjSchema[A] = Schema[Obj[A]]
-
-  private def operationToObject(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def operationToObject[F[_]](
+    schemas: SchemaLookup[F],
     path: String,
     method: HttpMethod,
     op: io.swagger.v3.oas.models.Operation,
-  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[T]])] = {
     import qr.*
 
-    val paramSchema: Option[Exists[ObjSchema]] =
+    val paramSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]] =
       Option(op.getParameters())
         .map(_.asScala.toList)
         .collect { case p :: ps => NonEmptyList(p, ps) }
         .map(parametersSchema(schemas, _))
 
-    val reqBodySchema =
+    val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema[B]]])]] =
       Option(op.getRequestBody())
         .map(requestBodySchema(schemas, _))
 
-    val reqSchema: RequestSchema[?] =
+    val reqSchema: Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
       requestSchema(paramSchema, reqBodySchema)
 
     val responseSchema =
@@ -236,73 +324,142 @@ private[openapi] object SpecToScala {
           report.errorAndAbort(s"No response defined for $method $path")
         }
 
-    val endpoint = HttpEndpoint(path, method, reqSchema, responseSchema)
+    (reqSchema, responseSchema) match
+      case (req @ Indeed((tReq, reqSchema)), resp @ Indeed((tResp, respSchema))) =>
+        type I = req.T
+        type O = resp.T
+        given Type[I] = tReq
+        given Type[O] = tResp
 
-    val (tpe, expr) = quotedHttpEndpoint(endpoint)
-    (TypeRepr.of(using tpe), _ => expr.asTerm)
+        Indeed((
+          Type.of[HttpEndpoint[I, O]],
+          F.map2(reqSchema, respSchema) { (reqSchema, respSchema) =>
+            '{ HttpEndpoint(${Expr(path)}, ${Expr(method)}, $reqSchema, $respSchema) }
+          },
+        ))
   }
 
-  private def parametersSchema(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def parametersSchema[F[_]](
+    schemas: SchemaLookup[F],
     params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
-  ): Exists[ObjSchema] = {
-    val res =
-      params.foldLeft[Schematic.Object[Schema, ?]](Schematic.Object.Empty()) { (acc, p) =>
-        val pSchema = protoSchemaToSchema(schemas, protoSchema(p.getSchema()))
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])] = {
+    val protoSchematic: Schematic.Object[[x] =>> ProtoSchema.Oriented, ?] =
+      params.foldLeft[Schematic.Object[[x] =>> ProtoSchema.Oriented, ?]](Schematic.Object.Empty()) { (acc, p) =>
+        val pSchema = protoSchema(p.getSchema()).orientBackward
         Schematic.Object.snoc(acc, p.getName(), pSchema)
       }
-    Indeed(Schema.Proper(res))
+
+    quotedObjectSchemaFromProto(protoSchematic)
+      .run(schemas)
   }
 
-  private def requestBodySchema(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def requestBodySchema[F[_]](
+    schemas: SchemaLookup[F],
     requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
-  ): BodySchema[?] =
+  )(using
+    Quotes,
+    Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
     bodySchema(schemas, requestBody.getContent())
 
-  private def bodySchema(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def bodySchema[F[_]](
+    schemas: SchemaLookup[F],
     nullableContent: io.swagger.v3.oas.models.media.Content,
-  ): BodySchema[?] =
-    bodyVariants(schemas, nullableContent)
-      .map(BodySchema.Variants(_))
-      .getOrElse(BodySchema.EmptyBody)
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
+    bodyVariants(schemas, nullableContent) match
+      case Some(ex @ Indeed((t, fe))) =>
+        given Type[ex.T] = t
+        Indeed((
+          Type.of[DiscriminatedUnion[ex.T]],
+          fe map { e => '{ BodySchema.Variants($e) } }
+        ))
+      case None =>
+        Indeed((
+          Type.of[Unit],
+          F.pure('{ BodySchema.EmptyBody })
+        ))
 
-  private def bodyVariants(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def bodyVariants[F[_]](
+    schemas: SchemaLookup[F],
     nullableContent: io.swagger.v3.oas.models.media.Content,
-  ): Option[Items1Named.Product[||, ::, Schema, ?]] =
+  )(using
+    Quotes,
+    Applicative[F],
+  ): Option[Exists[[Ts] =>> (Type[Ts], F[Expr[Items1Named.Product[||, ::, Schema, Ts]]])]] =
     Option(nullableContent)
       .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
-      .collect { case r :: rs => NonEmptyList(r, rs) }
-      .map { _.mapToProduct(mt => Exists(protoSchemaToSchema(schemas, protoSchema(mt.getSchema())))) }
+      .collect { case x :: xs => NonEmptyList(x, xs) }
+      .map { _.mapToProduct[[x] =>> ProtoSchema.Oriented](mt => Exists(protoSchema(mt.getSchema()).orientBackward)) }
+      .map { xs =>
+        quotedProductUnrelatedAA(
+          xs,
+          [A] => ps => quotedSchemaFromProto[F](ps),
+        ).run(schemas)
+      }
 
-  private def responseBodyByStatus(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def responseBodyByStatus[F[_]](
+    schemas: SchemaLookup[F],
     byStatus: NonEmptyList[(String, io.swagger.v3.oas.models.responses.ApiResponse)],
-  ): ResponseSchema[?] =
-    ResponseSchema(
-      byStatus
-        .mapToProduct[BodySchema] { apiResponse =>
-          Exists(responseBodySchema(schemas, apiResponse))
-        },
-    )
+  )(using
+    Quotes,
+    Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[ResponseSchema[T]]])] =
+    quotedProductUnrelatedAA(
+      byStatus.asProduct,
+      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchema(sl, apiResponse)),
+    ).run(schemas) match {
+      case x @ Indeed((tp, bs)) =>
+        given Type[x.T] = tp
+        Indeed((tp, bs.map { bs => '{ResponseSchema($bs) } }))
+    }
 
-  private def responseBodySchema(using Quotes)(
-    schemas: Map[String, qr.TermRef],
+  private def responseBodySchema[F[_]](
+    schemas: SchemaLookup[F],
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
-  ): BodySchema[?] =
+  )(using
+    Quotes,
+    Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
     bodySchema(schemas, apiResponse.getContent())
 
-  private def requestSchema(
-    paramsSchema: Option[Exists[ObjSchema]],
-    reqBodySchema: Option[BodySchema[?]],
-  ): RequestSchema[?] =
+  private def requestSchema[F[_]](
+    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
+    reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema[B]]])]],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
     (paramsSchema, reqBodySchema) match
-      case (Some(ps), Some(bs)) => RequestSchema.ParamsAndBody(ps.value, bs)
-      case (Some(ps), None    ) => RequestSchema.Params(ps.value)
-      case (None    , Some(bs)) => RequestSchema.Body(bs)
-      case (None    , None    ) => RequestSchema.NoInput
+      case (Some(ps @ Indeed((tps, sps))), Some(b @ Indeed((tb, sb)))) =>
+        given pst: Type[ps.T] = tps
+        given bt:  Type[b.T]  = tb
+        Indeed((
+          Type.of[Obj[{} || "params" :: Obj[ps.T] || "body" :: b.T]],
+          F.map2(sps, sb) { (sps, sb) => '{ RequestSchema.ParamsAndBody($sps, $sb) } },
+        ))
+      case (Some(ps @ Indeed((tps, sps))), None) =>
+        given Type[ps.T] = tps
+        Indeed((
+          Type.of[Obj[ps.T]],
+          sps.map { sps => '{ RequestSchema.Params($sps) } },
+        ))
+      case (None, Some(b @ Indeed((tb, sb)))) =>
+        given Type[b.T]  = tb
+        Indeed((
+          Type.of[b.T],
+          sb.map { sb => '{ RequestSchema.Body($sb) } },
+        ))
+      case (None, None) =>
+        Indeed((
+          Type.of[Unit],
+          F.pure( '{ RequestSchema.NoInput } )
+        ))
 
   private def protoSchema(using Quotes)(
     schema: io.swagger.v3.oas.models.media.Schema[?],
@@ -344,21 +501,6 @@ private[openapi] object SpecToScala {
     }
   }
 
-  private def protoSchemaToSchema(using Quotes)(
-    schemas: Map[String, qr.TermRef],
-    schema: ProtoSchema,
-  ): Schema[?] = {
-    schema match
-      case ProtoSchema.Proper(value) =>
-        Schema.Proper(
-          value.wipeTranslate[Schema]([A] => sa => Exists(protoSchemaToSchema(schemas, sa)))
-        )
-      case ProtoSchema.Ref(name) =>
-        Schema.unknown(reason = s"Local schema $name not yet supported")
-      case ProtoSchema.Unsupported(details) =>
-        Schema.unknown(reason = details)
-  }
-
   extension [A](as: NonEmptyList[(String, A)]) {
 
     private def mapToProduct[F[_]](
@@ -388,63 +530,124 @@ private[openapi] object SpecToScala {
       )
     }
 
+    private def asProduct: Items1Named.Product[||, ::, [x] =>> A, ?] =
+      mapToProduct[[x] =>> A](a => Indeed(a))
+
   }
 
-  private class PreviousSiblings[Q <: Quotes & Singleton](using val q: Q)(
+  private class PreviousSiblings[Q <: Quotes, M](using
+    val q: Q,
+    val mode: Mode[q.type, M],
+  )(
     val types: Map[String, qr.TypeRef],
-    val terms: Map[String, qr.TermRef],
+    val terms: Map[String, mode.InTerm],
   ) {
-    def addType(name: String, value: qr.TypeRef): PreviousSiblings[Q] =
-      PreviousSiblings(
+    def addType(name: String, value: qr.TypeRef): PreviousSiblings[Q, M] =
+      new PreviousSiblings(
         types.updated(name, value),
         terms,
       )
 
-    def addTerm(name: String, value: qr.TermRef): PreviousSiblings[Q] =
-      PreviousSiblings(
+    def addTerm(using m: Mode[q.type, M])(name: String, value: m.InTerm): PreviousSiblings[Q, M] =
+      val terms1 = Mode.sameInTerm(mode, m).substituteCo(terms)
+      new PreviousSiblings[Q, M](
         types,
-        terms.updated(name, value),
+        terms1.updated(name, value),
       )
+
+    def termsProper(using M =:= "term-synth"): Map[String, qr.Term] =
+      mode.inTermProper.substituteCo(terms)
   }
 
   private object PreviousSiblings {
-    def empty(using q: Quotes): PreviousSiblings[q.type] =
+    def apply[M](using
+      q: Quotes,
+      mode: Mode[q.type, M],
+    )(
+      types: Map[String, qr.TypeRef],
+      terms: Map[String, mode.InTerm],
+    ): PreviousSiblings[q.type, M] =
+      new PreviousSiblings[q.type, M](types, terms)
+
+    def empty[M](using q: Quotes, m: Mode[q.type, M]): PreviousSiblings[q.type, M] =
       PreviousSiblings(Map.empty, Map.empty)
   }
 
-  private sealed trait MemberDef[Q <: Quotes]
+  private sealed trait MemberDef[Q <: Quotes, +F[_]] {
+    def acceptVisitor[R](
+      caseType: (q: Q) ?=> qr.TypeRepr => R,
+      caseVal: (q: Q) ?=> (tpe: qr.TypeRepr, body: F[(selfSym: qr.Symbol) => qr.Term]) => R,
+      caseMethod: (q: Q) ?=> (tpe: qr.MethodType, body: F[(selfSym: qr.Symbol, argss: List[List[qr.Tree]]) => qr.Term]) => R,
+    ): R
+  }
+
   private object MemberDef {
     class Type[Q <: Quotes & Singleton](using val q: Q)(
       val body: qr.TypeRepr,
-    ) extends MemberDef[Q]
+    ) extends MemberDef[Q, Nothing] {
+      override def acceptVisitor[R](
+        caseType: (q: Q) ?=> q.reflect.TypeRepr => R,
+        caseVal: (q: Q) ?=> (tpe: q.reflect.TypeRepr, body: Nothing) => R,
+        caseMethod: (q: Q) ?=> (tpe: q.reflect.MethodType, body: Nothing) => R,
+      ): R =
+        caseType(body)
+    }
 
-    class Val[Q <: Quotes & Singleton](using val q: Q)(
+    class Val[Q <: Quotes & Singleton, F[_]](using val q: Q)(
       val tpe: qr.TypeRepr,
-      val body: (selfSym: qr.Symbol) => qr.Term,
-    ) extends MemberDef[Q]
+      val body: F[(selfSym: qr.Symbol) => qr.Term],
+    ) extends MemberDef[Q, F] {
+      override def acceptVisitor[R](
+        caseType: (q: Q) ?=> q.reflect.TypeRepr => R,
+        caseVal: (q: Q) ?=> (tpe: q.reflect.TypeRepr, body: F[(selfSym: q.reflect.Symbol) => q.reflect.Term]) => R,
+        caseMethod: (q: Q) ?=> (tpe: q.reflect.MethodType, body: F[(selfSym: q.reflect.Symbol, argss: List[List[q.reflect.Tree]]) => q.reflect.Term]) => R,
+      ): R =
+        caseVal(tpe, body)
+    }
 
-    class Method[Q <: Quotes & Singleton](using val q: Q)(
+    class Method[Q <: Quotes & Singleton, F[_]](using val q: Q)(
       val tpe: qr.MethodType,
-      val body: (selfSym: qr.Symbol, argss: List[List[qr.Tree]]) => qr.Term,
-    ) extends MemberDef[Q]
+      val body: F[(selfSym: qr.Symbol, argss: List[List[qr.Tree]]) => qr.Term],
+    ) extends MemberDef[Q, F] {
+      override def acceptVisitor[R](
+        caseType: (q: Q) ?=> q.reflect.TypeRepr => R,
+        caseVal: (q: Q) ?=> (tpe: q.reflect.TypeRepr, body: F[(selfSym: q.reflect.Symbol) => q.reflect.Term]) => R,
+        caseMethod: (q: Q) ?=> (tpe: q.reflect.MethodType, body: F[(selfSym: q.reflect.Symbol, argss: List[List[q.reflect.Tree]]) => q.reflect.Term]) => R,
+      ): R =
+        caseMethod(tpe, body)
+    }
+
+    /** Helps with type-inference of the polymorphic function with given arguments. */
+    opaque type Poly[Q <: Quotes, M]
+      <: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> PreviousSiblings[Q, N] => MemberDef[Q, mode.OutEff]
+      =  [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> PreviousSiblings[Q, N] => MemberDef[Q, mode.OutEff]
+
+    def poly[Q <: Quotes, M](using q: Q)(
+      f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> PreviousSiblings[Q, N] => MemberDef[Q, mode.OutEff],
+    ): Poly[Q, M] =
+      f
   }
 
-  private def newRefinedObject[Base](using q: Quotes, baseType: Type[Base])(
+  private def newRefinedObject[Base](using baseType: Type[Base])[Q <: Quotes & Singleton](using q: Q)(
     owner : qr.Symbol,
-    members : List[(String, PreviousSiblings[q.type] => MemberDef[q.type])],
+    members : List[(String, MemberDef.Poly[q.type, "term-synth"])],
     anonClassNameSuffix: String,
   ): qr.Term = {
     import qr.*
 
-    val (tpe, termFn) = newRefinedObject_[Base](members, anonClassNameSuffix)
+    val (tpe, termFn) = newRefinedObject_[Base, "term-synth"](members, anonClassNameSuffix)
     val term = termFn(owner)
     Typed(term, TypeTree.of(using tpe.asType))
   }
 
-  private def newRefinedObject_[Base](using q: Quotes, baseType: Type[Base])(
-    members: List[(String, PreviousSiblings[q.type] => MemberDef[q.type])],
+  private def newRefinedObject_[Base, M](using
+    q: Quotes,
+    mode: Mode[q.type, M],
+    baseType: Type[Base],
+  )(
+    members : List[(String, MemberDef.Poly[q.type, M])],
     anonClassNameSuffix: String,
-  ): (qr.TypeRepr, (owner: qr.Symbol) => qr.Term) = {
+  ): (qr.TypeRepr, mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import qr.*
 
     val baseTypeRepr = TypeRepr.of[Base]
@@ -458,16 +661,16 @@ private[openapi] object SpecToScala {
     (
       refinementType(selectableBase) { b =>
         val (_, b1) =
-          members.foldLeft((PreviousSiblings.empty(using q), b)) {
+          members.foldLeft((PreviousSiblings.empty["type-synth"](using q), b)) {
             case ((ctx, b), (name, defn)) =>
-              defn(ctx) match
+              defn["type-synth"](ctx) match
                 case _: MemberDef.Type[q] =>
                   val (b1, ref) = b.addAbstractType(name)
                   (ctx.addType(name, ref), b1)
-                case tm: MemberDef.Val[q] =>
+                case tm: MemberDef.Val[q, tref] =>
                   val (b1, ref) = b.addMember(name, tm.tpe)
                   (ctx.addTerm(name, ref), b1)
-                case md: MemberDef.Method[q] =>
+                case md: MemberDef.Method[q, tref] =>
                   val (b1, ref) = b.addMember(name, md.tpe)
                   (ctx.addTerm(name, ref), b1)
           }
@@ -475,102 +678,113 @@ private[openapi] object SpecToScala {
         b1.result
       },
 
-      { (owner: Symbol) =>
-        val clsSym =
-          Symbol.newClass(
-            owner,
-            name = "$anon_" + anonClassNameSuffix,
-            parents = parents,
-            decls = selfSym => {
-              val (_, symsRev) =
-                members.foldLeft((
-                  PreviousSiblings.empty(using q),
-                  List.empty[Symbol],
-                )) { case ((ctx, acc), (name, defn)) =>
-                  defn(ctx) match
-                    case td: MemberDef.Type[q] =>
-                      val tp = td.body
-                      val tpSym =
-                        Symbol.newTypeAlias(
-                          parent = selfSym,
-                          name = name,
-                          flags = Flags.EmptyFlags,
-                          tpe = tp,
-                          privateWithin = Symbol.noSymbol,
-                        )
-                      (ctx.addType(name, tpSym.typeRef), tpSym :: acc)
-                    case tm: MemberDef.Val[q] =>
-                      val sym =
-                        Symbol.newVal(
-                          parent = selfSym,
-                          name = name,
-                          tpe = tm.tpe,
-                          flags = Flags.EmptyFlags,
-                          privateWithin = Symbol.noSymbol,
-                        )
-                      (ctx.addTerm(name, sym.termRef), sym :: acc)
-                    case md: MemberDef.Method[q] =>
-                      val sym =
-                        Symbol.newMethod(
-                          parent = selfSym,
-                          name = name,
-                          tpe = md.tpe,
-                          flags = Flags.EmptyFlags,
-                          privateWithin = Symbol.noSymbol,
-                        )
-                      (ctx.addTerm(name, sym.termRef), sym :: acc)
-                }
+      mode.isTermSynth.map { case TypeEq(Refl()) =>
+        summon[M =:= "term-synth"]
+        { (owner: Symbol) =>
+          val clsSym =
+            Symbol.newClass(
+              owner,
+              name = "$anon_" + anonClassNameSuffix,
+              parents = parents,
+              decls = selfSym => {
+                val (_, symsRev) =
+                  members.foldLeft((
+                    PreviousSiblings.empty["type-synth"](using q),
+                    List.empty[Symbol],
+                  )) { case ((ctx, acc), (name, defn)) =>
+                    defn["type-synth"](ctx) match
+                      case td: MemberDef.Type[q] =>
+                        val tp = td.body
+                        val tpSym =
+                          Symbol.newTypeAlias(
+                            parent = selfSym,
+                            name = name,
+                            flags = Flags.EmptyFlags,
+                            tpe = tp,
+                            privateWithin = Symbol.noSymbol,
+                          )
+                        (ctx.addType(name, tpSym.typeRef), tpSym :: acc)
+                      case tm: MemberDef.Val[q, term] =>
+                        val sym =
+                          Symbol.newVal(
+                            parent = selfSym,
+                            name = name,
+                            tpe = tm.tpe,
+                            flags = Flags.EmptyFlags,
+                            privateWithin = Symbol.noSymbol,
+                          )
+                        (ctx.addTerm(name, sym.termRef), sym :: acc)
+                      case md: MemberDef.Method[q, term] =>
+                        val sym =
+                          Symbol.newMethod(
+                            parent = selfSym,
+                            name = name,
+                            tpe = md.tpe,
+                            flags = Flags.EmptyFlags,
+                            privateWithin = Symbol.noSymbol,
+                          )
+                        (ctx.addTerm(name, sym.termRef), sym :: acc)
+                  }
 
-              symsRev.reverse
-            },
-            selfType = None,
+                symsRev.reverse
+              },
+              selfType = None,
+            )
+
+          val definedTypeSymbols: List[Symbol] =
+            clsSym.declaredTypes
+
+          val definedTypeMap: Map[String, TypeRef] =
+            definedTypeSymbols.map(sym => (sym.name, sym.typeRef)).toMap
+
+          val definedValMap: Map[String, Term] =
+            clsSym.declaredFields.map(sym => (sym.name, Ref.term(sym.termRef))).toMap
+
+          // XXX: these are all the definitions, not just _previous_ ones
+          val ctx = PreviousSiblings["term-synth"](
+            definedTypeMap,
+            mode.inTermProper.substituteContra(definedValMap),
           )
 
-        val definedTypeSymbols: List[Symbol] =
-          clsSym.declaredTypes
+          val typeDefs =
+            definedTypeSymbols.map(TypeDef(_))
 
-        val definedTypeMap: Map[String, TypeRef] =
-          definedTypeSymbols.map(sym => (sym.name, sym.typeRef)).toMap
+          val valDefs =
+            members.flatMap { case (name, defn) =>
+              defn["term-synth"](ctx)
+                .acceptVisitor[Option[Definition]](
+                  caseType = _ => None,
+                  caseVal = (_, bodyF) => {
+                    val body = mode.outEffId.at(bodyF)
+                    val sym = clsSym.declaredField(name)
+                    Some(ValDef(sym, Some(body(selfSym = sym))))
+                  },
+                  caseMethod = (_, bodyF) => {
+                    val body = mode.outEffId.at(bodyF)
+                    val sym =
+                      clsSym.declaredMethod(name) match
+                        case m :: Nil => m
+                        case Nil => report.errorAndAbort(s"Bug: Method `$name` not found in declared methods")
+                        case _ => report.errorAndAbort(s"Bug: Multiple methods named `$name` found in declared methods")
+                    Some(DefDef(sym, argss => Some(body(sym, argss))))
+                  }
+                )
+            }
 
-        val definedValMap: Map[String, TermRef] =
-          clsSym.declaredFields.map(sym => (sym.name, sym.termRef)).toMap
+          val clsDef = ClassDef(
+            clsSym,
+            parents = parents.map(t => TypeTree.of(using t.asType)),
+            body = typeDefs ++ valDefs,
+          )
 
-        // XXX: these are all the definitions, not just _previous_ ones
-        val ctx = PreviousSiblings(definedTypeMap, definedValMap)
+          val instance =
+            Apply(Select(New(TypeIdent(clsSym)), clsSym.primaryConstructor), Nil)
 
-        val typeDefs =
-          definedTypeSymbols.map(TypeDef(_))
-
-        val valDefs =
-          members.flatMap { case (name, defn) =>
-            defn(ctx) match
-              case _: MemberDef.Type[q] =>
-                None
-              case vd: MemberDef.Val[q] =>
-                val sym = clsSym.declaredField(name)
-                Some(ValDef(sym, Some(vd.body(selfSym = sym))))
-              case md: MemberDef.Method[q] =>
-                val sym =
-                  clsSym.declaredMethod(name) match
-                    case m :: Nil => m
-                    case Nil => report.errorAndAbort(s"Bug: Method `$name` not found in declared methods")
-                    case _ => report.errorAndAbort(s"Bug: Multiple methods named `$name` found in declared methods")
-                Some(DefDef(sym, argss => Some(md.body(sym, argss))))
-          }
-
-        val clsDef = ClassDef(
-          clsSym,
-          parents = parents.map(t => TypeTree.of(using t.asType)),
-          body = typeDefs ++ valDefs,
-        )
-
-        val instance =
-          Apply(Select(New(TypeIdent(clsSym)), clsSym.primaryConstructor), Nil)
-
-        Block(
-          List(clsDef),
-          instance,
-        )
+          Block(
+            List(clsDef),
+            instance,
+          )
+        }
       },
     )
   }
@@ -591,17 +805,10 @@ private[openapi] object SpecToScala {
     acc: q.reflect.TypeRepr
   ) {
     import q.reflect.*
-    import dotty.tools.dotc.core.{Names, Types} // XXX: using compiler internals will backfire at some point
 
     def addAbstractType(name: String): (RefinementTypeBuilder[Q], TypeRef) = {
       val acc1 = Refinement(acc, name, TypeBounds.empty)
-      val ref =
-        Types.TypeRef(
-          self.recThis.asInstanceOf[Types.Type],
-          Names.typeName(name),
-        )(using
-          q.asInstanceOf[scala.quoted.runtime.impl.QuotesImpl].ctx
-        ).asInstanceOf[TypeRef]
+      val ref = typeRef(using q)(self.recThis, name)
 
       (RefinementTypeBuilder(q)(self, acc1), ref)
     }
@@ -614,5 +821,17 @@ private[openapi] object SpecToScala {
 
     def result: TypeRepr =
       acc
+  }
+
+  private def typeRef(using q: Quotes)(prefix: qr.TypeRepr, name: String): qr.TypeRef = {
+    // XXX: using compiler internals will backfire at some point
+    import dotty.tools.dotc.core.{Names, Types}
+
+    Types.TypeRef(
+      prefix.asInstanceOf[Types.Type],
+      Names.typeName(name),
+    )(using
+      q.asInstanceOf[scala.quoted.runtime.impl.QuotesImpl].ctx
+    ).asInstanceOf[qr.TypeRef]
   }
 }

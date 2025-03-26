@@ -13,6 +13,12 @@ private[openapi] trait Substitutive[Rel[_, _]] {
       trans(rel, s)
   }
 
+  def biLift[A, B, X, Y](
+    r: Rel[A, X],
+    s: Rel[B, Y],
+  )[F[_, _]]: Rel[F[A, B], F[X, Y]] =
+    r.lift[[t] =>> F[t, B]] andThen s.lift[[t] =>> F[X, t]]
+
 }
 
 private[openapi] object Substitutive {
