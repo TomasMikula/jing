@@ -319,6 +319,13 @@ private[openapi] object SpecToScala {
       case "string" =>
         // TODO: look for modifiers such as format and enum
         ProtoSchema.str
+      case "integer" =>
+        schema.getFormat() match
+          case "int32" => ProtoSchema.i32
+          case "int64" => ProtoSchema.i64
+          case other => ProtoSchema.Unsupported(s"Unsupported integer format: $other")
+      case "boolean" =>
+        ProtoSchema.bool
       case "array" =>
         val itemSchema = protoSchema(schema.getItems())
         ProtoSchema.arr(itemSchema)

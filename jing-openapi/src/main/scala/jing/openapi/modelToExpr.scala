@@ -192,6 +192,10 @@ def quotedSchematicRelAA[F[_], T, G[_], Rel[_, _], M[_], N[_]](
   N: Applicative[N],
 ): M[Exists[[U] =>> (Rel[T, U], (Type[U], N[Expr[Schematic[G, U]]]))]] =
   s match
+    case Schematic.I32() =>
+      M.pure(
+        Exists((Rel.refl[Int32], (Type.of[Int32], N.pure('{ Schematic.I32() }))))
+      )
     case Schematic.I64() =>
       M.pure(
         Exists((Rel.refl[Int64], (Type.of[Int64], N.pure('{ Schematic.I64() }))))
@@ -199,6 +203,10 @@ def quotedSchematicRelAA[F[_], T, G[_], Rel[_, _], M[_], N[_]](
     case Schematic.S() =>
       M.pure(
         Exists((Rel.refl[Str], (Type.of[Str], N.pure('{ Schematic.S() }))))
+      )
+    case Schematic.B() =>
+      M.pure(
+        Exists((Rel.refl[Bool], (Type.of[Bool], N.pure('{ Schematic.B() }))))
       )
     case a: Schematic.Array[s, a] =>
       f(a.elem) map:

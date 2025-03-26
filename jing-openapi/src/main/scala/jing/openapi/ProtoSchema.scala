@@ -14,8 +14,10 @@ private[openapi] enum ProtoSchema {
 private[openapi] object ProtoSchema {
   import jing.openapi.model.{Schematic as tic}
 
+  def i32: ProtoSchema = Proper(tic.I32())
   def i64: ProtoSchema = Proper(tic.I64())
   def str: ProtoSchema = Proper(tic.S())
+  def bool: ProtoSchema = Proper(tic.B())
 
   def arr(elemSchema: ProtoSchema): ProtoSchema =
     Proper(tic.Array(elemSchema))

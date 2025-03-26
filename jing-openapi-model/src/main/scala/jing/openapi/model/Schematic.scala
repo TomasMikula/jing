@@ -12,31 +12,39 @@ sealed trait Schematic[F[_], A] {
 
   def translate[G[_]](h: [X] => F[X] => G[X]): Schematic[G, A] =
     this match
+      case I32() => I32()
       case I64() => I64()
       case S() => S()
+      case B() => B()
       case Array(elem) => Array(h(elem))
       case Object.Empty() => Object.Empty()
       case Object.Snoc(init, pname, ptype) => Object.Snoc(asObject(init.translate(h)), pname, h(ptype))
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): Schematic[G, ?] =
     this match
+      case I32() => I32()
       case I64() => I64()
       case S() => S()
+      case B() => B()
       case Array(elem) => Array(h(elem).value)
       case o: Object[f, ps] => o.wipeTranslateObj(h).value
 
   def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[Schematic[H, ?]] =
     this match
+      case I32() => G.pure(I32())
       case I64() => G.pure(I64())
       case S() => G.pure(S())
+      case B() => G.pure(B())
       case Array(elem) => h(elem).map(el => Array(el.value))
       case o: Object[f, ps] => o.wipeTranslateObjA(h).map(_.value)
 
 }
 
 object Schematic {
+  case class I32[F[_]]() extends Schematic[F, Int32]
   case class I64[F[_]]() extends Schematic[F, Int64]
   case class S[F[_]]() extends Schematic[F, Str]
+  case class B[F[_]]() extends Schematic[F, Bool]
   case class Array[F[_], T](elem: F[T]) extends Schematic[F, Arr[T]]
 
   sealed trait Object[F[_], Ps] extends Schematic[F, Obj[Ps]] {
