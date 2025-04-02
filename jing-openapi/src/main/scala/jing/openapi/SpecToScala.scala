@@ -137,50 +137,11 @@ private[openapi] object SpecToScala {
     import quotes.reflect.*
 
     MemberDef.poly[q.type, M] { [M1] => (m1, _) ?=> ctx =>
-      val schemasField =
+      val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
       val typesAndTerms: (Map[String, TypeRepr], m1.OutEff[Map[String, Term]]) =
-        m1 match
-          case _: Mode.TermSynth[q] =>
-            val schemasFieldTerm: Term =
-              ctx.mode.inTermProper(schemasField)
-            val types =
-              schemas
-                .map { case (name, _) => (name, TypeSelect(schemasFieldTerm, name).tpe) }
-                .toMap
-            val terms: m1.OutEff[Map[String, Term]] =
-              schemas
-                .map { case (name, _) =>
-                  val companionDynamic =
-                    Select.unique(schemasFieldTerm, "selectDynamic")
-                      .appliedTo(Literal(StringConstant(name)))
-                  val companionTyped =
-                    Select
-                      .unique(companionDynamic, "$asInstanceOf$")
-                      .appliedToType(
-                        TypeRepr.of[SchemaCompanion]
-                          .appliedTo(List(
-                            TypeSelect(schemasFieldTerm, name).tpe,
-                            WildcardTypeTree(TypeBounds.empty).tpe)
-                          ),
-                      )
-                  val schemaTerm =
-                    Select.unique(companionTyped, "schema")
-                  (name, schemaTerm)
-                }
-                .toMap
-                .pure[m1.OutEff]
-            (types, terms)
-          case _: Mode.TypeSynth[q] =>
-            val schemasFieldRef: TermRef =
-              ctx.mode.inTermRefOnly(schemasField)
-            (
-              schemas
-                .map { case (name, _) => (name, typeRef(schemasFieldRef, name)) }
-                .toMap,
-              m1.outEffConstUnit.flip.at[Map[String, Term]](()),
-            )
+        schemaRefsFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
         schemaLookupForMode[M1](typesAndTerms._1, typesAndTerms._2)
@@ -195,6 +156,62 @@ private[openapi] object SpecToScala {
         "paths",
       )
       MemberDef.Val(tpe, bodyFn)
+    }
+  }
+
+  /** Collects references to schema types (`schemas.Foo`) and schema terms (`schemas.Foo.schema`)
+   *  from the given `schemas` field.
+   */
+  private def schemaRefsFromSchemaField[M](using q: Quotes, m: Mode[q.type, M])(
+    schemasField: m.InTerm,
+    schemaNames: List[String],
+  ): (
+    Map[String, qr.TypeRepr],
+    m.OutEff[Map[String, qr.Term]],
+  ) = {
+    import q.reflect.*
+
+    m match {
+      case _: Mode.TermSynth[q] =>
+        val schemasFieldTerm: Term =
+          m.inTermProper(schemasField)
+        val types: Map[String, TypeRepr] =
+          schemaNames
+            .map { name => (name, TypeSelect(schemasFieldTerm, name).tpe) }
+            .toMap
+        val terms: m.OutEff[Map[String, Term]] =
+          schemaNames
+            .map { name =>
+              val companionDynamic =
+                Select.unique(schemasFieldTerm, "selectDynamic")
+                  .appliedTo(Literal(StringConstant(name)))
+              val companionTyped =
+                Select
+                  .unique(companionDynamic, "$asInstanceOf$")
+                  .appliedToType(
+                    TypeRepr.of[SchemaCompanion]
+                      .appliedTo(List(
+                        TypeSelect(schemasFieldTerm, name).tpe,
+                        WildcardTypeTree(TypeBounds.empty).tpe)
+                      ),
+                  )
+              val schemaTerm =
+                Select.unique(companionTyped, "schema")
+              (name, schemaTerm)
+            }
+            .toMap
+            .pure[m.OutEff]
+        (types, terms)
+
+      case _: Mode.TypeSynth[q] =>
+        val schemasFieldRef: TermRef =
+          m.inTermRefOnly(schemasField)
+        (
+          schemaNames
+            .map { name => (name, typeRef(schemasFieldRef, name)) }
+            .toMap,
+          m.outEffConstUnit.flip.at[Map[String, Term]](()),
+        )
     }
   }
 
