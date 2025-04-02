@@ -1,11 +1,11 @@
 package jing.openapi.model
 
-import libretto.lambda.util.SingletonValue
+import libretto.lambda.util.SingletonType
 
 enum Schema[A] {
   case Proper(value: Schematic[Schema, A])
 
-  case Unknown[S <: String](reason: SingletonValue[S]) extends Schema[Oops[S]]
+  case Unknown[S <: String](reason: SingletonType[S]) extends Schema[Oops[S]]
 }
 
 object Schema {
@@ -22,16 +22,16 @@ object Schema {
 
   def objectSnoc[Init, PropName <: String, PropType](
     init: Schema[Obj[Init]],
-    pname: SingletonValue[PropName],
+    pname: SingletonType[PropName],
     ptype: Schema[PropType],
   ): Schema[Obj[Init || PropName :: PropType]] =
     Proper(tic.Object.Snoc(asObject(init), pname, ptype))
 
-  def unknown[S <: String](reason: SingletonValue[S]): Schema[Oops[S]] =
+  def unknown[S <: String](reason: SingletonType[S]): Schema[Oops[S]] =
     Unknown(reason)
 
   def unknown(reason: String): Schema[Oops[reason.type]] =
-    unknown(SingletonValue(reason))
+    unknown(SingletonType(reason))
 
   def asObject[Ps](s: Schema[Obj[Ps]]): Schematic.Object[Schema, Ps] =
     s match

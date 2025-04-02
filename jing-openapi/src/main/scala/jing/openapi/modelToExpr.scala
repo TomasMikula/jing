@@ -3,7 +3,7 @@ package jing.openapi
 import jing.openapi.model.*
 import scala.quoted.*
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Applicative, Exists, SingletonValue, TypeEq}
+import libretto.lambda.util.{Applicative, Exists, SingletonType, TypeEq}
 import libretto.lambda.util.Applicative.*
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
@@ -112,7 +112,7 @@ def quotedSchema[T](s: Schema[T])(using Quotes): (Type[T], Expr[Schema[T]]) =
     case u: Schema.Unknown[reason] =>
       quotedSchemaOops(u.reason)
 
-private def quotedSchemaOops[S <: String](s: SingletonValue[S])(using Quotes): (Type[Oops[S]], Expr[Schema[Oops[S]]]) =
+private def quotedSchemaOops[S <: String](s: SingletonType[S])(using Quotes): (Type[Oops[S]], Expr[Schema[Oops[S]]]) =
   val (tpe, exp) = quotedSingletonString(s)
   given Type[S] = tpe
   (Type.of[Oops[S]], '{ Schema.unknown($exp) })
@@ -157,16 +157,16 @@ def quotedSchemaFromProto[F[_]](
 
     case ProtoSchema.Oriented.ForwardRef(schemaName, cycle) =>
       val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
-      val (tpe, trm) = quotedSchemaOops(SingletonValue(msg))
+      val (tpe, trm) = quotedSchemaOops(SingletonType(msg))
       Reader.pure( Exists(tpe, F.pure(trm)) )
 
     case ProtoSchema.Oriented.UnresolvedRef(schemaName) =>
       val msg = s"Unresolved schema $schemaName"
-      val (tpe, trm) = quotedSchemaOops(SingletonValue(msg))
+      val (tpe, trm) = quotedSchemaOops(SingletonType(msg))
       Reader.pure( Exists(tpe, F.pure(trm)) )
 
     case ProtoSchema.Oriented.Unsupported(details) =>
-      val (tpe, trm) = quotedSchemaOops(SingletonValue(details))
+      val (tpe, trm) = quotedSchemaOops(SingletonType(details))
       Reader.pure( Exists((tpe, F.pure(trm))) )
 }
 
@@ -422,14 +422,14 @@ private def quotedObjectSnocSchematicRelAA[F[_], Init, PropName <: String, PropT
 }
 
 private def prodSingle[F[_], Label <: String, T](
-  label: SingletonValue[Label],
+  label: SingletonType[Label],
   value: F[T],
 ): Items1Named.Product[||, ::, F, Label :: T] =
   Items1Named.Product.Single(label, value)
 
-private def quotedSingletonString[T <: String](x: SingletonValue[T])(using
+private def quotedSingletonString[T <: String](x: SingletonType[T])(using
   Quotes,
-): (Type[T], Expr[SingletonValue[T]]) = {
+): (Type[T], Expr[SingletonType[T]]) = {
   import quotes.reflect.*
 
   val (tpe, trm) = quotedStringLiteral(x.value)
@@ -437,12 +437,12 @@ private def quotedSingletonString[T <: String](x: SingletonValue[T])(using
 
   (
     Type.of[T],
-    '{ SingletonValue($trm) }.asExprOf[SingletonValue[T]],
+    '{ SingletonType($trm) }.asExprOf[SingletonType[T]],
   )
 }
 
-given stringSingletonToExpr[T <: String]: ToExpr[SingletonValue[T]] with {
-  override def apply(x: SingletonValue[T])(using Quotes): Expr[SingletonValue[T]] =
+given stringSingletonToExpr[T <: String]: ToExpr[SingletonType[T]] with {
+  override def apply(x: SingletonType[T])(using Quotes): Expr[SingletonType[T]] =
     quotedSingletonString(x)._2
 }
 

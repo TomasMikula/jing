@@ -20,7 +20,7 @@ import jing.openapi.model.{
   Value,
 }
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Applicative, Exists, SingletonValue, TypeEq, TypeEqK}
+import libretto.lambda.util.{Applicative, Exists, SingletonType, TypeEq, TypeEqK}
 import libretto.lambda.util.Applicative.pure
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
@@ -518,14 +518,14 @@ private[openapi] object SpecToScala {
             f(a) match
               case Indeed(fa) =>
                 go(
-                  Items1Named.Product.Snoc(acc, SingletonValue(tag), fa),
+                  Items1Named.Product.Snoc(acc, SingletonType(tag), fa),
                   as,
                 )
 
       val NonEmptyList((tag, a), tail) = as
 
       go(
-        Items1Named.Product.Single(SingletonValue(tag), f(a).value),
+        Items1Named.Product.Single(SingletonType(tag), f(a).value),
         tail,
       )
     }

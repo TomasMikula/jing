@@ -1,6 +1,6 @@
 package jing.openapi.model
 
-import libretto.lambda.util.{Applicative, Exists, SingletonValue}
+import libretto.lambda.util.{Applicative, Exists, SingletonType}
 
 /** Schema structure parametric in the type of nested schemas.
  *
@@ -76,11 +76,11 @@ object Schematic {
 
     case class Snoc[F[_], Init, PropName <: String, PropType](
       init: Object[F, Init],
-      pname: SingletonValue[PropName],
+      pname: SingletonType[PropName],
       ptype: F[PropType],
     ) extends Object[F, Init || PropName :: PropType] {
       def widen(n: String)(using PropName <:< n.type): Snoc[F, Init, n.type, PropType] =
-        Snoc(init, SingletonValue(n), ptype)
+        Snoc(init, SingletonType(n), ptype)
     }
 
     def snoc[F[_], Init, PropType](
@@ -88,7 +88,7 @@ object Schematic {
       pname: String,
       ptype: F[PropType],
     ): Snoc[F, Init, pname.type, PropType] =
-      Snoc(asObject(init), SingletonValue(pname), ptype)
+      Snoc(asObject(init), SingletonType(pname), ptype)
   }
 
   def asObject[F[_], Ps](s: Schematic[F, Obj[Ps]]): Schematic.Object[F, Ps] =
