@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "3.6.3"
+ThisBuild / scalaVersion := "3.6.4"
 
 ThisBuild / organization := "dev.continuously.jing"
 
