@@ -30,36 +30,6 @@ import scala.quoted.*
 import scala.annotation.tailrec
 
 private[openapi] object SpecToScala {
-  private def schemaLookupForMode[M](using q: Quotes, mode: Mode[q.type, M])(
-    types: Map[String, qr.TypeRepr],
-    terms: mode.OutEff[Map[String, qr.Term]],
-  ): SchemaLookup[mode.OutEff] =
-    mode match
-      case _: Mode.TypeSynth[q] => mode.outEffConstUnit.flip.subst(SchemaLookupForTypeSynth(types))
-      case _: Mode.TermSynth[q] => mode.outEffId.flip.subst(SchemaLookupForTermSynth(types, mode.outEffId.at(terms)))
-
-  private class SchemaLookupForTermSynth(using q: Quotes)(
-    types: Map[String, qr.TypeRepr],
-    terms: Map[String, qr.Term],
-  ) extends SchemaLookup[[x] =>> x] {
-    import quotes.reflect.*
-
-    override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Expr[Schema[T]])] =
-      val tpe = types(schemaName).asType.asInstanceOf[Type[Any]]
-      def go[T](using Type[T]): Expr[Schema[T]] =
-        terms(schemaName)
-          .asExprOf[Schema[T]]
-      Exists((tpe, go(using tpe)))
-  }
-
-  private class SchemaLookupForTypeSynth(using q: Quotes)(
-    types: Map[String, qr.TypeRepr],
-  ) extends SchemaLookup[[x] =>> Unit] {
-    override def lookup(schemaName: String): Exists[[T] =>> (Type[T], Unit)] =
-      val tpe = types(schemaName).asType.asInstanceOf[Type[Any]]
-      Exists((tpe, ()))
-  }
-
   def apply(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
 
@@ -90,7 +60,7 @@ private[openapi] object SpecToScala {
             s: ProtoSchema.Oriented,
           ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
             quotedSchemaFromProto[mode.OutEff](s)
-              .run(schemaLookupForMode[M](
+              .run(SchemaLookup.forMode[M](
                 ctx.types,
                 mode.isTermSynth.map { case TypeEq(Refl()) =>
                   ctx.termsProper.view.mapValues(Select.unique(_, "schema")).toMap
@@ -144,7 +114,7 @@ private[openapi] object SpecToScala {
         schemaRefsFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
-        schemaLookupForMode[M1](typesAndTerms._1, typesAndTerms._2)
+        SchemaLookup.forMode[M1](typesAndTerms._1, typesAndTerms._2)
 
       val (tpe, bodyFn) = newRefinedObject_[AnyRef, M1](
         members = paths.map { case (path, pathItem) =>
@@ -160,7 +130,7 @@ private[openapi] object SpecToScala {
   }
 
   /** Collects references to schema types (`schemas.Foo`) and schema terms (`schemas.Foo.schema`)
-   *  from the given `schemas` field.
+   *  from the given `schemas` field, for use within the parent of `schemas` field.
    */
   private def schemaRefsFromSchemaField[M](using q: Quotes, m: Mode[q.type, M])(
     schemasField: m.InTerm,

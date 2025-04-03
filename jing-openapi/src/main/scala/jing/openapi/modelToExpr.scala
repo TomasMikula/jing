@@ -120,17 +120,6 @@ private def quotedSchemaOops[S <: String](s: SingletonType[S])(using Quotes): (T
 private transparent inline def qr(using q: Quotes): q.reflect.type =
   q.reflect
 
-trait SchemaLookup[F[_]] {
-  def lookup(schemaName: String): Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]
-
-  def mapK[G[_]](h: [A] => F[A] => G[A]): SchemaLookup[G] =
-    new SchemaLookup {
-      override def lookup(schemaName: String): Exists[[T] =>> (Type[T], G[Expr[Schema[T]]])] =
-        SchemaLookup.this.lookup(schemaName) match
-          case Indeed((t, e)) => Indeed((t, h(e)))
-    }
-}
-
 def quotedSchemaFromProto[F[_]](
   schema: ProtoSchema.Oriented,
 )(using
