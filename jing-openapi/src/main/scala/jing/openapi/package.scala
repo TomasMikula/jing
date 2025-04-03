@@ -10,8 +10,11 @@ package object openapi {
   private def go(urlExpr: Expr[String])(using Quotes): Expr[Any] = {
     val url = urlExpr.valueOrAbort
 
-    SpecToScala.apply(url)
+    SwaggerToScalaAst(url)
   }
+
+  private transparent inline def qr(using q: Quotes): q.reflect.type =
+    q.reflect
 
 }
 

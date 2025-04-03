@@ -3,6 +3,7 @@ package jing.openapi
 import io.swagger.parser.OpenAPIParser
 import jing.openapi.Mode.IsSubsumedBy
 import jing.openapi.Mode.IsSubsumedBy.given
+import jing.openapi.ModelToScalaAst.{*, given}
 import jing.openapi.model.{
   ||,
   ::,
@@ -29,7 +30,7 @@ import scala.jdk.CollectionConverters.*
 import scala.quoted.*
 import scala.annotation.tailrec
 
-private[openapi] object SpecToScala {
+private[openapi] object SwaggerToScalaAst {
   def apply(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
 
@@ -236,9 +237,6 @@ private[openapi] object SpecToScala {
       name,
     )
   }
-
-  private transparent inline def qr(using q: Quotes): q.reflect.type =
-    q.reflect
 
   private def pathToObject[M](using q: Quotes, mode: Mode[q.type, M])(
     schemas: SchemaLookup[mode.OutEff],
