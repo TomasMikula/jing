@@ -18,11 +18,13 @@ private sealed trait Mode[Q <: Quotes, M] {
   def outEffId(using M =:= "term-synth"): TypeEqK[OutEff, [x] =>> x]
   def outEffConstUnit(using M =:= "type-synth"): TypeEqK[OutEff, [x] =>> Unit]
 
-  override def toString(): String =
+  def name: M & String =
     this match
       case _: Mode.TypeSynth[q] => "type-synth"
       case _: Mode.TermSynth[q] => "term-synth"
 
+  override def toString(): String =
+    name
 }
 
 private object Mode {
