@@ -18,6 +18,8 @@ private sealed trait Mode[Q <: Quotes, M] {
   def outEffId(using M =:= "term-synth"): TypeEqK[OutEff, [x] =>> x]
   def outEffConstUnit(using M =:= "type-synth"): TypeEqK[OutEff, [x] =>> Unit]
 
+  def term(t: InTerm): OutEff[q.reflect.Term]
+
   def name: M & String =
     this match
       case _: Mode.TypeSynth[q] => "type-synth"
@@ -44,6 +46,9 @@ private object Mode {
     override def outEffConstUnit(using "type-synth" =:= "type-synth"): TypeEqK[[A] =>> Unit, [x] =>> Unit] =
       TypeEqK.refl
 
+    override def term(t: qr.TermRef): OutEff[qr.Term] =
+      ()
+
     override def isTermSynth: Unit =
       ()
 
@@ -69,6 +74,9 @@ private object Mode {
 
     override def outEffConstUnit(using impossible: "term-synth" =:= "type-synth"): TypeEqK[[A] =>> A, [x] =>> Unit] =
       throw AssertionError("""Impossible: "term-synth" =:= "type-synth"""")
+
+    override def term(t: qr.Term): OutEff[qr.Term] =
+      t
 
     override def isTermSynth: "term-synth" =:= "term-synth" =
       summon

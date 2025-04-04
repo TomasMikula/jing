@@ -61,13 +61,18 @@ private[openapi] object SwaggerToScalaAst {
             ctx: PreviousSiblings[q.type, M],
             s: ProtoSchema.Oriented,
           ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
+            val schemaLookup0: SchemaLookup[ctx.mode.OutEff] =
+              SchemaLookup.fromMap[ctx.mode.OutEff](
+                ctx.terms.transform: (name, companionTerm) =>
+                  val schemaTerm: ctx.mode.OutEff[qr.Term] =
+                    ctx.mode.term(companionTerm)
+                      .map[qr.Term](Select.unique(_, "schema"))
+                  (ctx.types(name), schemaTerm)
+              )
+            val schemaLookup: SchemaLookup[mode.OutEff] =
+              Mode.sameOutEff(ctx.mode, mode).subst(schemaLookup0)
             quotedSchemaFromProto[mode.OutEff](s)
-              .run(SchemaLookup.forMode[M](
-                ctx.types,
-                mode.isTermSynth.map { case TypeEq(Refl()) =>
-                  ctx.termsProper.view.mapValues(Select.unique(_, "schema")).toMap
-                },
-              ))
+              .run(schemaLookup)
 
           val (tpe, bodyFn) = StructuralRefinement.forMode[M][AnyRef](
             members = schemas.flatMap { case (name, s) =>
