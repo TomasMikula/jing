@@ -22,21 +22,6 @@ object SchemaLookup {
   ): SchemaLookup[F] =
     SchemaMap[F](schemas)
 
-  def fromMapReflect[F[_]](using Quotes, Applicative[F])(
-    schemas: Map[String, (qr.TypeRepr, F[qr.Term])],
-  ): SchemaLookup[F] =
-    fromMap[F](
-      schemas
-        .view
-        .mapValues[Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]] { case (tr, fTerm) =>
-          def asSchemaExpr[T](trm: qr.Term)(using Type[T]): Expr[Schema[T]] =
-            trm.asExprOf[Schema[T]]
-          val tp = tr.asType.asInstanceOf[Type[? <: Any]]
-          Indeed((tp, fTerm.map(asSchemaExpr(_)(using tp))))
-        }
-        .toMap
-    )
-
   private class SchemaMap[F[_]](using Quotes)(
     schemas: Map[String, Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]],
   ) extends SchemaLookup[F] {

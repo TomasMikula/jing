@@ -55,56 +55,53 @@ private[openapi] object SwaggerToScalaAst {
     StructuralRefinement.typedTerm[OpenApiSpec](
       owner = Symbol.spliceOwner,
       members = List(
-        "schemas" -> MemberDef.poly[q.type, "term-synth"] { [M] => (_, _) ?=> (ctx: PreviousSiblings[q.type, M]) =>
-
-          def resolveSchema[M](using mode: Mode[q.type, M])(
-            ctx: PreviousSiblings[q.type, M],
-            s: ProtoSchema.Oriented,
-          ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
-            val schemaLookup0: SchemaLookup[ctx.mode.OutEff] =
-              SchemaLookup.fromMapReflect[ctx.mode.OutEff](
-                ctx.terms.transform: (name, companionTerm) =>
-                  val schemaTerm: ctx.mode.OutEff[qr.Term] =
-                    ctx.mode.term(companionTerm)
-                      .map[qr.Term](Select.unique(_, "schema"))
-                  (ctx.types(name), schemaTerm)
-              )
-            val schemaLookup: SchemaLookup[mode.OutEff] =
-              Mode.sameOutEff(ctx.mode, mode).subst(schemaLookup0)
-            quotedSchemaFromProto[mode.OutEff](s)
-              .run(schemaLookup)
-
-          val (tpe, bodyFn) = StructuralRefinement.forMode[M][AnyRef](
-            members = schemas.flatMap { case (name, s) =>
-              List(
-                // "opaque" type alias
-                name -> MemberDef.poly[q.type, M] { [N] => (_, _) ?=> ctx =>
-                  val tpe = resolveSchema[N](ctx, s).value._1
-                  MemberDef.Type(TypeRepr.of(using tpe))
-                },
-
-                // companion "object"
-                name -> MemberDef.poly[q.type, M] { [N] => (n, _) ?=> ctx =>
-                  val ex: Exists[[T] =>> (Type[T], n.OutEff[Expr[Schema[T]]])] = resolveSchema[N](ctx, s)
-                  given Type[ex.T] = ex.value._1
-                  val tpeAlias =
-                    ctx.types
-                      .getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it should have just been defined") })
-                      .asType
-                      .asInstanceOf[Type[? <: Any]]
-                  val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(name, ex.value._2)
-                  MemberDef.Val(tp, bodyFn)
-                },
-              )
-            },
-            "schemas",
-          )
-          MemberDef.Val(tpe, bodyFn)
-        },
-        "paths" -> pathsField["term-synth"](schemas, paths),
+        "schemas" -> schemasField["term-synth"](schemas),
+        "paths"   -> pathsField["term-synth"](schemas, paths),
       ),
       "Api",
     ).asExpr
+  }
+
+  private def schemasField[M](using q: Quotes)(
+    schemas: List[(String, ProtoSchema.Oriented)],
+  ): MemberDef.Poly[q.type, M] = {
+    import q.reflect.*
+
+    MemberDef.poly[q.type, M] { [N] => (_, _) ?=> (ctx: PreviousSiblings[q.type, N]) =>
+      def resolveSchema[M](using mode: Mode[q.type, M])(
+        ctx: PreviousSiblings[q.type, M],
+        s: ProtoSchema.Oriented,
+      ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
+        quotedSchemaFromProto[mode.OutEff](s)
+          .run(schemaLookupFromPreviousSiblings(ctx))
+
+      val (tpe, bodyFn) = StructuralRefinement.forMode[N][AnyRef](
+        members = schemas.flatMap { case (name, s) =>
+          List(
+            // "opaque" type alias
+            name -> MemberDef.poly[q.type, N] { [N] => (_, _) ?=> ctx =>
+              val tpe = resolveSchema[N](ctx, s).value._1
+              MemberDef.Type(TypeRepr.of(using tpe))
+            },
+
+            // companion "object"
+            name -> MemberDef.poly[q.type, N] { [N] => (n, _) ?=> ctx =>
+              val ex: Exists[[T] =>> (Type[T], n.OutEff[Expr[Schema[T]]])] = resolveSchema[N](ctx, s)
+              given Type[ex.T] = ex.value._1
+              val tpeAlias =
+                ctx.types
+                  .getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it should have just been defined") })
+                  .asType
+                  .asInstanceOf[Type[? <: Any]]
+              val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(name, ex.value._2)
+              MemberDef.Val(tp, bodyFn)
+            },
+          )
+        },
+        "schemas",
+      )
+      MemberDef.Val(tpe, bodyFn)
+    }
   }
 
   private def pathsField[M](using q: Quotes)(
@@ -117,11 +114,8 @@ private[openapi] object SwaggerToScalaAst {
       val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
-      val typesAndTerms: (Map[String, Exists[[T] =>> (Type[T], m1.OutEff[Expr[Schema[T]]])]]) =
-        schemaRefsFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
-
       val schemaLookup: SchemaLookup[m1.OutEff] =
-        SchemaLookup.fromMap[m1.OutEff](typesAndTerms)
+        schemaLookupFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
       val (tpe, bodyFn) = StructuralRefinement.forMode[M1][AnyRef](
         members = paths.map { case (path, pathItem) =>
@@ -136,68 +130,90 @@ private[openapi] object SwaggerToScalaAst {
     }
   }
 
-  /** Collects references to schema types (`schemas.Foo`) and schema terms (`schemas.Foo.schema`)
-   *  from the given `schemas` field, for use within the same parent as that of the `schemas` field.
+  /** For each previous term `Foo`, assumes it is a companion of a previous type `Foo`,
+   *  and selects `Foo.schema` as a term of type `Schema[Foo]`.
    */
-  private def schemaRefsFromSchemaField[M](using q: Quotes, m: Mode[q.type, M])(
-    schemasField: m.InTerm,
-    schemaNames: List[String],
-  ): Map[String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])]] = {
+  def schemaLookupFromPreviousSiblings[M](using q: Quotes, mode: Mode[q.type, M])(
+    ctx: PreviousSiblings[q.type, M],
+  ): SchemaLookup[mode.OutEff] = {
     import q.reflect.*
 
-    m match {
-      case _: Mode.TermSynth[q] =>
-        val schemasFieldTerm: Term =
-          m.inTermProper(schemasField)
-        schemaNames
-          .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
-            val tpe: Type[? <: Any] =
-              TypeSelect(schemasFieldTerm, name).tpe
-                .asType
-                .asInstanceOf[Type[? <: Any]]
+    val schemaLookup0: SchemaLookup[ctx.mode.OutEff] =
+      SchemaLookup.fromMap[ctx.mode.OutEff](
+        ctx.terms.transform: (name, companionTerm) =>
+          val tpe = ctx.types(name)
+          val schemaTerm: ctx.mode.OutEff[qr.Term] =
+            ctx.mode.term(companionTerm)
+              .map[qr.Term](Select.unique(_, "schema"))
+          typeAndSchemaExpr(tpe, schemaTerm)
+      )
 
-            val companionDynamic =
-              Select.unique(schemasFieldTerm, "selectDynamic")
-                .appliedTo(Literal(StringConstant(name)))
-            val companionTyped =
-              Select
-                .unique(companionDynamic, "$asInstanceOf$")
-                .appliedToType(
-                  TypeRepr.of[SchemaCompanion]
-                    .appliedTo(List(
-                      TypeSelect(schemasFieldTerm, name).tpe,
-                      WildcardTypeTree(TypeBounds.empty).tpe)
-                    ),
-                )
-            val schemaTerm =
-              Select.unique(companionTyped, "schema")
+    Mode.sameOutEff(ctx.mode, mode)
+      .subst(schemaLookup0)
+  }
 
-            def asSchemaExpr[T](trm: qr.Term)(using Type[T]): Expr[Schema[T]] =
-              trm.asExprOf[Schema[T]]
+  /** Collects schema types (like `schemas.Foo`) and schema terms (like `schemas.Foo.schema`)
+   *  from the given `schemas` field, for use within the same parent as that of the `schemas` field.
+   */
+  private def schemaLookupFromSchemaField[M](using q: Quotes, m: Mode[q.type, M])(
+    schemasField: m.InTerm,
+    schemaNames: List[String],
+  ): SchemaLookup[m.OutEff] = {
+    import q.reflect.*
 
-            val schemaExpr =
-              asSchemaExpr(schemaTerm)(using tpe)
+    val typesAndTerms: Map[String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])]] =
+      m match {
+        case _: Mode.TermSynth[q] =>
+          val schemasFieldTerm: Term =
+            m.inTermProper(schemasField)
+          schemaNames
+            .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
+              val tpe: TypeRepr =
+                TypeSelect(schemasFieldTerm, name).tpe
 
-            (name, Indeed((tpe, schemaExpr.pure[m.OutEff])))
-          }
-          .toMap
+              val companionDynamic =
+                Select.unique(schemasFieldTerm, "selectDynamic")
+                  .appliedTo(Literal(StringConstant(name)))
+              val companionTyped =
+                Select
+                  .unique(companionDynamic, "$asInstanceOf$")
+                  .appliedToType(
+                    TypeRepr.of[SchemaCompanion]
+                      .appliedTo(List(
+                        TypeSelect(schemasFieldTerm, name).tpe,
+                        WildcardTypeTree(TypeBounds.empty).tpe)
+                      ),
+                  )
+              val schemaTerm =
+                Select.unique(companionTyped, "schema")
 
-      case _: Mode.TypeSynth[q] =>
-        val schemasFieldRef: TermRef =
-          m.inTermRefOnly(schemasField)
-        val fabricate: [A] => Unit => m.OutEff[A] =
-          val ev = m.outEffConstUnit.flip;
-          [A] => (u: Unit) => ev.at[A](())
-        schemaNames
-          .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
-            val tpe =
-              typeRefUnsafe(schemasFieldRef, name)
-                .asType
-                .asInstanceOf[Type[? <: Any]]
-            (name, Indeed((tpe, fabricate(()))))
-          }
-          .toMap
-    }
+              (name, typeAndSchemaExpr(tpe, schemaTerm.pure[m.OutEff]))
+            }
+            .toMap
+
+        case _: Mode.TypeSynth[q] =>
+          val schemasFieldRef: TermRef =
+            m.inTermRefOnly(schemasField)
+          val fabricate: [A] => Unit => m.OutEff[A] =
+            val ev = m.outEffConstUnit.flip;
+            [A] => (u: Unit) => ev.at[A](())
+          schemaNames
+            .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
+              val tpe = typeRefUnsafe(schemasFieldRef, name)
+              (name, typeAndSchemaExpr(tpe, fabricate(())))
+            }
+            .toMap
+      }
+
+    SchemaLookup.fromMap[m.OutEff](typesAndTerms)
+  }
+
+  private def typeAndSchemaExpr[F[_]](using Quotes)(
+    tpe: qr.TypeRepr,
+    schemaTerm: F[qr.Term],
+  )(using Applicative[F]): Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])] = {
+    tpe.asType match
+      case '[t] => Indeed((Type.of[t], schemaTerm.map(_.asExprOf[Schema[t]])))
   }
 
   /**
