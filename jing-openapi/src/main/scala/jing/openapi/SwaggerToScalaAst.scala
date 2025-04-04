@@ -117,11 +117,11 @@ private[openapi] object SwaggerToScalaAst {
       val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
-      val typesAndTerms: (Map[String, (TypeRepr, m1.OutEff[Term])]) =
+      val typesAndTerms: (Map[String, Exists[[T] =>> (Type[T], m1.OutEff[Expr[Schema[T]]])]]) =
         schemaRefsFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
-        SchemaLookup.fromMapReflect[m1.OutEff](typesAndTerms)
+        SchemaLookup.fromMap[m1.OutEff](typesAndTerms)
 
       val (tpe, bodyFn) = StructuralRefinement.forMode[M1][AnyRef](
         members = paths.map { case (path, pathItem) =>
@@ -142,7 +142,7 @@ private[openapi] object SwaggerToScalaAst {
   private def schemaRefsFromSchemaField[M](using q: Quotes, m: Mode[q.type, M])(
     schemasField: m.InTerm,
     schemaNames: List[String],
-  ): Map[String, (qr.TypeRepr, m.OutEff[qr.Term])] = {
+  ): Map[String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])]] = {
     import q.reflect.*
 
     m match {
@@ -150,8 +150,12 @@ private[openapi] object SwaggerToScalaAst {
         val schemasFieldTerm: Term =
           m.inTermProper(schemasField)
         schemaNames
-          .map { name =>
-            val tpe = TypeSelect(schemasFieldTerm, name).tpe
+          .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
+            val tpe: Type[? <: Any] =
+              TypeSelect(schemasFieldTerm, name).tpe
+                .asType
+                .asInstanceOf[Type[? <: Any]]
+
             val companionDynamic =
               Select.unique(schemasFieldTerm, "selectDynamic")
                 .appliedTo(Literal(StringConstant(name)))
@@ -167,7 +171,14 @@ private[openapi] object SwaggerToScalaAst {
                 )
             val schemaTerm =
               Select.unique(companionTyped, "schema")
-            (name, (tpe, schemaTerm.pure[m.OutEff]))
+
+            def asSchemaExpr[T](trm: qr.Term)(using Type[T]): Expr[Schema[T]] =
+              trm.asExprOf[Schema[T]]
+
+            val schemaExpr =
+              asSchemaExpr(schemaTerm)(using tpe)
+
+            (name, Indeed((tpe, schemaExpr.pure[m.OutEff])))
           }
           .toMap
 
@@ -178,7 +189,13 @@ private[openapi] object SwaggerToScalaAst {
           val ev = m.outEffConstUnit.flip;
           [A] => (u: Unit) => ev.at[A](())
         schemaNames
-          .map { name => (name, (typeRefUnsafe(schemasFieldRef, name), fabricate(()))) }
+          .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
+            val tpe =
+              typeRefUnsafe(schemasFieldRef, name)
+                .asType
+                .asInstanceOf[Type[? <: Any]]
+            (name, Indeed((tpe, fabricate(()))))
+          }
           .toMap
     }
   }
