@@ -112,11 +112,11 @@ private[openapi] object SwaggerToScalaAst {
       val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
-      val typesAndTerms: (Map[String, TypeRepr], m1.OutEff[Map[String, Term]]) =
+      val typesAndTerms: (Map[String, (TypeRepr, m1.OutEff[Term])]) =
         schemaRefsFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
-        SchemaLookup.forMode[M1](typesAndTerms._1, typesAndTerms._2)
+        SchemaLookup.fromMap[m1.OutEff](typesAndTerms)
 
       val (tpe, bodyFn) = StructuralRefinement.forMode[M1][AnyRef](
         members = paths.map { case (path, pathItem) =>
@@ -132,58 +132,49 @@ private[openapi] object SwaggerToScalaAst {
   }
 
   /** Collects references to schema types (`schemas.Foo`) and schema terms (`schemas.Foo.schema`)
-   *  from the given `schemas` field, for use within the parent of `schemas` field.
+   *  from the given `schemas` field, for use within the same parent as that of the `schemas` field.
    */
   private def schemaRefsFromSchemaField[M](using q: Quotes, m: Mode[q.type, M])(
     schemasField: m.InTerm,
     schemaNames: List[String],
-  ): (
-    Map[String, qr.TypeRepr],
-    m.OutEff[Map[String, qr.Term]],
-  ) = {
+  ): Map[String, (qr.TypeRepr, m.OutEff[qr.Term])] = {
     import q.reflect.*
 
     m match {
       case _: Mode.TermSynth[q] =>
         val schemasFieldTerm: Term =
           m.inTermProper(schemasField)
-        val types: Map[String, TypeRepr] =
-          schemaNames
-            .map { name => (name, TypeSelect(schemasFieldTerm, name).tpe) }
-            .toMap
-        val terms: m.OutEff[Map[String, Term]] =
-          schemaNames
-            .map { name =>
-              val companionDynamic =
-                Select.unique(schemasFieldTerm, "selectDynamic")
-                  .appliedTo(Literal(StringConstant(name)))
-              val companionTyped =
-                Select
-                  .unique(companionDynamic, "$asInstanceOf$")
-                  .appliedToType(
-                    TypeRepr.of[SchemaCompanion]
-                      .appliedTo(List(
-                        TypeSelect(schemasFieldTerm, name).tpe,
-                        WildcardTypeTree(TypeBounds.empty).tpe)
-                      ),
-                  )
-              val schemaTerm =
-                Select.unique(companionTyped, "schema")
-              (name, schemaTerm)
-            }
-            .toMap
-            .pure[m.OutEff]
-        (types, terms)
+        schemaNames
+          .map { name =>
+            val tpe = TypeSelect(schemasFieldTerm, name).tpe
+            val companionDynamic =
+              Select.unique(schemasFieldTerm, "selectDynamic")
+                .appliedTo(Literal(StringConstant(name)))
+            val companionTyped =
+              Select
+                .unique(companionDynamic, "$asInstanceOf$")
+                .appliedToType(
+                  TypeRepr.of[SchemaCompanion]
+                    .appliedTo(List(
+                      TypeSelect(schemasFieldTerm, name).tpe,
+                      WildcardTypeTree(TypeBounds.empty).tpe)
+                    ),
+                )
+            val schemaTerm =
+              Select.unique(companionTyped, "schema")
+            (name, (tpe, schemaTerm.pure[m.OutEff]))
+          }
+          .toMap
 
       case _: Mode.TypeSynth[q] =>
         val schemasFieldRef: TermRef =
           m.inTermRefOnly(schemasField)
-        (
-          schemaNames
-            .map { name => (name, typeRefUnsafe(schemasFieldRef, name)) }
-            .toMap,
-          m.outEffConstUnit.flip.at[Map[String, Term]](()),
-        )
+        val fabricate: [A] => Unit => m.OutEff[A] =
+          val ev = m.outEffConstUnit.flip;
+          [A] => (u: Unit) => ev.at[A](())
+        schemaNames
+          .map { name => (name, (typeRefUnsafe(schemasFieldRef, name), fabricate(()))) }
+          .toMap
     }
   }
 
