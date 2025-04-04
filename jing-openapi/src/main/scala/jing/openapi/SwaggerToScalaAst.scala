@@ -62,7 +62,7 @@ private[openapi] object SwaggerToScalaAst {
             s: ProtoSchema.Oriented,
           ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
             val schemaLookup0: SchemaLookup[ctx.mode.OutEff] =
-              SchemaLookup.fromMap[ctx.mode.OutEff](
+              SchemaLookup.fromMapReflect[ctx.mode.OutEff](
                 ctx.terms.transform: (name, companionTerm) =>
                   val schemaTerm: ctx.mode.OutEff[qr.Term] =
                     ctx.mode.term(companionTerm)
@@ -121,7 +121,7 @@ private[openapi] object SwaggerToScalaAst {
         schemaRefsFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
-        SchemaLookup.fromMap[m1.OutEff](typesAndTerms)
+        SchemaLookup.fromMapReflect[m1.OutEff](typesAndTerms)
 
       val (tpe, bodyFn) = StructuralRefinement.forMode[M1][AnyRef](
         members = paths.map { case (path, pathItem) =>
