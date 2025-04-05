@@ -431,7 +431,10 @@ private[openapi] object SwaggerToScalaAst {
     ).run(schemas) match {
       case x @ Indeed((tp, bs)) =>
         given Type[x.T] = tp
-        Indeed((tp, bs.map { bs => '{ResponseSchema($bs) } }))
+        Indeed((
+          Type.of[DiscriminatedUnion[x.T]],
+          bs.map { bs => '{ResponseSchema.ByStatusCode($bs) } }
+        ))
     }
 
   private def responseBodySchema[F[_]](
