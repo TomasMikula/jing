@@ -110,13 +110,13 @@ object ModelToScalaAst {
         val (tpe, exp) = quotedSchematic(s, [A] => sa => quotedSchema(sa))
         given Type[T] = tpe
         (tpe, '{ Schema.Proper($exp) })
-      case u: Schema.Unknown[reason] =>
-        quotedSchemaOops(u.reason)
+      case u: Schema.Unsupported[msg] =>
+        quotedSchemaOops(u.message)
 
   private def quotedSchemaOops[S <: String](s: SingletonType[S])(using Quotes): (Type[Oops[S]], Expr[Schema[Oops[S]]]) =
     val (tpe, exp) = quotedSingletonString(s)
     given Type[S] = tpe
-    (Type.of[Oops[S]], '{ Schema.unknown($exp) })
+    (Type.of[Oops[S]], '{ Schema.unsupported($exp) })
 
   def quotedSchemaFromProto[F[_]](
     schema: ProtoSchema.Oriented,
@@ -365,6 +365,8 @@ object ModelToScalaAst {
         )
       case snoc @ Schematic.Object.Snoc(init, pname, ptype) =>
         quotedObjectSnocSchematicRelAA(snoc, f)
+      case snoc @ Schematic.Object.SnocOpt(init, pname, ptype) =>
+        quotedObjectSnocOptSchematicRelAA(snoc, f)
 
   private def quotedObjectSnocSchematicRelAA[F[_], Init, PropName <: String, PropType, G[_], Rel[_, _], M[_], N[_]](
     snoc: Schematic.Object.Snoc[F, Init, PropName, PropType],
@@ -404,6 +406,48 @@ object ModelToScalaAst {
         Exists((
           Rel.biLift(ri, rl)[[X, Y] =>> X || PropName :: Y],
           (Type.of[As || PropName :: B], expr)
+        ))
+    }
+  }
+
+  private def quotedObjectSnocOptSchematicRelAA[F[_], Init, PropName <: String, PropType, G[_], Rel[_, _], M[_], N[_]](
+    snoc: Schematic.Object.SnocOpt[F, Init, PropName, PropType],
+    f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
+  )(using
+    q: Quotes,
+    G: Type[G],
+    Rel: Substitutive[Rel],
+    M: Applicative[M],
+    N: Applicative[N],
+  ): M[Exists[[Qs] =>> (
+    Rel[Init || PropName :? PropType, Qs],
+    (
+      Type[Qs],
+      N[Expr[Schematic.Object[G, Qs]]],
+    )
+  )]] = {
+    M.map2(
+      quotedObjectSchematicRelAA(snoc.init, f),
+      f(snoc.ptype),
+    ) {
+      case (e1 @ Indeed((ri, (ti, si))), e2 @ Indeed((rl, (tl, sl)))) =>
+        type As = e1.T
+        type B  = e2.T
+        given Type[As] = ti
+        given Type[B] = tl
+
+        val (nt, spn) = quotedSingletonString(snoc.pname)
+
+        given Type[PropName] = nt
+
+        val expr: N[Expr[Schematic.Object[G, As || PropName :? B]]] =
+          N.map2(si, sl) { (si, sl) =>
+            '{ Schematic.Object.SnocOpt[G, As, PropName, B]($si, $spn, $sl) }
+          }
+
+        Exists((
+          Rel.biLift(ri, rl)[[X, Y] =>> X || PropName :? Y],
+          (Type.of[As || PropName :? B], expr)
         ))
     }
   }

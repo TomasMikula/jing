@@ -32,15 +32,19 @@ private[openapi] object ProtoSchema {
   def arr(elemSchema: ProtoSchema): ProtoSchema =
     Proper(tic.Array(elemSchema))
 
-  def obj(props: List[(String, ProtoSchema)]): ProtoSchema = {
+  def obj(props: List[(String, Boolean, ProtoSchema)]): ProtoSchema = {
     @tailrec
     def go(
       acc: tic.Object[[A] =>> ProtoSchema, ?],
-      remaining: List[(String, ProtoSchema)],
+      remaining: List[(String, Boolean, ProtoSchema)],
     ): tic.Object[[A] =>> ProtoSchema, ?] =
       remaining match
-        case Nil          => acc
-        case (n, s) :: ps => go(tic.Object.snoc(acc, n, s), ps)
+        case Nil =>
+          acc
+        case (n, isRequired, s) :: ps =>
+          if isRequired
+          then go(tic.Object.snoc(acc, n, s), ps)
+          else go(tic.Object.snocOpt(acc, n, s), ps)
 
     Proper(go(tic.Object.Empty(), props))
   }

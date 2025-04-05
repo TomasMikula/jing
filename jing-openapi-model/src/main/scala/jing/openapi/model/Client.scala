@@ -1,10 +1,10 @@
 package jing.openapi.model
 
 trait Client {
-  type Result[T]
+  type Response[T]
 
   def runRequest[O](
     baseUrl: String,
     req: HttpThunk[O],
-  ): Result[O]
+  ): Response[O]
 }

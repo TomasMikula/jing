@@ -511,8 +511,12 @@ private[openapi] object SwaggerToScalaAst {
           case null =>
             ProtoSchema.Unsupported("Missing properties field in schema of type 'object'")
           case props =>
-            val b = List.newBuilder[(String, ProtoSchema)]
-            props.forEach { (name, s) => b += ((name, protoSchema(s))) }
+            val required: Set[String] =
+              schema.getRequired() match
+                case null => Set.empty[String]
+                case props => (Set.newBuilder[String] ++= props.iterator.asScala).result()
+            val b = List.newBuilder[(String, Boolean, ProtoSchema)]
+            props.forEach { (name, s) => b += ((name, required.contains(name), protoSchema(s))) }
             ProtoSchema.obj(b.result())
       case other =>
         ProtoSchema.Unsupported(s"Type '$other' not yet supported.")

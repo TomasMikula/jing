@@ -51,6 +51,9 @@ lazy val jingOpenApiClientDefault = project
   .settings(
     scalacOptions ++=
       scalacOptionsCommon,
+    libraryDependencies ++= Seq(
+      "io.circe" %% "circe-parser" % "0.14.12",
+    ),
   )
 
 lazy val jingOpenApiExamples = project

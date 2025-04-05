@@ -18,5 +18,5 @@ object TestApp extends App {
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 
-  println(result)
+  println(result.map(_.show))
 }

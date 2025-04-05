@@ -5,7 +5,7 @@ import libretto.lambda.util.SingletonType
 enum Schema[A] {
   case Proper(value: Schematic[Schema, A])
 
-  case Unknown[S <: String](reason: SingletonType[S]) extends Schema[Oops[S]]
+  case Unsupported[S <: String](message: SingletonType[S]) extends Schema[Oops[S]]
 }
 
 object Schema {
@@ -27,17 +27,17 @@ object Schema {
   ): Schema[Obj[Init || PropName :: PropType]] =
     Proper(tic.Object.Snoc(asObject(init), pname, ptype))
 
-  def unknown[S <: String](reason: SingletonType[S]): Schema[Oops[S]] =
-    Unknown(reason)
+  def unsupported[S <: String](message: SingletonType[S]): Schema[Oops[S]] =
+    Unsupported(message)
 
-  def unknown(reason: String): Schema[Oops[reason.type]] =
-    unknown(SingletonType(reason))
+  def unsupported(message: String): Schema[Oops[message.type]] =
+    unsupported(SingletonType(message))
 
   def asObject[Ps](s: Schema[Obj[Ps]]): Schematic.Object[Schema, Ps] =
     s match
       case Proper(value) =>
         Schematic.asObject(value)
-      case u: Unknown[rsn] =>
+      case u: Unsupported[msg] =>
         throw AssertionError(s"Impossible for Obj[X] =:= Oops[Y], as `Obj` and `Oops` are distinct class types")
 
 }

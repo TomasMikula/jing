@@ -6,7 +6,7 @@ sealed trait HttpThunk[O] {
   def path: String
   def input: RequestInput[InputType]
 
-  def runAgainst(apiBaseUrl: String)(using client: Client): client.Result[O] =
+  def runAgainst(apiBaseUrl: String)(using client: Client): client.Response[O] =
     client.runRequest(apiBaseUrl, this)
 }
 

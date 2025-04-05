@@ -54,6 +54,8 @@ object Schematic {
           Exists(Object.Empty())
         case Object.Snoc(init, pname, ptype) =>
           Exists(Object.Snoc(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
+        case Object.SnocOpt(init, pname, ptype) =>
+          Exists(Object.SnocOpt(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
 
     private[Schematic] def wipeTranslateObjA[G[_], H[_]](
       h: [X] => F[X] => G[Exists[H]],
@@ -70,6 +72,13 @@ object Schematic {
           ) { (init, ptype) =>
             Exists(Object.Snoc(asObject(init.value), pname, ptype.value))
           }
+        case Object.SnocOpt(init, pname, ptype) =>
+          G.map2(
+            init.wipeTranslateObjA(h),
+            h(ptype),
+          ) { (init, ptype) =>
+            Exists(Object.SnocOpt(asObject(init.value), pname, ptype.value))
+          }
   }
   object Object {
     case class Empty[F[_]]() extends Object[F, {}]
@@ -78,17 +87,30 @@ object Schematic {
       init: Object[F, Init],
       pname: SingletonType[PropName],
       ptype: F[PropType],
-    ) extends Object[F, Init || PropName :: PropType] {
-      def widen(n: String)(using PropName <:< n.type): Snoc[F, Init, n.type, PropType] =
-        Snoc(init, SingletonType(n), ptype)
-    }
+    ) extends Object[F, Init || PropName :: PropType]
+
+    case class SnocOpt[F[_], Init, PropName <: String, PropType](
+      init: Object[F, Init],
+      pname: SingletonType[PropName],
+      ptype: F[PropType],
+    ) extends Object[F, Init || PropName :? PropType]
+
+    def empty[F[_]]: Object[F, {}] =
+      Empty()
 
     def snoc[F[_], Init, PropType](
       init: Schematic[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
-    ): Snoc[F, Init, pname.type, PropType] =
+    ): Object[F, Init || pname.type :: PropType] =
       Snoc(asObject(init), SingletonType(pname), ptype)
+
+    def snocOpt[F[_], Init, PropType](
+      init: Schematic[F, Obj[Init]],
+      pname: String,
+      ptype: F[PropType],
+    ): Object[F, Init || pname.type :? PropType] =
+      SnocOpt(asObject(init), SingletonType(pname), ptype)
   }
 
   def asObject[F[_], Ps](s: Schematic[F, Obj[Ps]]): Schematic.Object[F, Ps] =
