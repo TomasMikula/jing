@@ -22,7 +22,7 @@ import jing.openapi.model.{
   Value,
 }
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Applicative, Exists, SingletonType, TypeEq, TypeEqK}
+import libretto.lambda.util.{Applicative, Exists, Functor, SingletonType, TypeEq, TypeEqK}
 import libretto.lambda.util.Applicative.pure
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
@@ -211,7 +211,7 @@ private[openapi] object SwaggerToScalaAst {
   private def typeAndSchemaExpr[F[_]](using Quotes)(
     tpe: qr.TypeRepr,
     schemaTerm: F[qr.Term],
-  )(using Applicative[F]): Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])] = {
+  )(using Functor[F]): Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])] = {
     tpe.asType match
       case '[t] => Indeed((Type.of[t], schemaTerm.map(_.asExprOf[Schema[t]])))
   }

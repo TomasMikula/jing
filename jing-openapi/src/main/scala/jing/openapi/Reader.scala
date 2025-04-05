@@ -21,16 +21,12 @@ private[openapi] object Reader {
     override def pure[A](a: A): Reader[R, A] =
       _ => a
 
-    override def map[A, B](
-      fa: Reader[R, A],
-      f: A => B,
-    ): Reader[R, B] =
-      r => f(fa(r))
+    extension [A](fa: Reader[R, A]) {
+      override def map[B](f: A => B): Reader[R, B] =
+        r => f(fa(r))
 
-    override def zip[A, B](
-      fa: Reader[R, A],
-      fb: Reader[R, B],
-    ): Reader[R, (A, B)] =
-      r => (fa(r), fb(r))
-  }
+      override def zip[B](fb: Reader[R, B]): Reader[R, (A, B)] =
+        r => (fa(r), fb(r))
+      }
+    }
 }

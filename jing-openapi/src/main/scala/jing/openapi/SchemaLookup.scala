@@ -1,7 +1,7 @@
 package jing.openapi
 
 import jing.openapi.model.Schema
-import libretto.lambda.util.{Applicative, Exists}
+import libretto.lambda.util.Exists
 import libretto.lambda.util.Exists.Indeed
 import scala.quoted.*
 

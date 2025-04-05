@@ -53,9 +53,12 @@ private object Mode {
       ()
 
     override given applicativeOutEff: Applicative[[A] =>> Unit] with {
-      override def map[A, B](fa: Unit, f: A => B): Unit = ()
       override def pure[A](a: A): Unit = ()
-      override def zip[A, B](fa: Unit, fb: Unit): Unit = ()
+
+      extension [A](fa: Unit) {
+        override def map[B](f: A => B): Unit = ()
+        override def zip[B](fb: Unit): Unit = ()
+      }
     }
   }
 
