@@ -1,4 +1,4 @@
-package jing.openapi.client.jdk
+package jing.openapi.client.default
 
 import java.net.http.{HttpClient, HttpRequest}
 import java.net.http.HttpResponse.BodyHandlers

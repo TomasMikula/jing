@@ -43,10 +43,22 @@ lazy val jingOpenApi = project
       ),
   )
 
+lazy val jingOpenApiClientDefault = project
+  .in(file("jing-openapi-client-default"))
+  .dependsOn(
+    jingOpenApiModel,
+  )
+  .settings(
+    scalacOptions ++=
+      scalacOptionsCommon,
+  )
+
 lazy val jingOpenApiExamples = project
   .in(file("jing-openapi-examples"))
   .dependsOn(
-    jingOpenApi,
+    jingOpenApiModel,
+    jingOpenApiClientDefault,
+    jingOpenApi % Provided,
   )
   .settings(
     scalacOptions ++=

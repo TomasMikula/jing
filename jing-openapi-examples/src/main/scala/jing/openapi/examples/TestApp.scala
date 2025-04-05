@@ -1,6 +1,6 @@
 package jing.openapi.examples
 
-import jing.openapi.client.jdk.given
+import jing.openapi.client.default.given
 import jing.openapi.model.Value
 import jing.openapi.model.Value.obj
 
