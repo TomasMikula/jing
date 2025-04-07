@@ -22,7 +22,7 @@ lazy val jingOpenApiModel = project
   .settings(
     scalacOptions ++= scalacOptionsCommon,
     libraryDependencies ++= Seq(
-      "dev.continuously.libretto" %% "libretto-lambda" % "0.3.4-SNAPSHOT",
+      "dev.continuously.libretto" %% "libretto-lambda" % "0.3.4",
     )
   )
 
