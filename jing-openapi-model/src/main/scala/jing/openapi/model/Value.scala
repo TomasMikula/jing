@@ -2,7 +2,8 @@ package jing.openapi.model
 
 import libretto.lambda.Items1Named
 import libretto.lambda.Items1Named.Member
-import libretto.lambda.util.SingletonType
+import libretto.lambda.util.{SingletonType, TypeEq}
+import libretto.lambda.util.TypeEq.Refl
 
 sealed trait Value[T] {
   def show: String =
@@ -122,7 +123,30 @@ object Value {
 
   case class Sum[As](
     value: Items1Named.Sum[||, ::, Value, As]
-  ) extends Value[DiscriminatedUnion[As]]
+  ) extends Value[DiscriminatedUnion[As]] {
+    def discriminator: DiscriminatorOf[As] =
+      discriminatorImpl(value.tag)
+
+    private def discriminatorImpl[Lbl, A, Cases](member: Member[||, ::, Lbl, A, Cases]): DiscriminatorOf[Cases] = {
+      import Member.{InInit, InLast, Single}
+
+      member match
+        case last: InLast[sep, of, init, lbl, a] =>
+          summon[(init || lbl :: a) =:= Cases].substituteCo[DiscriminatorOf](
+            last.label.value
+          )
+        case Single(label) =>
+          summon[(Lbl :: A) =:= Cases].substituteCo[DiscriminatorOf](
+            label.value: DiscriminatorOf[Lbl :: A]
+          )
+        case i: InInit[sep, of, lbl, a, init, lblB, b] =>
+          summon[(init || lblB :: b) =:= Cases].substituteCo[DiscriminatorOf](
+            (discriminatorImpl[lbl, a, init](i.i)
+              : DiscriminatorOf[init])
+              : DiscriminatorOf[init || lblB :: b]
+          )
+    }
+  }
 
   case class Oopsy[S <: String](
     message: SingletonType[S],
@@ -161,4 +185,32 @@ object Value {
   def asObject[Ps](value: Value[Obj[Ps]]): Value.Object[Ps] =
     value match
       case o: Value.Object[ps] => o
+
+  extension [Cases](value: Value[DiscriminatedUnion[Cases]]) {
+    private def asSum: Value.Sum[Cases] =
+      value match
+        case s @ Sum(_) => s
+
+    def discriminator: DiscriminatorOf[Cases] =
+      asSum.discriminator
+
+    def assertCase[C <: DiscriminatorOf[Cases]](using ev: C IsCaseOf Cases): Value[ev.Type] =
+      val s = value.asSum.value
+      assertCaseImpl(IsCaseOf.toMember(ev), s.tag, s.value)
+  }
+
+  private def assertCaseImpl[LabelA, A, LabelB, B, Cases](
+    expected: Member[||, ::, LabelA, A, Cases],
+    actual: Member[||, ::, LabelB, B, Cases],
+    value: Value[B],
+  ): Value[A] =
+    actual.testEqual(expected) match
+      case Some(TypeEq(Refl())) =>
+        value
+      case None =>
+        if (expected.label.value == actual.label.value)
+          throw IllegalStateException("Seems like you have used the same case label multiple times")
+        else
+          throw IllegalStateException(s"Expected case: \"${expected.label.value}\", actual case: \"${actual.label.value}\".")
+
 }

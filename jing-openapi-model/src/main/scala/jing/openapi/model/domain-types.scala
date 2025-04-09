@@ -1,5 +1,8 @@
 package jing.openapi.model
 
+import libretto.lambda.util.{BiInjective, TypeEq}
+import libretto.lambda.util.TypeEq.Refl
+
 sealed trait Int32
 sealed trait Int64
 sealed trait Str
@@ -11,3 +14,27 @@ sealed trait ::[A, B]
 sealed trait :?[A, B]
 sealed trait DiscriminatedUnion[Variants]
 sealed trait Oops[Reason]
+
+// workaround of https://github.com/scala/scala3/issues/22943
+type LabelOf[KV] = KV match
+  case k :: v => k
+
+type DiscriminatorOf[Cases] =
+  Cases match
+    case s :: t => s
+    case init || last => DiscriminatorOf[init] | LabelOf[last]
+
+given BiInjective[||] with {
+  override def unapply[A, B, X, Y](ev: (A || B) =:= (X || Y)): (A =:= X, B =:= Y) =
+    ev match { case TypeEq(Refl()) => (summon, summon) }
+}
+
+given BiInjective[::] with {
+  override def unapply[A, B, X, Y](ev: A :: B =:= X :: Y): (A =:= X, B =:= Y) =
+    ev match { case TypeEq(Refl()) => (summon, summon) }
+}
+
+given BiInjective[:?] with {
+  override def unapply[A, B, X, Y](ev: A :? B =:= X :? Y): (A =:= X, B =:= Y) =
+    ev match { case TypeEq(Refl()) => (summon, summon) }
+}

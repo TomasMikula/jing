@@ -34,7 +34,7 @@ class ClientJdk extends Client {
 
     val resp =
       try {
-        Result.Success(
+        Result.Succeeded(
           client
             .send(
               HttpRequest.newBuilder(uri).build(), // TODO: body
@@ -42,8 +42,8 @@ class ClientJdk extends Client {
             )
         )
       } catch {
-        case e: IOException => Result.Failure.IOError(e)
-        case e              => Result.Failure.UnexpectedError(e)
+        case e: IOException => Result.ioError(e)
+        case e              => Result.unexpectedError(e)
       }
 
     resp.flatMap(parseResponse(respSchema, _))
@@ -61,7 +61,7 @@ class ClientJdk extends Client {
             parseBody(code, s, response)
               .map(Value.discriminatedUnion(i, _))
           case None =>
-            Result.Failure.UnexpectedStatusCode(code, response.body())
+            Result.unexpectedStatusCode(code, response.body())
   }
 
   private def parseBody[T](
@@ -71,7 +71,7 @@ class ClientJdk extends Client {
   ): Result[Value[T]] =
     schema match
       case BodySchema.EmptyBody =>
-        Result.Success(Value.unit)
+        Result.Succeeded(Value.unit)
       case BodySchema.Variants(byMediaType) =>
         response.headers().firstValue("Content-Type").toScala match
           case Some(contentType) =>
@@ -80,9 +80,9 @@ class ClientJdk extends Client {
                 parseBody(statusCode, s, contentType, response.body())
                   .map(Value.discriminatedUnion(i, _))
               case None =>
-                Result.Failure.UnexpectedContentType(statusCode, contentType, response.body())
+                Result.unexpectedContentType(statusCode, contentType, response.body())
           case None =>
-            Result.Failure.MissingContentTypeHeader(statusCode, response.body())
+            Result.missingContentTypeHeader(statusCode, response.body())
 
   private def parseBody[T](
     statusCode: Int,
@@ -98,10 +98,10 @@ class ClientJdk extends Client {
           case Right(value) =>
             parseJsonBody(schema, value)
       case other =>
-        Result.Failure.UnsupportedContentType(statusCode, contentType, body)
+        Result.unsupportedContentType(statusCode, contentType, body)
 
-  private def jsonParsingFailure(code: Int, e: ParsingFailure): Result[Nothing] =
-    Result.Failure.ParseError(code, s"JSON parsing failure: ${e.message}", e.underlying)
+  private def jsonParsingFailure[T](code: Int, e: ParsingFailure): Result[T] =
+    Result.parseError(code, s"JSON parsing failure: ${e.message}", e.underlying)
 
   private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value[T]] =
     JsonToValue.decode(schema, body)

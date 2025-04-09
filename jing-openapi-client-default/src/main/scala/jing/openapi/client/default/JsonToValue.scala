@@ -1,7 +1,7 @@
 package jing.openapi.client.default
 
 import io.circe.{Json, JsonObject}
-import jing.openapi.client.default.Result.Failure.SchemaViolation
+import jing.openapi.client.default.Result.schemaViolation
 import jing.openapi.model.{Arr, Obj, Oops, Schema, Schematic, Value}
 import jing.openapi.model.Schematic.{Array, I32, I64, S, B, Object}
 import libretto.lambda.util.SingletonType
@@ -25,42 +25,42 @@ object JsonToValue {
             json.asNumber match
               case Some(jsonNumber) =>
                 jsonNumber.toInt match
-                  case Some(n) => Result.Success(Value.int32(n))
-                  case None => SchemaViolation(s"Expected a 32-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
+                  case Some(n) => Result.Succeeded(Value.int32(n))
+                  case None => schemaViolation(s"Expected a 32-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
               case None =>
-                SchemaViolation(s"Expected JSON number, got ${json.name}. At ${jsonLoc.printLoc}")
+                schemaViolation(s"Expected JSON number, got ${json.name}. At ${jsonLoc.printLoc}")
 
           case I64() =>
             json.asNumber match
               case Some(jsonNumber) =>
                 jsonNumber.toLong match
-                  case Some(n) => Result.Success(Value.int64(n))
-                  case None => SchemaViolation(s"Expected a 64-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
+                  case Some(n) => Result.Succeeded(Value.int64(n))
+                  case None => schemaViolation(s"Expected a 64-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
               case None =>
-                SchemaViolation(s"Expected JSON number, got ${json.name}. At ${jsonLoc.printLoc}")
+                schemaViolation(s"Expected JSON number, got ${json.name}. At ${jsonLoc.printLoc}")
 
           case S() =>
             json.asString match
-              case Some(s) => Result.Success(Value.str(s))
-              case None => SchemaViolation(s"Expected JSON string, got ${json.name}. At ${jsonLoc.printLoc}")
+              case Some(s) => Result.Succeeded(Value.str(s))
+              case None => schemaViolation(s"Expected JSON string, got ${json.name}. At ${jsonLoc.printLoc}")
 
           case B() =>
             json.asBoolean match
-              case Some(b) => Result.Success(Value.bool(b))
-              case None => SchemaViolation(s"Expected JSON boolean, got ${json.name}. At ${jsonLoc.printLoc}")
+              case Some(b) => Result.Succeeded(Value.bool(b))
+              case None => schemaViolation(s"Expected JSON boolean, got ${json.name}. At ${jsonLoc.printLoc}")
 
           case Array(elemSchema) =>
             json.asArray match
               case Some(jsonElems) => decodeArray(elemSchema, jsonLoc, jsonElems)
-              case None => SchemaViolation(s"Expected JSON array, got ${json.name}. At ${jsonLoc.printLoc}")
+              case None => schemaViolation(s"Expected JSON array, got ${json.name}. At ${jsonLoc.printLoc}")
 
           case o: Object[value, props] =>
             json.asObject match
               case Some(obj) => decodeObject(o, jsonLoc, obj)
-              case None => SchemaViolation(s"Expected JSON object, got ${json.name}. At ${jsonLoc.printLoc}")
+              case None => schemaViolation(s"Expected JSON object, got ${json.name}. At ${jsonLoc.printLoc}")
 
       case Schema.Unsupported(message) =>
-        Result.Success(Value.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
+        Result.Succeeded(Value.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
     }
 
   // Note: Ignores any superfluous fields, for better or worse.
@@ -71,7 +71,7 @@ object JsonToValue {
   ): Result[Value[Obj[Props]]] =
     schema match
       case Object.Empty() =>
-        Result.Success(Value.obj)
+        Result.Succeeded(Value.obj)
       case Object.Snoc(init, pname, ptype) =>
         Result.map2(
           decodeObject(init, jsonLoc, json),
@@ -103,7 +103,7 @@ object JsonToValue {
           jsonLoc.dropInPlace(2)
         }
       case None =>
-        SchemaViolation(s"Missing property ${propName.value}. At ${jsonLoc.printLoc}")
+        schemaViolation(s"Missing property ${propName.value}. At ${jsonLoc.printLoc}")
 
   private def decodePropOpt[K <: String, V](
     propName: SingletonType[K],
@@ -122,7 +122,7 @@ object JsonToValue {
           jsonLoc.dropInPlace(2)
         }
       case None =>
-        Result.Success(None)
+        Result.Succeeded(None)
 
   private def decodeArray[T](
     elemSchema: Schema[T],
@@ -137,13 +137,13 @@ object JsonToValue {
         jsonLoc.push(s"[$i]")
         try {
           decodeAt(elemSchema, jsonLoc, json) match
-            case Result.Success(t) => builder += t
-            case e: Result.Failure => boundary.break(e)
+            case Result.Succeeded(t) => builder += t
+            case Result.Failed(e) => boundary.break(Result.Failed(e))
         } finally {
           jsonLoc.pop()
         }
       }
-      Result.Success(Value.Array(builder.result))
+      Result.Succeeded(Value.Array(builder.result))
     }
   }
 
