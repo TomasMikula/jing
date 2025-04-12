@@ -83,13 +83,7 @@ object Value {
   case class BoolValue(b: Boolean) extends Value[Bool]
   case class Array[T](elems: IArray[Value[T]]) extends Value[Arr[T]]
 
-  sealed trait Object[Ps] extends Value[Obj[Ps]] {
-    def set[T](propName: String, value: Value[T]): Value[Obj[Ps || propName.type :: T]] =
-      Object.ObjExt(this, propName, value)
-
-    def set(propName: String, value: String): Value[Obj[Ps || propName.type :: Str]] =
-      Object.ObjExt(this, propName, StringValue(value))
-  }
+  sealed trait Object[Ps] extends Value[Obj[Ps]]
 
   object Object {
     case object ObjEmpty extends Value.Object[Void]
@@ -120,18 +114,6 @@ object Value {
       v: Option[Value[V]],
     ): Value[Obj[Base || K :? V]] =
       ObjExtOpt(asObject(base), k, v)
-
-    extension [Init, K <: String, V](value: Object[Init || K :: V])
-      def unsnoc: (Object[Init], Value[V]) =
-        value match
-          case ObjExt(init, lastName, lastValue) => (init, lastValue)
-
-    extension [Init, K <: String, V](value: Object[Init || K :? V])
-      @targetName("unsnocOpt")
-      def unsnoc: (Object[Init], Option[Value[V]]) =
-        value match
-          case ObjExtOpt(init, lastName, lastValue) => (init, lastValue)
-
   }
 
   case class DiscUnion[As](
@@ -180,7 +162,7 @@ object Value {
   def int32(i: Int): Value[Int32] = Value.Int32Value(i)
   def int64(i: Long): Value[Int64] = Value.Int64Value(i)
   def bool(b: Boolean): Value[Bool] = Value.BoolValue(b)
-  def obj: Value.Object[Void] = Value.Object.ObjEmpty
+  def obj: Value[Obj[Void]] = Value.Object.ObjEmpty
   def arr[T](elems: Value[T]*): Value[Arr[T]] = Value.Array(IArray(elems*))
 
   type ToRightAssoc[Props, Acc] = Props match
@@ -190,7 +172,7 @@ object Value {
   def obj[Props](
     f: ObjectBuilder[Void, ToRightAssoc[Props, Void]] => ObjectBuilder[Props, Void],
   ): Value[Obj[Props]] =
-    f(obj).result
+    f(Object.ObjEmpty).result
 
   opaque type ObjectBuilder[Acc, Remaining] = Value.Object[Acc]
   extension [Acc](b: ObjectBuilder[Acc, {}])
@@ -269,7 +251,13 @@ object Value {
   }
 
   extension [Ps](value: Value[Obj[Ps]]) {
-    def asObject: Value.Object[Ps] =
+    def set[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :: T]] =
+      Object.ObjExt(value.asObject, k, v)
+
+    def set(k: String, v: String): Value[Obj[Ps || k.type :: Str]] =
+      Object.ObjExt(value.asObject, k, StringValue(v))
+
+    private def asObject: Value.Object[Ps] =
       value match
         case o: Value.Object[ps] => o
 
@@ -283,6 +271,17 @@ object Value {
             case Some(v) => m0.updated(k, v)
             case None    => m0
   }
+
+  extension [Init, K <: String, V](value: Value[Obj[Init || K :: V]])
+    def unsnoc: (Value[Obj[Init]], Value[V]) =
+      value match
+        case Object.ObjExt(init, lastName, lastValue) => (init, lastValue)
+
+  extension [Init, K <: String, V](value: Value[Obj[Init || K :? V]])
+    @targetName("unsnocOpt")
+    def unsnoc: (Value[Obj[Init]], Option[Value[V]]) =
+      value match
+        case Object.ObjExtOpt(init, lastName, lastValue) => (init, lastValue)
 
   extension [Cases](value: Value[DiscriminatedUnion[Cases]]) {
     def asDiscriminatedUnion: Value.DiscUnion[Cases] =

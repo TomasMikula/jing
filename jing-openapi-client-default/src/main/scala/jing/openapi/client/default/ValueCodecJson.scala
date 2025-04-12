@@ -37,7 +37,7 @@ object ValueCodecJson {
             builder += ']'
           case o: Object[schema, props] =>
             builder += '{'
-            encodeObjectProps(o, Value.asObject(value), builder)
+            encodeObjectProps(o, value, builder)
             builder += '}'
 
       case Schema.Unsupported(message) =>
@@ -47,7 +47,7 @@ object ValueCodecJson {
 
   private def encodeObjectProps[Props](
     schema: Schematic.Object[Schema, Props],
-    value: Value.Object[Props],
+    value: Value[Obj[Props]],
     builder: StringBuilder,
   ): Boolean =
     schema match
@@ -55,13 +55,13 @@ object ValueCodecJson {
         false
       case s: Object.Snoc[schema, init, pname, ptype] =>
         summon[Props =:= (init || pname :: ptype)]
-        val (vInit, vLast) = Value.Object.unsnoc[init, pname, ptype](value)
+        val (vInit, vLast) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
         appendProp(s.ptype, s.pname.value, vLast, propsWritten, builder)
         true
       case s: Object.SnocOpt[schema, init, pname, ptype] =>
         summon[Props =:= (init || pname :? ptype)]
-        val (vInit, vLastOpt) = Value.Object.unsnoc[init, pname, ptype](value)
+        val (vInit, vLastOpt) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
         vLastOpt match
           case None =>

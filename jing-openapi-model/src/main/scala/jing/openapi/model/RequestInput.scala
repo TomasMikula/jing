@@ -46,7 +46,6 @@ object RequestInput {
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
         import Value.Object.{ObjEmpty, ObjExt}
         (value: Value[Obj[Void || "params" :: Obj[ps] || "body" :: b]])
-          .asObject
           .unsnoc match
             case (init, body) =>
               init.unsnoc match
