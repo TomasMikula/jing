@@ -24,17 +24,23 @@ type DiscriminatorOf[Cases] =
     case s :: t => s
     case init || last => DiscriminatorOf[init] | LabelOf[last]
 
-given BiInjective[||] with {
-  override def unapply[A, B, X, Y](ev: (A || B) =:= (X || Y)): (A =:= X, B =:= Y) =
-    ev match { case TypeEq(Refl()) => (summon, summon) }
+object || {
+  given BiInjective[||] with {
+    override def unapply[A, B, X, Y](ev: (A || B) =:= (X || Y)): (A =:= X, B =:= Y) =
+      ev match { case TypeEq(Refl()) => (summon, summon) }
+  }
 }
 
-given BiInjective[::] with {
-  override def unapply[A, B, X, Y](ev: A :: B =:= X :: Y): (A =:= X, B =:= Y) =
-    ev match { case TypeEq(Refl()) => (summon, summon) }
+object :: {
+  given BiInjective[::] with {
+    override def unapply[A, B, X, Y](ev: A :: B =:= X :: Y): (A =:= X, B =:= Y) =
+      ev match { case TypeEq(Refl()) => (summon, summon) }
+  }
 }
 
-given BiInjective[:?] with {
-  override def unapply[A, B, X, Y](ev: A :? B =:= X :? Y): (A =:= X, B =:= Y) =
-    ev match { case TypeEq(Refl()) => (summon, summon) }
+object  :? {
+  given BiInjective[:?] with {
+    override def unapply[A, B, X, Y](ev: A :? B =:= X :? Y): (A =:= X, B =:= Y) =
+      ev match { case TypeEq(Refl()) => (summon, summon) }
+  }
 }

@@ -9,4 +9,7 @@ enum HttpMethod {
   case Options
   case Patch
   case Trace
+
+  def nameUpperCase: String =
+    this.toString.toUpperCase
 }

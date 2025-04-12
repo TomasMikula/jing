@@ -4,6 +4,7 @@ sealed trait HttpThunk[O] {
   type InputType
 
   def path: String
+  def method: HttpMethod
   def input: RequestInput[InputType]
 
   def runAgainst(apiBaseUrl: String)(using client: Client): client.Response[O] =
@@ -13,6 +14,7 @@ sealed trait HttpThunk[O] {
 object HttpThunk {
   case class Impl[I, O](
     path: String,
+    method: HttpMethod,
     input: RequestInput[I],
     responseSchema: ResponseSchema[O],
   ) extends HttpThunk[O] {
@@ -25,5 +27,5 @@ object HttpThunk {
     input: RequestInput[I],
     responseSchema: ResponseSchema[O],
   ): HttpThunk[O] =
-    Impl(path, input, responseSchema)
+    Impl(path, method, input, responseSchema)
 }

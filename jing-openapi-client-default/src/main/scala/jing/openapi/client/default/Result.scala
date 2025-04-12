@@ -1,6 +1,7 @@
 package jing.openapi.client.default
 
 import java.io.IOException
+import java.io.StringWriter
 
 sealed trait Result[T] {
   def flatMap[U](f: T => Result[U]): Result[U]
@@ -36,7 +37,14 @@ object Result {
     sealed trait NotSupported extends Failure
     case class UnsupportedContentType(statusCode: Int, contentType: String, body: String) extends NotSupported
 
-    case class UnexpectedError(thrown: Throwable) extends Failure
+    case class UnexpectedError(thrown: Throwable) extends Failure {
+      override def toString(): String =
+        val builder = new StringWriter()
+        builder.append("Unexpected error: ")
+        builder.append(thrown.getMessage())
+        thrown.printStackTrace(new java.io.PrintWriter(builder))
+        builder.toString()
+    }
   }
 
   def ioError[T](thrown: IOException): Result[T] = Failed(Failure.IOError(thrown))

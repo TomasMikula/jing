@@ -361,7 +361,7 @@ object ModelToScalaAst {
     s match
       case Schematic.Object.Empty() =>
         M.pure(
-          Exists(Rel.refl[{}], (Type.of[{}], N.pure('{ Schematic.Object.Empty() })))
+          Exists(Rel.refl[Void], (Type.of[Void], N.pure('{ Schematic.Object.Empty() })))
         )
       case snoc @ Schematic.Object.Snoc(init, pname, ptype) =>
         quotedObjectSnocSchematicRelAA(snoc, f)

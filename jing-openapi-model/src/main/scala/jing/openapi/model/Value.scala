@@ -4,6 +4,7 @@ import libretto.lambda.Items1Named
 import libretto.lambda.Items1Named.Member
 import libretto.lambda.util.{SingletonType, TypeEq}
 import libretto.lambda.util.TypeEq.Refl
+import scala.annotation.targetName
 
 sealed trait Value[T] {
   def show: String =
@@ -56,7 +57,7 @@ sealed trait Value[T] {
         }
         go(o)
         b.append("}")
-      case Sum(underlying) =>
+      case DiscUnion(underlying) =>
         b.append(underlying.label)
         b.append("(")
         underlying.value.show(b)
@@ -91,7 +92,7 @@ object Value {
   }
 
   object Object {
-    case object ObjEmpty extends Value.Object[{}]
+    case object ObjEmpty extends Value.Object[Void]
     case class ObjExt[Init, PropName <: String, PropType](
       init: Object[Init],
       lastName: PropName,
@@ -103,7 +104,7 @@ object Value {
       lastValue: Option[Value[PropType]],
     ) extends Value.Object[Init || PropName :? PropType]
 
-    def empty: Value[Obj[{}]] =
+    def empty: Value[Obj[Void]] =
       ObjEmpty
 
     def extend[Base, K <: String, V](
@@ -119,31 +120,52 @@ object Value {
       v: Option[Value[V]],
     ): Value[Obj[Base || K :? V]] =
       ObjExtOpt(asObject(base), k, v)
+
+    extension [Init, K <: String, V](value: Object[Init || K :: V])
+      def unsnoc: (Object[Init], Value[V]) =
+        value match
+          case ObjExt(init, lastName, lastValue) => (init, lastValue)
+
+    extension [Init, K <: String, V](value: Object[Init || K :? V])
+      @targetName("unsnocOpt")
+      def unsnoc: (Object[Init], Option[Value[V]]) =
+        value match
+          case ObjExtOpt(init, lastName, lastValue) => (init, lastValue)
+
   }
 
-  case class Sum[As](
-    value: Items1Named.Sum[||, ::, Value, As]
+  case class DiscUnion[As](
+    underlying: Items1Named.Sum[||, ::, Value, As],
   ) extends Value[DiscriminatedUnion[As]] {
-    def discriminator: DiscriminatorOf[As] =
-      discriminatorImpl(value.tag)
+    opaque type Label <: String = underlying.Label
+    opaque type ValueType = underlying.Case
 
-    private def discriminatorImpl[Lbl, A, Cases](member: Member[||, ::, Lbl, A, Cases]): DiscriminatorOf[Cases] = {
+    def discriminator: (Label IsCaseOf As) { type Type = ValueType } =
+      IsCaseOf.fromMember(underlying.tag)
+
+    def value: Value[ValueType] = underlying.value
+    def label: Label = underlying.tag.label.value
+
+    def discriminatorValue: Label & DiscriminatorOf[As] =
+      discriminatorValueImpl(underlying.tag)
+
+    private def discriminatorValueImpl[Lbl, A, Cases](member: Member[||, ::, Lbl, A, Cases]): Lbl & DiscriminatorOf[Cases] = {
       import Member.{InInit, InLast, Single}
 
       member match
         case last: InLast[sep, of, init, lbl, a] =>
-          summon[(init || lbl :: a) =:= Cases].substituteCo[DiscriminatorOf](
+          summon[(init || lbl :: a) =:= Cases].substituteCo[[cs] =>> Lbl & DiscriminatorOf[cs]](
             last.label.value
           )
         case Single(label) =>
-          summon[(Lbl :: A) =:= Cases].substituteCo[DiscriminatorOf](
+          summon[(Lbl :: A) =:= Cases].substituteCo[[cs] =>> Lbl & DiscriminatorOf[cs]](
             label.value: DiscriminatorOf[Lbl :: A]
           )
         case i: InInit[sep, of, lbl, a, init, lblB, b] =>
-          summon[(init || lblB :: b) =:= Cases].substituteCo[DiscriminatorOf](
-            (discriminatorImpl[lbl, a, init](i.i)
-              : DiscriminatorOf[init])
-              : DiscriminatorOf[init || lblB :: b]
+          summon[(init || lblB :: b) =:= Cases].substituteCo[[cs] =>> Lbl & DiscriminatorOf[cs]](
+            (discriminatorValueImpl[lbl, a, init](i.i)
+              : Lbl & DiscriminatorOf[init])
+              : Lbl & DiscriminatorOf[init || lblB :: b]
           )
     }
   }
@@ -158,13 +180,61 @@ object Value {
   def int32(i: Int): Value[Int32] = Value.Int32Value(i)
   def int64(i: Long): Value[Int64] = Value.Int64Value(i)
   def bool(b: Boolean): Value[Bool] = Value.BoolValue(b)
-  def obj: Value.Object[{}] = Value.Object.ObjEmpty
+  def obj: Value.Object[Void] = Value.Object.ObjEmpty
+  def arr[T](elems: Value[T]*): Value[Arr[T]] = Value.Array(IArray(elems*))
+
+  type ToRightAssoc[Props, Acc] = Props match
+    case init || last => ToRightAssoc[init, last || Acc]
+    case Void => Acc
+
+  def obj[Props](
+    f: ObjectBuilder[Void, ToRightAssoc[Props, Void]] => ObjectBuilder[Props, Void],
+  ): Value[Obj[Props]] =
+    f(obj).result
+
+  opaque type ObjectBuilder[Acc, Remaining] = Value.Object[Acc]
+  extension [Acc](b: ObjectBuilder[Acc, {}])
+    def result: Value[Obj[Acc]] = b
+  extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :: A || Tail])
+    def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :: A, Tail] =
+      Object.ObjExt[Acc, Label, A](b, propName, value)
+  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Str || Tail])
+    def set(propName: Label, value: String): ObjectBuilder[Acc || Label :: Str, Tail] =
+      Object.ObjExt[Acc, Label, Str](b, propName, Value.str(value))
+
+  extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :? A || Tail]) {
+    @targetName("setOpt")
+    def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :? A, Tail] =
+      Object.ObjExtOpt[Acc, Label, A](b, propName, Some(value))
+
+    @targetName("setOpt")
+    def set(propName: Label, value: String)(using A =:= Str): ObjectBuilder[Acc || Label :? Str, Tail] =
+      Object.ObjExtOpt[Acc, Label, Str](b, propName, Some(Value.str(value)))
+
+    @targetName("setOpt")
+    def set(propName: Label, value: Long)(using A =:= Int64): ObjectBuilder[Acc || Label :? Int64, Tail] =
+      Object.ObjExtOpt[Acc, Label, Int64](b, propName, Some(Value.int64(value)))
+
+    def skip(propName: Label): ObjectBuilder[Acc || Label :? A, Tail] =
+      Object.ObjExtOpt[Acc, Label, A](b, propName, None)
+  }
 
   def discriminatedUnion[Label <: String, A, As](
     discriminator: Member[||, ::, Label, A, As],
     value: Value[A],
   ): Value[DiscriminatedUnion[As]] =
-    Sum(Items1Named.Sum.Value(discriminator, value))
+    DiscUnion(Items1Named.Sum.Value(discriminator, value))
+
+  def discriminatedUnion[Cases](
+    f: DiscriminatedUnionBuilder[Cases] => Value[DiscriminatedUnion[Cases]],
+  ): Value[DiscriminatedUnion[Cases]] =
+    f(())
+
+  opaque type DiscriminatedUnionBuilder[Cases] = Unit
+  extension [Cases](b: DiscriminatedUnionBuilder[Cases]) {
+    def pick[C <: String](using i: C IsCaseOf Cases)(value: Value[i.Type]): Value[DiscriminatedUnion[Cases]] =
+      discriminatedUnion(IsCaseOf.toMember(i), value)
+  }
 
   def oops[S <: String](message: SingletonType[S], details: Option[String]): Value[Oops[S]] =
     Oopsy(message, details)
@@ -172,30 +242,58 @@ object Value {
   def oops(message: String, details: Option[String] = None): Value[Oops[message.type]] =
     oops(SingletonType(message), details)
 
-  def toMap[Ps](value: Value[Obj[Ps]]): Map[String, Value[?]] =
-    value match
-      case Object.ObjEmpty => Map.empty
-      case Object.ObjExt(init, k, v) => toMap(init).updated(k, v)
-      case Object.ObjExtOpt(init, k, vOpt) =>
-        val m0 = toMap(init)
-        vOpt match
-          case Some(v) => m0.updated(k, v)
-          case None    => m0
+  extension (value: Value[Str])
+    def stringValue: String =
+      value match
+        case StringValue(s) => s
 
-  def asObject[Ps](value: Value[Obj[Ps]]): Value.Object[Ps] =
-    value match
-      case o: Value.Object[ps] => o
+  extension (value: Value[Int64])
+    def longValue: Long =
+      value match
+        case Int64Value(n) => n
+
+  extension (value: Value[Int32])
+    def intValue: Int =
+      value match
+        case Int32Value(n) => n
+
+  extension (value: Value[Bool])
+    def booleanValue: Boolean =
+      value match
+        case BoolValue(b) => b
+
+  extension [T](value: Value[Arr[T]]) {
+    def asArray: IArray[Value[T]] =
+      value match
+        case Value.Array(elems) => elems
+  }
+
+  extension [Ps](value: Value[Obj[Ps]]) {
+    def asObject: Value.Object[Ps] =
+      value match
+        case o: Value.Object[ps] => o
+
+    def toMap: Map[String, Value[?]] =
+      value match
+        case Object.ObjEmpty => Map.empty
+        case Object.ObjExt(init, k, v) => init.toMap.updated(k, v)
+        case Object.ObjExtOpt(init, k, vOpt) =>
+          val m0 = init.toMap
+          vOpt match
+            case Some(v) => m0.updated(k, v)
+            case None    => m0
+  }
 
   extension [Cases](value: Value[DiscriminatedUnion[Cases]]) {
-    private def asSum: Value.Sum[Cases] =
+    def asDiscriminatedUnion: Value.DiscUnion[Cases] =
       value match
-        case s @ Sum(_) => s
+        case s @ DiscUnion(_) => s
 
     def discriminator: DiscriminatorOf[Cases] =
-      asSum.discriminator
+      asDiscriminatedUnion.discriminatorValue
 
     def assertCase[C <: DiscriminatorOf[Cases]](using ev: C IsCaseOf Cases): Value[ev.Type] =
-      val s = value.asSum.value
+      val s = value.asDiscriminatedUnion.underlying
       assertCaseImpl(IsCaseOf.toMember(ev), s.tag, s.value)
   }
 

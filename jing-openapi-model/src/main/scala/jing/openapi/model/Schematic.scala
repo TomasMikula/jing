@@ -81,7 +81,7 @@ object Schematic {
           }
   }
   object Object {
-    case class Empty[F[_]]() extends Object[F, {}]
+    case class Empty[F[_]]() extends Object[F, Void]
 
     case class Snoc[F[_], Init, PropName <: String, PropType](
       init: Object[F, Init],
@@ -95,7 +95,7 @@ object Schematic {
       ptype: F[PropType],
     ) extends Object[F, Init || PropName :? PropType]
 
-    def empty[F[_]]: Object[F, {}] =
+    def empty[F[_]]: Object[F, Void] =
       Empty()
 
     def snoc[F[_], Init, PropType](

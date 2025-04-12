@@ -316,6 +316,7 @@ private[openapi] object SwaggerToScalaAst {
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[T]])] = {
     import qr.*
+    import scala.collection.immutable.::
 
     val paramSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]] =
       Option(op.getParameters())
@@ -407,6 +408,7 @@ private[openapi] object SwaggerToScalaAst {
     Quotes,
     Applicative[F],
   ): Option[Exists[[Ts] =>> (Type[Ts], F[Expr[Items1Named.Product[||, ::, Schema, Ts]]])]] =
+    import scala.collection.immutable.::
     Option(nullableContent)
       .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
       .collect { case x :: xs => NonEmptyList(x, xs) }
@@ -534,6 +536,7 @@ private[openapi] object SwaggerToScalaAst {
         acc: Items1Named.Product[||, ::, F, Init],
         remaining: List[(String, A)],
       ): Items1Named.Product[||, ::, F, ?] =
+        import scala.collection.immutable.::
         remaining match
           case Nil => acc
           case (tag, a) :: as =>

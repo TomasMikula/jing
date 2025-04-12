@@ -17,7 +17,7 @@ object Schema {
   def arr[A](sa: Schema[A]): Schema[Arr[A]] =
     Proper(tic.Array(sa))
 
-  def objectEmpty: Schema[Obj[{}]] =
+  def objectEmpty: Schema[Obj[Void]] =
     Proper(tic.Object.Empty())
 
   def objectSnoc[Init, PropName <: String, PropType](
