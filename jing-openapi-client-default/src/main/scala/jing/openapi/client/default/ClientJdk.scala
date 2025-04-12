@@ -75,9 +75,8 @@ class ClientJdk extends Client {
       case Body(schema, value)                        => Some(encodeBody(schema, value))
       case ParamsAndBody(params, Body(schema, value)) => Some(encodeBody(schema, value))
 
-  private def encodeBody[T](schema: BodySchema[T], value: Value[T]): (SupportedMimeType, String) =
+  private def encodeBody[T](schema: BodySchema.NonEmpty[T], value: Value[T]): (SupportedMimeType, String) =
     schema match
-      case BodySchema.EmptyBody => throw IllegalArgumentException("Empty body schema") // TODO: make unrepresentable
       case schemaVariants: BodySchema.Variants[cases] =>
         val duValue =
           Value.asDiscriminatedUnion(value: Value[DiscriminatedUnion[cases]])
@@ -114,7 +113,7 @@ class ClientJdk extends Client {
     response: HttpResponse[String],
   ): Result[Value[T]] =
     schema match
-      case BodySchema.EmptyBody =>
+      case BodySchema.Empty =>
         Result.Succeeded(Value.unit)
       case BodySchema.Variants(byMediaType) =>
         response.headers().firstValue("Content-Type").toScala match

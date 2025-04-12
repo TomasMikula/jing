@@ -324,9 +324,9 @@ private[openapi] object SwaggerToScalaAst {
         .collect { case p :: ps => NonEmptyList(p, ps) }
         .map(parametersSchema(schemas, _))
 
-    val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema[B]]])]] =
+    val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]] =
       Option(op.getRequestBody())
-        .map(requestBodySchema(schemas, _))
+        .flatMap(requestBodySchema(schemas, _))
 
     val reqSchema: Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
       requestSchema(paramSchema, reqBodySchema)
@@ -378,7 +378,7 @@ private[openapi] object SwaggerToScalaAst {
   )(using
     Quotes,
     Applicative[F],
-  ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
+  ): Option[Exists[[T] =>> (Type[T], F[Expr[BodySchema.NonEmpty[T]]])]] =
     bodySchema(schemas, requestBody.getContent())
 
   private def bodySchema[F[_]](
@@ -387,38 +387,42 @@ private[openapi] object SwaggerToScalaAst {
   )(using
     q: Quotes,
     F: Applicative[F],
-  ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
-    bodyVariants(schemas, nullableContent) match
-      case Some(ex @ Indeed((t, fe))) =>
+  ): Option[Exists[[T] =>> (Type[T], F[Expr[BodySchema.NonEmpty[T]]])]] =
+    nonEmptyEntryList(nullableContent)
+      .map { bodySchema(schemas, _) }
+
+  def bodySchema[F[_]](
+    schemas: SchemaLookup[F],
+    mediaTypes: NonEmptyList[(String, io.swagger.v3.oas.models.media.MediaType)],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[BodySchema.NonEmpty[T]]])] =
+    bodyVariants(schemas, mediaTypes) match
+      case ex @ Indeed((t, fe)) =>
         given Type[ex.T] = t
         Indeed((
           Type.of[DiscriminatedUnion[ex.T]],
           fe map { e => '{ BodySchema.Variants($e) } }
         ))
-      case None =>
-        Indeed((
-          Type.of[Unit],
-          F.pure('{ BodySchema.EmptyBody })
-        ))
+
+  private def nonEmptyEntryList[K, V](nullableMap: java.util.Map[K, V]): Option[NonEmptyList[(K, V)]] =
+    Option(nullableMap)
+      .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
+      .collect { case xs @ NonEmptyList(_, _) => xs }
 
   private def bodyVariants[F[_]](
     schemas: SchemaLookup[F],
-    nullableContent: io.swagger.v3.oas.models.media.Content,
+    mediaTypes: NonEmptyList[(String, io.swagger.v3.oas.models.media.MediaType)],
   )(using
     Quotes,
     Applicative[F],
-  ): Option[Exists[[Ts] =>> (Type[Ts], F[Expr[Items1Named.Product[||, ::, Schema, Ts]]])]] =
-    import scala.collection.immutable.::
-    Option(nullableContent)
-      .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
-      .collect { case x :: xs => NonEmptyList(x, xs) }
-      .map { _.mapToProduct[[x] =>> ProtoSchema.Oriented](mt => Exists(protoSchema(mt.getSchema()).orientBackward)) }
-      .map { xs =>
-        quotedProductUnrelatedAA(
-          xs,
-          [A] => ps => quotedSchemaFromProto[F](ps),
-        ).run(schemas)
-      }
+  ): Exists[[Ts] =>> (Type[Ts], F[Expr[Items1Named.Product[||, ::, Schema, Ts]]])] =
+    quotedProductUnrelatedAA(
+      mediaTypes
+        .mapToProduct[[x] =>> ProtoSchema.Oriented](mt => Exists(protoSchema(mt.getSchema()).orientBackward)),
+        [A] => ps => quotedSchemaFromProto[F](ps),
+    ).run(schemas)
 
   private def responseBodyByStatus[F[_]](
     schemas: SchemaLookup[F],
@@ -429,7 +433,7 @@ private[openapi] object SwaggerToScalaAst {
   ): Exists[[T] =>> (Type[T], F[Expr[ResponseSchema[T]]])] =
     quotedProductUnrelatedAA(
       byStatus.asProduct,
-      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchema(sl, apiResponse)),
+      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchemaOrEmpty(sl, apiResponse)),
     ).run(schemas) match {
       case x @ Indeed((tp, bs)) =>
         given Type[x.T] = tp
@@ -439,18 +443,20 @@ private[openapi] object SwaggerToScalaAst {
         ))
     }
 
-  private def responseBodySchema[F[_]](
+  private def responseBodySchemaOrEmpty[F[_]](
     schemas: SchemaLookup[F],
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
   )(using
-    Quotes,
-    Applicative[F],
+    q: Quotes,
+    F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
-    bodySchema(schemas, apiResponse.getContent())
+    bodySchema(schemas, apiResponse.getContent()) match
+      case Some(Indeed((tp, exp))) => Indeed((tp, exp.widen))
+      case None => Indeed((Type.of[Unit], F.pure('{ BodySchema.Empty })))
 
   private def requestSchema[F[_]](
     paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
-    reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema[B]]])]],
+    reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]],
   )(using
     q: Quotes,
     F: Applicative[F],
@@ -460,7 +466,7 @@ private[openapi] object SwaggerToScalaAst {
         given pst: Type[ps.T] = tps
         given bt:  Type[b.T]  = tb
         Indeed((
-          Type.of[Obj[{} || "params" :: Obj[ps.T] || "body" :: b.T]],
+          Type.of[Obj[Void || "params" :: Obj[ps.T] || "body" :: b.T]],
           F.map2(sps, sb) { (sps, sb) => '{ RequestSchema.ParamsAndBody($sps, $sb) } },
         ))
       case (Some(ps @ Indeed((tps, sps))), None) =>

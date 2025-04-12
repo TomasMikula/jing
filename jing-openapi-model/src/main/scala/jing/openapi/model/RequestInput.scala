@@ -7,14 +7,14 @@ enum RequestInput[I] {
   case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Obj[Ps]]
 
   case Body(
-    schema: BodySchema[I],
+    schema: BodySchema.NonEmpty[I],
     value: Value[I],
   )
 
   case ParamsAndBody[Ps, B](
     params: Value[Obj[Ps]],
     body: Body[B],
-  ) extends RequestInput[Obj[{} || "params" :: Obj[Ps] || "body" :: B]]
+  ) extends RequestInput[Obj[Void || "params" :: Obj[Ps] || "body" :: B]]
 
   def queryParams: Option[Map[String, Value[?]]] =
     this match
@@ -45,8 +45,12 @@ object RequestInput {
         Body(schema, value)
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
         import Value.Object.{ObjEmpty, ObjExt}
-        value match
-          case ObjExt(ObjExt(ObjEmpty, "params", params), "body", body) =>
-            ParamsAndBody(params, Body(pb.body, body))
+        (value: Value[Obj[Void || "params" :: Obj[ps] || "body" :: b]])
+          .asObject
+          .unsnoc match
+            case (init, body) =>
+              init.unsnoc match
+                case (ObjEmpty, params) =>
+                  ParamsAndBody(params, Body(pb.body, body))
 
 }

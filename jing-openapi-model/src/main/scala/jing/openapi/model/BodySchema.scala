@@ -2,12 +2,15 @@ package jing.openapi.model
 
 import libretto.lambda.Items1Named
 
-enum BodySchema[A] {
+sealed trait BodySchema[A]
 
-  case EmptyBody extends BodySchema[Unit]
+object BodySchema {
+  case object Empty extends BodySchema[Unit]
 
-  case Variants[Cases](
+  sealed trait NonEmpty[A] extends BodySchema[A]
+
+  case class Variants[Cases](
     byMediaType: Items1Named.Product[||, ::, Schema, Cases],
-  ) extends BodySchema[DiscriminatedUnion[Cases]]
+  ) extends BodySchema.NonEmpty[DiscriminatedUnion[Cases]]
 
 }

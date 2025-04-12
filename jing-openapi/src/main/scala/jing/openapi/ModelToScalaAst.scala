@@ -54,17 +54,17 @@ object ModelToScalaAst {
         given Type[ps] = t
         (Type.of[Obj[ps]], '{ RequestSchema.Params($s) })
       case RequestSchema.Body(schema) =>
-        val (t, s) = quotedBodySchema(schema)
+        val (t, s) = quotedBodySchemaNonEmpty(schema)
         given Type[T] = t
         (t, '{ RequestSchema.Body($s)})
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
-        summon[T =:= Obj[{} || "params" :: Obj[ps] || "body" :: b]]
+        summon[T =:= Obj[Void || "params" :: Obj[ps] || "body" :: b]]
         val (pst, ps) = quotedObjectSchema(pb.params)
-        val (bt, b) = quotedBodySchema(pb.body)
+        val (bt, b) = quotedBodySchemaNonEmpty(pb.body)
         given Type[ps] = pst
         given Type[b] = bt
         (
-          Type.of[Obj[{} || "params" :: Obj[ps] || "body" :: b]],
+          Type.of[Obj[Void || "params" :: Obj[ps] || "body" :: b]],
           '{ RequestSchema.ParamsAndBody($ps, $b) },
         )
 
@@ -89,8 +89,17 @@ object ModelToScalaAst {
     Quotes,
   ): (Type[T], Expr[BodySchema[T]]) =
     s match
-      case BodySchema.EmptyBody =>
-        (Type.of[Unit], '{ BodySchema.EmptyBody })
+      case BodySchema.Empty =>
+        (Type.of[Unit], '{ BodySchema.Empty })
+      case ne: BodySchema.NonEmpty[t] =>
+        quotedBodySchemaNonEmpty(ne)
+
+  def quotedBodySchemaNonEmpty[T](
+    s: BodySchema.NonEmpty[T],
+  )(using
+    Quotes,
+  ): (Type[T], Expr[BodySchema.NonEmpty[T]]) =
+    s match
       case v: BodySchema.Variants[cases] =>
         val (t, e) =
           quotedProduct(
