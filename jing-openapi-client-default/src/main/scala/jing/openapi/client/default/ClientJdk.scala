@@ -78,10 +78,14 @@ class ClientJdk extends Client {
   private def encodeBody[T](schema: BodySchema.NonEmpty[T], value: Value[T]): (SupportedMimeType, String) =
     schema match
       case schemaVariants: BodySchema.Variants[cases] =>
-        val duValue =
-          Value.asDiscriminatedUnion(value: Value[DiscriminatedUnion[cases]])
-        val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(duValue.discriminator))
-        encodeBody(schema, duValue.discriminatorValue, duValue.value)
+        (value: Value[DiscriminatedUnion[cases]]).handleDiscriminatedUnion(
+          [Label <: String, A] => (
+            discriminator: (Label IsCaseOf cases) { type Type = A },
+            value: Value[A],
+          ) =>
+            val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(discriminator))
+            encodeBody(schema, discriminator.label, value)
+        )
 
   private def encodeBody[T](schema: Schema[T], mimeType: String, value: Value[T]): (SupportedMimeType, String) =
     mimeType match
@@ -156,21 +160,42 @@ class ClientJdk extends Client {
     urlEncode(stringify(v))
 
   private def stringify[T](v: Value[T]): String =
-    import Value.*
+    import Value.Motif.*
     v match
+      case Value.Proper(w) => w match
         case StringValue(s) => s
         case Int64Value(i) => i.toString
         case Int32Value(i) => i.toString
         case BoolValue(b)  => b.toString
-        case o: Object[props] =>
+        case Array(elem) =>
+          throw IllegalArgumentException("URL-encoding an array is not supported")
+        case DiscUnion(_) =>
+          throw IllegalArgumentException("URL-encoding a discriminated union is not supported")
+        case Uno =>
+          throw IllegalArgumentException("URL-encoding Unit is not supported")
+        case o: Object[Value, props] =>
           // TODO: objects in query parameters should either
           //  - be disallowed by construction; or
           //  - have an associated encoder
-          Value.toMap(o)
-            .view.mapValues(stringify(_))
-            .iterator
-            .map { case (k, v) => s"$k:$v" }
-            .mkString("{", ",", "}")
+          // What follows is wrong
+
+          val builder = new StringBuilder
+          builder += '{'
+
+          var nonEmpty = false
+          o.foreachProperty:
+            [K <: String, V] => (k, v) =>
+              if (nonEmpty) builder += ','
+              builder ++= k
+              builder += ':'
+              builder ++= stringify(v)
+              nonEmpty = true
+
+          builder += '}'
+          builder.result()
+      case oops @ Value.Oopsy(_, _) =>
+        // TODO: make unrepresentable
+        throw IllegalArgumentException(s"Cannot stringify $oops")
 
   extension [A](a: A)
     private def |>[B](f: A => B): B = f(a)

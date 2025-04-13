@@ -19,6 +19,11 @@ object IsCaseOf {
     // Avoid asInstanceOf after libretto-lambda 0.3.5 is released:
     // c.typeWitness.substituteCo[Member[||, ::, Label, _, Cases]](c)
 
+  extension [Label, Cases](i: IsCaseOf[Label, Cases]) {
+    def label: Label & String =
+      i.label.value
+  }
+
   given isSingleCaseOf[Label <: String, A](using
     label: SingletonType[Label],
   ): (IsCaseOf[Label, Label :: A] { type Type = A }) =

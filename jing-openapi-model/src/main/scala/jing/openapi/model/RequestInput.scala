@@ -44,12 +44,11 @@ object RequestInput {
       case RequestSchema.Body(schema) =>
         Body(schema, value)
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
-        import Value.Object.{ObjEmpty, ObjExt}
         (value: Value[Obj[Void || "params" :: Obj[ps] || "body" :: b]])
           .unsnoc match
             case (init, body) =>
               init.unsnoc match
-                case (ObjEmpty, params) =>
+                case (_, params) =>
                   ParamsAndBody(params, Body(pb.body, body))
 
 }

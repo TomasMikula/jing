@@ -169,14 +169,14 @@ object ValueCodecJson {
           decodeObject(init, jsonLoc, json),
           decodeProp(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
-          Value.Object.extend(init, pname.value, last)
+          init.extend(pname, last)
         }
       case Object.SnocOpt(init, pname, ptype) =>
         Result.map2(
           decodeObject(init, jsonLoc, json),
           decodePropOpt(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
-          Value.Object.extendOpt(init, pname.value, last)
+          init.extendOpt(pname, last)
         }
 
   private def decodeProp[K <: String, V](
@@ -235,7 +235,7 @@ object ValueCodecJson {
           jsonLoc.pop()
         }
       }
-      Result.Succeeded(Value.Array(builder.result))
+      Result.Succeeded(Value.arr(builder.result))
     }
   }
 
