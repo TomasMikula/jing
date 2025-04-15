@@ -8,7 +8,7 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{BodySchema, Client, DiscriminatedUnion, IsCaseOf, HttpThunk, RequestInput, ResponseSchema, Schema, Value}
+import jing.openapi.model.{BodySchema, Client, DiscriminatedUnion, IsCaseOf, HttpThunk, RequestInput, ResponseSchema, Schema, Value, ValueMotif}
 import libretto.lambda.util.Exists.Indeed
 
 class ClientJdk extends Client {
@@ -106,7 +106,7 @@ class ClientJdk extends Client {
         items.getOption(code.toString) match
           case Some(Indeed((i, s))) =>
             parseBody(code, s, response)
-              .map(Value.discriminatedUnion(i, _))
+              .map(Value.discriminatedUnion(IsCaseOf.fromMember(i), _))
           case None =>
             Result.unexpectedStatusCode(code, response.body())
   }
@@ -125,7 +125,7 @@ class ClientJdk extends Client {
             byMediaType.getOption(contentType) match
               case Some(Indeed((i, s))) =>
                 parseBody(statusCode, s, contentType, response.body())
-                  .map(Value.discriminatedUnion(i, _))
+                  .map(Value.discriminatedUnion(IsCaseOf.fromMember(i), _))
               case None =>
                 Result.unexpectedContentType(statusCode, contentType, response.body())
           case None =>
@@ -160,7 +160,7 @@ class ClientJdk extends Client {
     urlEncode(stringify(v))
 
   private def stringify[T](v: Value[T]): String =
-    import Value.Motif.*
+    import ValueMotif.*
     v match
       case Value.Proper(w) => w match
         case StringValue(s) => s

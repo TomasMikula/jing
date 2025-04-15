@@ -44,3 +44,7 @@ object  :? {
       ev match { case TypeEq(Refl()) => (summon, summon) }
   }
 }
+
+type ToRightAssoc[Props, Acc] = Props match
+  case init || last => ToRightAssoc[init, last || Acc]
+  case Void => Acc
