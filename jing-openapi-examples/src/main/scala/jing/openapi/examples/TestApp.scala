@@ -50,7 +50,7 @@ object TestApp extends App {
       println(s"Failed with: $e")
     case Succeeded(value) =>
       val d = value.discriminator
-      val body: Value[Arr[Pet]] =
+      val body: Value.Lenient[Arr[Pet]] =
         value
           .assertCase["200"]
           .assertCase["application/json"]

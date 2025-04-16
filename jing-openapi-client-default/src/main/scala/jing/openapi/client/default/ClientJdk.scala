@@ -13,7 +13,7 @@ import libretto.lambda.util.Exists.Indeed
 
 class ClientJdk extends Client {
 
-  override type Response[T] = Result[Value[T]]
+  override type Response[T] = Result[Value.Lenient[T]]
 
   private type SupportedMimeType = "application/json"
 
@@ -99,14 +99,14 @@ class ClientJdk extends Client {
   private def parseResponse[T](
     schema: ResponseSchema[T],
     response: HttpResponse[String],
-  ): Result[Value[T]] = {
+  ): Result[Value.Lenient[T]] = {
     val code = response.statusCode()
     schema.match
       case ResponseSchema.ByStatusCode(items) =>
         items.getOption(code.toString) match
           case Some(Indeed((i, s))) =>
             parseBody(code, s, response)
-              .map(Value.discriminatedUnion(IsCaseOf.fromMember(i), _))
+              .map(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), _))
           case None =>
             Result.unexpectedStatusCode(code, response.body())
   }
@@ -115,17 +115,17 @@ class ClientJdk extends Client {
     statusCode: Int,
     schema: BodySchema[T],
     response: HttpResponse[String],
-  ): Result[Value[T]] =
+  ): Result[Value.Lenient[T]] =
     schema match
       case BodySchema.Empty =>
-        Result.Succeeded(Value.unit)
+        Result.Succeeded(Value.Lenient.unit)
       case BodySchema.Variants(byMediaType) =>
         response.headers().firstValue("Content-Type").toScala match
           case Some(contentType) =>
             byMediaType.getOption(contentType) match
               case Some(Indeed((i, s))) =>
                 parseBody(statusCode, s, contentType, response.body())
-                  .map(Value.discriminatedUnion(IsCaseOf.fromMember(i), _))
+                  .map(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), _))
               case None =>
                 Result.unexpectedContentType(statusCode, contentType, response.body())
           case None =>
@@ -136,7 +136,7 @@ class ClientJdk extends Client {
     schema: Schema[T],
     contentType: String,
     body: String,
-  ): Result[Value[T]] =
+  ): Result[Value.Lenient[T]] =
     contentType match
       case "application/json" =>
         io.circe.parser.parse(body) match
@@ -150,8 +150,8 @@ class ClientJdk extends Client {
   private def jsonParsingFailure[T](code: Int, e: ParsingFailure): Result[T] =
     Result.parseError(code, s"JSON parsing failure: ${e.message}", e.underlying)
 
-  private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value[T]] =
-    ValueCodecJson.decode(schema, body)
+  private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
+    ValueCodecJson.decodeLenient(schema, body)
 
   private def urlEncode(s: String): String =
     s // TODO
@@ -161,41 +161,37 @@ class ClientJdk extends Client {
 
   private def stringify[T](v: Value[T]): String =
     import ValueMotif.*
-    v match
-      case Value.Proper(w) => w match
-        case StringValue(s) => s
-        case Int64Value(i) => i.toString
-        case Int32Value(i) => i.toString
-        case BoolValue(b)  => b.toString
-        case Array(elem) =>
-          throw IllegalArgumentException("URL-encoding an array is not supported")
-        case DiscUnion(_) =>
-          throw IllegalArgumentException("URL-encoding a discriminated union is not supported")
-        case Uno =>
-          throw IllegalArgumentException("URL-encoding Unit is not supported")
-        case o: Object[Value, props] =>
-          // TODO: objects in query parameters should either
-          //  - be disallowed by construction; or
-          //  - have an associated encoder
-          // What follows is wrong
+    v.underlying match
+      case StringValue(s) => s
+      case Int64Value(i) => i.toString
+      case Int32Value(i) => i.toString
+      case BoolValue(b)  => b.toString
+      case Array(elem) =>
+        throw IllegalArgumentException("URL-encoding an array is not supported")
+      case DiscUnion(_) =>
+        throw IllegalArgumentException("URL-encoding a discriminated union is not supported")
+      case Uno =>
+        throw IllegalArgumentException("URL-encoding Unit is not supported")
+      case o: Object[Value, props] =>
+        // TODO: objects in query parameters should either
+        //  - be disallowed by construction; or
+        //  - have an associated encoder
+        // What follows is wrong
 
-          val builder = new StringBuilder
-          builder += '{'
+        val builder = new StringBuilder
+        builder += '{'
 
-          var nonEmpty = false
-          o.foreachProperty:
-            [K <: String, V] => (k, v) =>
-              if (nonEmpty) builder += ','
-              builder ++= k
-              builder += ':'
-              builder ++= stringify(v)
-              nonEmpty = true
+        var nonEmpty = false
+        o.foreachProperty:
+          [K <: String, V] => (k, v) =>
+            if (nonEmpty) builder += ','
+            builder ++= k
+            builder += ':'
+            builder ++= stringify(v)
+            nonEmpty = true
 
-          builder += '}'
-          builder.result()
-      case oops @ Value.Oopsy(_, _) =>
-        // TODO: make unrepresentable
-        throw IllegalArgumentException(s"Cannot stringify $oops")
+        builder += '}'
+        builder.result()
 
   extension [A](a: A)
     private def |>[B](f: A => B): B = f(a)
