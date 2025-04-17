@@ -7,10 +7,10 @@ import libretto.lambda.util.{Applicative, Exists, SingletonType}
  * @tparam F representation of nested schemas. In [[Schema]],
  *   [[Schematic]] is used with `F` recursively instantiated to [[Schema]] itself.
  */
-sealed trait Schematic[F[_], A] {
-  import Schematic.*
+sealed trait SchemaMotif[F[_], A] {
+  import SchemaMotif.*
 
-  def translate[G[_]](h: [X] => F[X] => G[X]): Schematic[G, A] =
+  def translate[G[_]](h: [X] => F[X] => G[X]): SchemaMotif[G, A] =
     this match
       case I32() => I32()
       case I64() => I64()
@@ -20,7 +20,7 @@ sealed trait Schematic[F[_], A] {
       case Object.Empty() => Object.Empty()
       case Object.Snoc(init, pname, ptype) => Object.Snoc(asObject(init.translate(h)), pname, h(ptype))
 
-  def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): Schematic[G, ?] =
+  def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
       case I32() => I32()
       case I64() => I64()
@@ -29,7 +29,7 @@ sealed trait Schematic[F[_], A] {
       case Array(elem) => Array(h(elem).value)
       case o: Object[f, ps] => o.wipeTranslateObj(h).value
 
-  def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[Schematic[H, ?]] =
+  def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[SchemaMotif[H, ?]] =
     this match
       case I32() => G.pure(I32())
       case I64() => G.pure(I64())
@@ -40,15 +40,15 @@ sealed trait Schematic[F[_], A] {
 
 }
 
-object Schematic {
-  case class I32[F[_]]() extends Schematic[F, Int32]
-  case class I64[F[_]]() extends Schematic[F, Int64]
-  case class S[F[_]]() extends Schematic[F, Str]
-  case class B[F[_]]() extends Schematic[F, Bool]
-  case class Array[F[_], T](elem: F[T]) extends Schematic[F, Arr[T]]
+object SchemaMotif {
+  case class I32[F[_]]() extends SchemaMotif[F, Int32]
+  case class I64[F[_]]() extends SchemaMotif[F, Int64]
+  case class S[F[_]]() extends SchemaMotif[F, Str]
+  case class B[F[_]]() extends SchemaMotif[F, Bool]
+  case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 
-  sealed trait Object[F[_], Ps] extends Schematic[F, Obj[Ps]] {
-    private[Schematic] def wipeTranslateObj[G[_]](h: [X] => F[X] => Exists[G]): Exists[[X] =>> Schematic[G, Obj[X]]] =
+  sealed trait Object[F[_], Ps] extends SchemaMotif[F, Obj[Ps]] {
+    private[SchemaMotif] def wipeTranslateObj[G[_]](h: [X] => F[X] => Exists[G]): Exists[[X] =>> SchemaMotif[G, Obj[X]]] =
       this match
         case Object.Empty() =>
           Exists(Object.Empty())
@@ -57,11 +57,11 @@ object Schematic {
         case Object.SnocOpt(init, pname, ptype) =>
           Exists(Object.SnocOpt(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
 
-    private[Schematic] def wipeTranslateObjA[G[_], H[_]](
+    private[SchemaMotif] def wipeTranslateObjA[G[_], H[_]](
       h: [X] => F[X] => G[Exists[H]],
     )(using
       G: Applicative[G],
-    ): G[Exists[[X] =>> Schematic[H, Obj[X]]]] =
+    ): G[Exists[[X] =>> SchemaMotif[H, Obj[X]]]] =
       this match
         case Object.Empty() =>
           G.pure(Exists(Object.Empty()))
@@ -99,21 +99,21 @@ object Schematic {
       Empty()
 
     def snoc[F[_], Init, PropType](
-      init: Schematic[F, Obj[Init]],
+      init: SchemaMotif[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
     ): Object[F, Init || pname.type :: PropType] =
       Snoc(asObject(init), SingletonType(pname), ptype)
 
     def snocOpt[F[_], Init, PropType](
-      init: Schematic[F, Obj[Init]],
+      init: SchemaMotif[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
     ): Object[F, Init || pname.type :? PropType] =
       SnocOpt(asObject(init), SingletonType(pname), ptype)
   }
 
-  def asObject[F[_], Ps](s: Schematic[F, Obj[Ps]]): Schematic.Object[F, Ps] =
+  def asObject[F[_], Ps](s: SchemaMotif[F, Obj[Ps]]): SchemaMotif.Object[F, Ps] =
     s match
       case o: Object[F, Ps] => o
 }

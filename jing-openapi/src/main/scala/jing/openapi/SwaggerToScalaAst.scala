@@ -18,7 +18,7 @@ import jing.openapi.model.{
   ResponseSchema,
   Schema,
   SchemaCompanion,
-  Schematic,
+  SchemaMotif,
   Value,
 }
 import libretto.lambda.Items1Named
@@ -362,10 +362,10 @@ private[openapi] object SwaggerToScalaAst {
     q: Quotes,
     F: Applicative[F],
   ): Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])] = {
-    val protoSchematic: Schematic.Object[[x] =>> ProtoSchema.Oriented, ?] =
-      params.foldLeft[Schematic.Object[[x] =>> ProtoSchema.Oriented, ?]](Schematic.Object.Empty()) { (acc, p) =>
+    val protoSchematic: SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?] =
+      params.foldLeft[SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?]](SchemaMotif.Object.Empty()) { (acc, p) =>
         val pSchema = protoSchema(p.getSchema()).orientBackward
-        Schematic.Object.snoc(acc, p.getName(), pSchema)
+        SchemaMotif.Object.snoc(acc, p.getName(), pSchema)
       }
 
     quotedObjectSchemaFromProto(protoSchematic)

@@ -2,8 +2,8 @@ package jing.openapi.client.default
 
 import io.circe.{Json, JsonObject}
 import jing.openapi.client.default.Result.schemaViolation
-import jing.openapi.model.{||, ::, :?, Arr, Obj, Oops, Schema, Schematic, Value}
-import jing.openapi.model.Schematic.{Array, I32, I64, S, B, Object}
+import jing.openapi.model.{||, ::, :?, Arr, Obj, Oops, Schema, SchemaMotif, Value}
+import jing.openapi.model.SchemaMotif.{Array, I32, I64, S, B, Object}
 import libretto.lambda.util.SingletonType
 import scala.util.boundary
 import scala.collection.mutable.Stack
@@ -45,7 +45,7 @@ object ValueCodecJson {
     }
 
   private def encodeObjectProps[Props](
-    schema: Schematic.Object[Schema, Props],
+    schema: SchemaMotif.Object[Schema, Props],
     value: Value[Obj[Props]],
     builder: StringBuilder,
   ): Boolean =
@@ -156,7 +156,7 @@ object ValueCodecJson {
 
   // Note: Ignores any superfluous fields, for better or worse.
   private def decodeObjectLenient[Props](
-    schema: Schematic[Schema, Obj[Props]],
+    schema: SchemaMotif[Schema, Obj[Props]],
     jsonLoc: Stack[String],
     json: JsonObject,
   ): Result[Value.Lenient[Obj[Props]]] =

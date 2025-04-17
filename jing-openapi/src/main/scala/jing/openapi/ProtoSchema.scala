@@ -1,12 +1,12 @@
 package jing.openapi
 
-import jing.openapi.model.{Obj, Schematic}
+import jing.openapi.model.{Obj, SchemaMotif}
 import libretto.lambda.util.Exists
 import scala.annotation.tailrec
 
 /** Schema with unresolved references to other schemas. */
 private[openapi] enum ProtoSchema {
-  case Proper(value: Schematic[[A] =>> ProtoSchema, ?])
+  case Proper(value: SchemaMotif[[A] =>> ProtoSchema, ?])
   case Ref(schemaName: String)
   case Unsupported(details: String)
 
@@ -22,31 +22,31 @@ private[openapi] enum ProtoSchema {
 }
 
 private[openapi] object ProtoSchema {
-  import jing.openapi.model.{Schematic as tic}
+  import jing.openapi.model.{SchemaMotif as motif}
 
-  def i32: ProtoSchema = Proper(tic.I32())
-  def i64: ProtoSchema = Proper(tic.I64())
-  def str: ProtoSchema = Proper(tic.S())
-  def bool: ProtoSchema = Proper(tic.B())
+  def i32: ProtoSchema = Proper(motif.I32())
+  def i64: ProtoSchema = Proper(motif.I64())
+  def str: ProtoSchema = Proper(motif.S())
+  def bool: ProtoSchema = Proper(motif.B())
 
   def arr(elemSchema: ProtoSchema): ProtoSchema =
-    Proper(tic.Array(elemSchema))
+    Proper(motif.Array(elemSchema))
 
   def obj(props: List[(String, Boolean, ProtoSchema)]): ProtoSchema = {
     @tailrec
     def go(
-      acc: tic.Object[[A] =>> ProtoSchema, ?],
+      acc: motif.Object[[A] =>> ProtoSchema, ?],
       remaining: List[(String, Boolean, ProtoSchema)],
-    ): tic.Object[[A] =>> ProtoSchema, ?] =
+    ): motif.Object[[A] =>> ProtoSchema, ?] =
       remaining match
         case Nil =>
           acc
         case (n, isRequired, s) :: ps =>
           if isRequired
-          then go(tic.Object.snoc(acc, n, s), ps)
-          else go(tic.Object.snocOpt(acc, n, s), ps)
+          then go(motif.Object.snoc(acc, n, s), ps)
+          else go(motif.Object.snocOpt(acc, n, s), ps)
 
-    Proper(go(tic.Object.Empty(), props))
+    Proper(go(motif.Object.Empty(), props))
   }
 
   /** Schema with unresolved references categorized as backward or forward,
@@ -54,7 +54,7 @@ private[openapi] object ProtoSchema {
    *  indicates cyclic references).
    */
   enum Oriented {
-    case Proper(value: Schematic[[A] =>> ProtoSchema.Oriented, ?])
+    case Proper(value: SchemaMotif[[A] =>> ProtoSchema.Oriented, ?])
     case BackwardRef(schemaName: String)
     case ForwardRef(schemaName: String, cycle: List[String])
     case UnresolvedRef(schemaName: String)
