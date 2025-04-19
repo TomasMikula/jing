@@ -29,9 +29,11 @@ object ClientEndpoint {
       def queryParams(params: Value[Qs]): InputBuilder[Acc || "params" :: Qs, Rest] =
         b.set("params", params)
 
-    extension [Acc, B, Rest](b: InputBuilder[Acc, "body" :: B || Rest])
-      def body(body: Value[B]): InputBuilder[Acc || "body" :: B, Rest] =
-        b.set("body", body)
+    extension [Acc, Bs, Rest](b: InputBuilder[Acc, "body" :: DiscriminatedUnion[Bs] || Rest])
+      def body[MimeType <: String](using ev: MimeType IsCaseOf Bs)(
+        body: Value[ev.Type],
+      ): InputBuilder[Acc || "body" :: DiscriminatedUnion[Bs], Rest] =
+        b.set("body", Value.discriminatedUnion[MimeType, ev.Type, Bs](ev, body))
 
     extension [Acc](b: InputBuilder[Acc, Void])
       def result: Value[Obj[Acc]] =
