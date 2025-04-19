@@ -23,20 +23,20 @@ object ModelToScalaAst {
 
   }
 
-  def quotedHttpEndpoint[I, O](
-    x: HttpEndpoint[I, O],
+  def quotedHttpEndpoint[Is, O](
+    x: HttpEndpoint[Is, O],
   )(using
     Quotes,
-  ): (Type[HttpEndpoint[I, O]], Expr[HttpEndpoint[I, O]]) =
+  ): (Type[HttpEndpoint[Is, O]], Expr[HttpEndpoint[Is, O]]) =
     val HttpEndpoint(path, meth, req, resp) = x
     val (reqType, reqExpr) = quotedRequestSchema(req)
     val (respType, respExpr) = quotedResponseSchema(resp)
 
-    given Type[I] = reqType
+    given Type[Is] = reqType
     given Type[O] = respType
 
     (
-      Type.of[HttpEndpoint[I, O]],
+      Type.of[HttpEndpoint[Is, O]],
       '{ HttpEndpoint(${Expr(path)}, ${Expr(meth)}, ${reqExpr}, ${respExpr}) },
     )
 
@@ -47,26 +47,26 @@ object ModelToScalaAst {
   ): (Type[T], Expr[RequestSchema[T]]) =
     x match
       case RequestSchema.NoInput =>
-        summon[T =:= Obj[Void]]
-        (Type.of[Obj[Void]], '{ RequestSchema.NoInput })
+        summon[T =:= Void]
+        (Type.of[Void], '{ RequestSchema.NoInput })
       case ps: RequestSchema.Params[ps] =>
-        summon[T =:= Obj[Void || "params" :: Obj[ps]]]
+        summon[T =:= (Void || "params" :: Obj[ps])]
         val (t, s) = quotedObjectSchema(ps.schema)
         given Type[ps] = t
-        (Type.of[Obj[Void || "params" :: Obj[ps]]], '{ RequestSchema.Params($s) })
+        (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Params($s) })
       case b: RequestSchema.Body[b] =>
-        summon[T =:= Obj[Void || "body" :: b]]
+        summon[T =:= (Void || "body" :: b)]
         val (t, s) = quotedBodySchemaNonEmpty(b.schema)
         given Type[b] = t
-        (Type.of[Obj[Void || "body" :: b]], '{ RequestSchema.Body($s)})
+        (Type.of[Void || "body" :: b], '{ RequestSchema.Body($s)})
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
-        summon[T =:= Obj[Void || "params" :: Obj[ps] || "body" :: b]]
+        summon[T =:= (Void || "params" :: Obj[ps] || "body" :: b)]
         val (pst, ps) = quotedObjectSchema(pb.params)
         val (bt, b) = quotedBodySchemaNonEmpty(pb.body)
         given Type[ps] = pst
         given Type[b] = bt
         (
-          Type.of[Obj[Void || "params" :: Obj[ps] || "body" :: b]],
+          Type.of[Void || "params" :: Obj[ps] || "body" :: b],
           '{ RequestSchema.ParamsAndBody($ps, $b) },
         )
 

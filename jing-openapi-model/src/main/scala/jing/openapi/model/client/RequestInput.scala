@@ -6,20 +6,21 @@ import jing.openapi.model.*
  *
  * @tparam MimeType limits the possible MIME types of request body.
  *   Example: `"application/json" | "application/x-www-form-urlencoded"`
+ * @tparam Is list of request inputs, separated by [[||]]
  */
-enum RequestInput[+MimeType, I] {
-  case NoInput extends RequestInput[Nothing, Obj[Void]]
+enum RequestInput[+MimeType, Is] {
+  case NoInput extends RequestInput[Nothing, Void]
 
-  case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Nothing, Obj[Void || "params" :: Obj[Ps]]]
+  case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Nothing, Void || "params" :: Obj[Ps]]
 
   case BodyOnly[MimeType, B](
     value: RequestInput.Body[MimeType, B],
-  ) extends RequestInput[MimeType, Obj[Void || "body" :: B]]
+  ) extends RequestInput[MimeType, Void || "body" :: B]
 
   case ParamsAndBody[Ps, MimeType, B](
     params: Value[Obj[Ps]],
     body: RequestInput.Body[MimeType, B],
-  ) extends RequestInput[MimeType, Obj[Void || "params" :: Obj[Ps] || "body" :: B]]
+  ) extends RequestInput[MimeType, Void || "params" :: Obj[Ps] || "body" :: B]
 
   def queryParams: Option[Map[String, Value[?]]] =
     this match
@@ -60,7 +61,7 @@ object RequestInput {
 
   def apply[T](
     schema: RequestSchema[T],
-    value: Value[T],
+    value: Value[Obj[T]],
   ): RequestInput[?, T] =
     schema match
       case RequestSchema.NoInput =>

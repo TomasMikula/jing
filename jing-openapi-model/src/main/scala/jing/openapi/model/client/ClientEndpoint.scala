@@ -2,19 +2,19 @@ package jing.openapi.model.client
 
 import jing.openapi.model.*
 
-class ClientEndpoint[I, O](
-  underlying: HttpEndpoint[I, O],
+class ClientEndpoint[Is, O](
+  underlying: HttpEndpoint[Is, O],
 ) {
   import ClientEndpoint.InputBuilder
 
-  def withInput(in: Value[I]): HttpThunk[O] =
+  def withInput(in: Value[Obj[Is]]): HttpThunk[O] =
     import underlying.{path, method, requestSchema, responseSchema}
     HttpThunk(path, method, RequestInput(requestSchema, in), responseSchema)
 
-  def withInput[Ps](using ev: I =:= Obj[Ps])(
-    f: InputBuilder[Void, ToRightAssoc[Ps, Void]] => InputBuilder[Ps, Void],
+  def withInput(
+    f: InputBuilder[Void, ToRightAssoc[Is, Void]] => InputBuilder[Is, Void],
   ): HttpThunk[O] =
-    val inputValue = ev.substituteContra(f(InputBuilder[Ps]).result)
+    val inputValue = f(InputBuilder[Is]).result
     withInput(inputValue)
 }
 
