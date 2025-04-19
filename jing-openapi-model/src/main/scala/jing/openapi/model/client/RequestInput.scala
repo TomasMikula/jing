@@ -8,13 +8,13 @@ import jing.openapi.model.*
  *   Example: `"application/json" | "application/x-www-form-urlencoded"`
  */
 enum RequestInput[+MimeType, I] {
-  case NoInput extends RequestInput[Nothing, Unit]
+  case NoInput extends RequestInput[Nothing, Obj[Void]]
 
-  case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Nothing, Obj[Ps]]
+  case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Nothing, Obj[Void || "params" :: Obj[Ps]]]
 
   case BodyOnly[MimeType, B](
     value: RequestInput.Body[MimeType, B],
-  ) extends RequestInput[MimeType, B]
+  ) extends RequestInput[MimeType, Obj[Void || "body" :: B]]
 
   case ParamsAndBody[Ps, MimeType, B](
     params: Value[Obj[Ps]],
@@ -66,9 +66,13 @@ object RequestInput {
       case RequestSchema.NoInput =>
         NoInput
       case ps: RequestSchema.Params[ps] =>
-        Params[ps](value)
-      case RequestSchema.Body(schema) =>
-        BodyOnly(Body(schema, value))
+        val params: Value[Obj[ps]] =
+          (value: Value[Obj[Void || "params" :: Obj[ps]]]).unsnoc._2
+        Params[ps](params)
+      case b: RequestSchema.Body[b] =>
+        val body: Value[b] =
+          (value: Value[Obj[Void || "body" :: b]]).unsnoc._2
+        BodyOnly(Body(b.schema, body))
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
         (value: Value[Obj[Void || "params" :: Obj[ps] || "body" :: b]])
           .unsnoc match

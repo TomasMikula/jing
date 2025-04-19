@@ -17,18 +17,21 @@ object TestApp extends App {
       .`/pet`
       .Post
       .interpret(using DefaultClient)
-      .withInput(
-        discriminatedUnion:
-          _.pick["application/json"](
-            Pet(obj(_
-              .set("id", 12345L)
-              .set("name", "Cookie")
-              .set("category", Category(obj(_.skip("id").set("name", "cuties"))))
-              .set("photoUrls", arr(str("https://cookie.com/pic.jpg")))
-              .skip("tags")
-              .set("status", "available")
-            ))
-          )
+      .withInput(_
+        .set(
+          "body",
+          discriminatedUnion:
+            _.pick["application/json"](
+              Pet(obj(_
+                .set("id", 12345L)
+                .set("name", "Cookie")
+                .set("category", Category(obj(_.skip("id").set("name", "cuties"))))
+                .set("photoUrls", arr(str("https://cookie.com/pic.jpg")))
+                .skip("tags")
+                .set("status", "available")
+              ))
+            )
+        )
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 
@@ -41,9 +44,11 @@ object TestApp extends App {
       .`/pet/findByStatus`
       .Get
       .interpret(using DefaultClient)
-      .withInput(
-        obj
-          .set("status", "available")
+      .withInput(_
+        .set(
+          "params",
+          obj.set("status", "available")
+        )
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 

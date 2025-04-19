@@ -45,6 +45,10 @@ trait ValueModule[Value[_]] {
   }
 
   opaque type ObjectBuilder[Acc, Remaining] = ValueMotif.Object[Value, Acc]
+  object ObjectBuilder {
+    def apply[Ps]: ObjectBuilder[Void, ToRightAssoc[Ps, Void]] =
+      ValueMotif.Object.ObjEmpty
+  }
 
   extension [Acc](b: ObjectBuilder[Acc, Void])
     def result: Value[Obj[Acc]] = fromMotif(b)
@@ -77,7 +81,7 @@ trait ValueModule[Value[_]] {
   def obj[Props](
     f: ObjectBuilder[Void, ToRightAssoc[Props, Void]] => ObjectBuilder[Props, Void],
   ): Value[Obj[Props]] =
-    f(ValueMotif.Object.ObjEmpty).result
+    f(ObjectBuilder[Props]).result
 
   def discriminatedUnion[Label <: String, A, As](
     discriminator: (Label IsCaseOf As) { type Type = A },

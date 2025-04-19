@@ -47,16 +47,18 @@ object ModelToScalaAst {
   ): (Type[T], Expr[RequestSchema[T]]) =
     x match
       case RequestSchema.NoInput =>
-        summon[Unit =:= T]
-        (Type.of[Unit], '{ RequestSchema.NoInput })
+        summon[T =:= Obj[Void]]
+        (Type.of[Obj[Void]], '{ RequestSchema.NoInput })
       case ps: RequestSchema.Params[ps] =>
+        summon[T =:= Obj[Void || "params" :: Obj[ps]]]
         val (t, s) = quotedObjectSchema(ps.schema)
         given Type[ps] = t
-        (Type.of[Obj[ps]], '{ RequestSchema.Params($s) })
-      case RequestSchema.Body(schema) =>
-        val (t, s) = quotedBodySchemaNonEmpty(schema)
-        given Type[T] = t
-        (t, '{ RequestSchema.Body($s)})
+        (Type.of[Obj[Void || "params" :: Obj[ps]]], '{ RequestSchema.Params($s) })
+      case b: RequestSchema.Body[b] =>
+        summon[T =:= Obj[Void || "body" :: b]]
+        val (t, s) = quotedBodySchemaNonEmpty(b.schema)
+        given Type[b] = t
+        (Type.of[Obj[Void || "body" :: b]], '{ RequestSchema.Body($s)})
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
         summon[T =:= Obj[Void || "params" :: Obj[ps] || "body" :: b]]
         val (pst, ps) = quotedObjectSchema(pb.params)

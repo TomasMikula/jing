@@ -472,18 +472,18 @@ private[openapi] object SwaggerToScalaAst {
       case (Some(ps @ Indeed((tps, sps))), None) =>
         given Type[ps.T] = tps
         Indeed((
-          Type.of[Obj[ps.T]],
+          Type.of[Obj[Void || "params" :: Obj[ps.T]]],
           sps.map { sps => '{ RequestSchema.Params($sps) } },
         ))
       case (None, Some(b @ Indeed((tb, sb)))) =>
         given Type[b.T]  = tb
         Indeed((
-          Type.of[b.T],
+          Type.of[Obj[Void || "body" :: b.T]],
           sb.map { sb => '{ RequestSchema.Body($sb) } },
         ))
       case (None, None) =>
         Indeed((
-          Type.of[Unit],
+          Type.of[Obj[Void]],
           F.pure( '{ RequestSchema.NoInput } )
         ))
 
