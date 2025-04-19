@@ -5,7 +5,7 @@ import jing.openapi.model.*
 class ClientEndpoint[Is, O](
   underlying: HttpEndpoint[Is, O],
 ) {
-  import ClientEndpoint.InputBuilder
+  import ClientEndpoint.*
 
   def withInput(in: Value[Obj[Is]]): HttpThunk[O] =
     import underlying.{path, method, requestSchema, responseSchema}
@@ -16,6 +16,13 @@ class ClientEndpoint[Is, O](
   ): HttpThunk[O] =
     val inputValue = f(InputBuilder[Is]).result
     withInput(inputValue)
+
+  def queryParams[Qs, Rest](using ev: ToRightAssoc[Is, Void] =:= ("params" :: Qs || Rest))(
+    params: Value[Qs],
+  ): ClientEndpoint.RequestBuilder[Is, Void || "params" :: Qs, Rest, O] =
+    val inputBuilder: InputBuilder[Void, "params" :: Qs || Rest] =
+      ev.substituteCo(InputBuilder[Is])
+    RequestBuilder(this, inputBuilder.queryParams(params))
 }
 
 object ClientEndpoint {
@@ -38,5 +45,35 @@ object ClientEndpoint {
     extension [Acc](b: InputBuilder[Acc, Void])
       def result: Value[Obj[Acc]] =
         Value.result(b)
+  }
+
+  extension [Bs, O](endpoint: ClientEndpoint[Void || "body" :: DiscriminatedUnion[Bs], O])
+    def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
+      body: Value[i.Type],
+    ): HttpThunk[O] =
+      val input: Value[Obj[Void || "body" :: DiscriminatedUnion[Bs]]] =
+        Value.obj.set("body", Value.discriminatedUnion(i, body))
+      endpoint.withInput(input)
+
+  class RequestBuilder[Is, Acc, Remaining, O](
+    endpoint: ClientEndpoint[Is, O],
+    inputBuilder: InputBuilder[Acc, Remaining],
+  ) {
+    // TODO: queryParams
+
+    // TODO: body
+
+    def toRequest(using ev1: Acc =:= Is, ev2: Remaining =:= Void): HttpThunk[O] =
+      val input: Value[Obj[Is]] =
+        ev1.substituteCo[[x] =>> Value[Obj[x]]](ev2.substituteCo(inputBuilder).result)
+      endpoint.withInput(input)
+
+    def runAgainst(using Acc =:= Is, Remaining =:= Void)(
+      apiBaseUrl: String,
+    )(using
+      client: Client,
+    ): client.Response[O] = {
+      toRequest.runAgainst(apiBaseUrl)
+    }
   }
 }
