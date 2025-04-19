@@ -18,8 +18,7 @@ object TestApp extends App {
       .Post
       .interpret(using DefaultClient)
       .withInput(_
-        .set(
-          "body",
+        .body(
           discriminatedUnion:
             _.pick["application/json"](
               Pet(obj(_
@@ -45,8 +44,7 @@ object TestApp extends App {
       .Get
       .interpret(using DefaultClient)
       .withInput(_
-        .set(
-          "params",
+        .queryParams(
           obj.set("status", "available")
         )
       )
