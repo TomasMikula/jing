@@ -6,6 +6,6 @@ case class HttpEndpoint[I, O](
   requestSchema: RequestSchema[I],
   responseSchema: ResponseSchema[O],
 ) {
-  def withInput(in: Value[I]): HttpThunk[O] =
-    HttpThunk(path, method, RequestInput(requestSchema, in), responseSchema)
+  def interpret(using impl: EndpointInterpreter): impl.Endpoint[I, O] =
+    impl.interpret(this)
 }

@@ -1,4 +1,6 @@
-package jing.openapi.model
+package jing.openapi.model.client
+
+import jing.openapi.model.*
 
 /** Request data, i.e. request parameters and request body.
  *

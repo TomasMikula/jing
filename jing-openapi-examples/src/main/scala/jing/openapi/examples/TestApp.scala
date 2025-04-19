@@ -1,6 +1,6 @@
 package jing.openapi.examples
 
-import jing.openapi.client.default.given
+import jing.openapi.client.default.{instance as DefaultClient}
 import jing.openapi.client.default.Result.{Failed, Succeeded}
 import jing.openapi.model.*
 import jing.openapi.model.Value.{arr, discriminatedUnion, obj, str}
@@ -16,6 +16,7 @@ object TestApp extends App {
       .paths
       .`/pet`
       .Post
+      .interpret(using DefaultClient)
       .withInput(
         discriminatedUnion:
           _.pick["application/json"](
@@ -39,6 +40,7 @@ object TestApp extends App {
       .paths
       .`/pet/findByStatus`
       .Get
+      .interpret(using DefaultClient)
       .withInput(
         obj
           .set("status", "available")

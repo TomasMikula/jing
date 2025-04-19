@@ -1,4 +1,4 @@
 package jing.openapi.client.default
 
-given ClientJdk =
+given instance: ClientJdk =
   new ClientJdk

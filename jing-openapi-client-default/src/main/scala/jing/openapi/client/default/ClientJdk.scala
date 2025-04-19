@@ -8,7 +8,8 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{BodySchema, Client, DiscriminatedUnion, IsCaseOf, HttpThunk, RequestInput, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.{BodySchema, DiscriminatedUnion, IsCaseOf, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.client.{Client, HttpThunk, RequestInput}
 import libretto.lambda.util.Exists.Indeed
 
 class ClientJdk extends Client {
