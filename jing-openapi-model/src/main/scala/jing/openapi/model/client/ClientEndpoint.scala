@@ -12,12 +12,12 @@ class ClientEndpoint[Is, O](
     HttpThunk(path, method, RequestInput(requestSchema, in), responseSchema)
 
   def withInput(
-    f: InputBuilder[Void, ToRightAssoc[Is, Void]] => InputBuilder[Is, Void],
+    f: InputBuilder[Void, ToRightAssoc[Is]] => InputBuilder[Is, Void],
   ): HttpThunk[O] =
     val inputValue = f(InputBuilder[Is]).result
     withInput(inputValue)
 
-  def queryParams[Qs, Rest](using ev: ToRightAssoc[Is, Void] =:= ("params" :: Qs || Rest))(
+  def queryParams[Qs, Rest](using ev: ToRightAssoc[Is] =:= ("params" :: Qs || Rest))(
     params: Value[Qs],
   ): ClientEndpoint.RequestBuilder[Is, Void || "params" :: Qs, Rest, O] =
     val inputBuilder: InputBuilder[Void, "params" :: Qs || Rest] =
@@ -29,7 +29,7 @@ object ClientEndpoint {
   opaque type InputBuilder[Acc, Remaining] = Value.ObjectBuilder[Acc, Remaining]
 
   object InputBuilder {
-    private[ClientEndpoint] def apply[Ps]: InputBuilder[Void, ToRightAssoc[Ps, Void]] =
+    private[ClientEndpoint] def apply[Ps]: InputBuilder[Void, ToRightAssoc[Ps]] =
       Value.ObjectBuilder[Ps]
 
     extension [Acc, Qs, Rest](b: InputBuilder[Acc, "params" :: Qs || Rest])

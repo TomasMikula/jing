@@ -46,7 +46,7 @@ trait ValueModule[Value[_]] {
 
   opaque type ObjectBuilder[Acc, Remaining] = ValueMotif.Object[Value, Acc]
   object ObjectBuilder {
-    def apply[Ps]: ObjectBuilder[Void, ToRightAssoc[Ps, Void]] =
+    def apply[Ps]: ObjectBuilder[Void, ToRightAssoc[Ps]] =
       ValueMotif.Object.ObjEmpty
   }
 
@@ -79,7 +79,7 @@ trait ValueModule[Value[_]] {
   }
 
   def obj[Props](
-    f: ObjectBuilder[Void, ToRightAssoc[Props, Void]] => ObjectBuilder[Props, Void],
+    f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
   ): Value[Obj[Props]] =
     f(ObjectBuilder[Props]).result
 

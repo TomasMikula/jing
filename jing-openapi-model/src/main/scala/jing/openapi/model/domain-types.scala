@@ -45,6 +45,9 @@ object  :? {
   }
 }
 
-type ToRightAssoc[Props, Acc] = Props match
-  case init || last => ToRightAssoc[init, last || Acc]
+type ToRightAssoc[Props] =
+  ToRightAssocAcc[Props, Void]
+
+type ToRightAssocAcc[Props, Acc] = Props match
+  case init || last => ToRightAssocAcc[init, last || Acc]
   case Void => Acc
