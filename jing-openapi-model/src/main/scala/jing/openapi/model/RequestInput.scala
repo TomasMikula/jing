@@ -1,20 +1,23 @@
 package jing.openapi.model
 
-/** Request data, i.e. request parameters and request body. */
-enum RequestInput[I] {
-  case NoInput extends RequestInput[Unit]
+/** Request data, i.e. request parameters and request body.
+ *
+ * @tparam MimeType limits the possible MIME types of request body.
+ *   Example: `"application/json" | "application/x-www-form-urlencoded"`
+ */
+enum RequestInput[+MimeType, I] {
+  case NoInput extends RequestInput[Nothing, Unit]
 
-  case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Obj[Ps]]
+  case Params[Ps](value: Value[Obj[Ps]]) extends RequestInput[Nothing, Obj[Ps]]
 
-  case Body(
-    schema: BodySchema.NonEmpty[I],
-    value: Value[I],
-  )
+  case BodyOnly[MimeType, B](
+    value: RequestInput.Body[MimeType, B],
+  ) extends RequestInput[MimeType, B]
 
-  case ParamsAndBody[Ps, B](
+  case ParamsAndBody[Ps, MimeType, B](
     params: Value[Obj[Ps]],
-    body: Body[B],
-  ) extends RequestInput[Obj[Void || "params" :: Obj[Ps] || "body" :: B]]
+    body: RequestInput.Body[MimeType, B],
+  ) extends RequestInput[MimeType, Obj[Void || "params" :: Obj[Ps] || "body" :: B]]
 
   def queryParams: Option[Map[String, Value[?]]] =
     this match
@@ -22,7 +25,7 @@ enum RequestInput[I] {
         None
       case Params(value) =>
         Some(Value.toMap(value))
-      case Body(_, _) =>
+      case BodyOnly(_) =>
         None
       case ParamsAndBody(params, body) =>
         Some(Value.toMap(params))
@@ -30,19 +33,40 @@ enum RequestInput[I] {
 }
 
 object RequestInput {
+
+  enum Body[MimeType, B]:
+    case MimeVariant[MimeType, BodyType, SchemaVariants](
+      schema: BodySchema.NonEmpty[DiscriminatedUnion[SchemaVariants]],
+      variantSelector: (MimeType IsCaseOf SchemaVariants) { type Type = BodyType },
+      value: Value[BodyType],
+    ) extends Body[MimeType, DiscriminatedUnion[SchemaVariants]]
+
+  object Body {
+    def apply[B](
+      schema: BodySchema.NonEmpty[B],
+      value: Value[B],
+    ): Body[?, B] =
+      schema match
+        case vs: BodySchema.Variants[cases] =>
+          (value: Value[DiscriminatedUnion[cases]])
+            .handleDiscriminatedUnion { [Label <: String, A] => (i, va) =>
+              Body.MimeVariant[Label, A, cases](vs, i, va)
+            }
+  }
+
   import RequestInput.*
 
   def apply[T](
     schema: RequestSchema[T],
     value: Value[T],
-  ): RequestInput[T] =
+  ): RequestInput[?, T] =
     schema match
       case RequestSchema.NoInput =>
         NoInput
       case ps: RequestSchema.Params[ps] =>
         Params[ps](value)
       case RequestSchema.Body(schema) =>
-        Body(schema, value)
+        BodyOnly(Body(schema, value))
       case pb: RequestSchema.ParamsAndBody[ps, b] =>
         (value: Value[Obj[Void || "params" :: Obj[ps] || "body" :: b]])
           .unsnoc match

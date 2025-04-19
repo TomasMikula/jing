@@ -66,26 +66,22 @@ class ClientJdk extends Client {
     resp.flatMap(parseResponse(respSchema, _))
   }
 
-  private def encodeBody[T](input: RequestInput[T]): Option[(SupportedMimeType, String)] =
+  private def encodeBody[T](input: RequestInput[?, T]): Option[(SupportedMimeType, String)] =
     import RequestInput.*
 
     input match
-      case NoInput                                    => None
-      case Params(value)                              => None
-      case Body(schema, value)                        => Some(encodeBody(schema, value))
-      case ParamsAndBody(params, Body(schema, value)) => Some(encodeBody(schema, value))
+      case NoInput                     => None
+      case Params(value)               => None
+      case BodyOnly(body)              => Some(encodeBody(body))
+      case ParamsAndBody(params, body) => Some(encodeBody(body))
 
-  private def encodeBody[T](schema: BodySchema.NonEmpty[T], value: Value[T]): (SupportedMimeType, String) =
-    schema match
-      case schemaVariants: BodySchema.Variants[cases] =>
-        (value: Value[DiscriminatedUnion[cases]]).handleDiscriminatedUnion(
-          [Label <: String, A] => (
-            discriminator: (Label IsCaseOf cases) { type Type = A },
-            value: Value[A],
-          ) =>
-            val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(discriminator))
-            encodeBody(schema, discriminator.label, value)
-        )
+  private def encodeBody[T](body: RequestInput.Body[?, T]): (SupportedMimeType, String) =
+    body match
+      case RequestInput.Body.MimeVariant(schemaVariants, i, v) =>
+        schemaVariants match
+          case schemaVariants: BodySchema.Variants[cases] =>
+            val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(i))
+            encodeBody(schema, i.label, v)
 
   private def encodeBody[T](schema: Schema[T], mimeType: String, value: Value[T]): (SupportedMimeType, String) =
     mimeType match
