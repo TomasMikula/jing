@@ -3,11 +3,13 @@ package jing.openapi.model.client
 import jing.openapi.model.*
 
 sealed trait HttpThunk[+MimeType, O] {
-  type InputType
+  type QueryParams
+  type BodyType
 
   def path: String
   def method: HttpMethod
-  def input: RequestInput[MimeType, InputType]
+  def queryParams: Option[Value[Obj[QueryParams]]]
+  def body: Option[Body[MimeType, BodyType]]
 
   def runAgainst(apiBaseUrl: String)(using
     client: Client,
@@ -17,20 +19,23 @@ sealed trait HttpThunk[+MimeType, O] {
 }
 
 object HttpThunk {
-  case class Impl[MimeType, I, O](
+  case class Impl[QParams, MimeType, Bdy, O](
     path: String,
     method: HttpMethod,
-    input: RequestInput[MimeType, I],
+    queryParams: Option[Value[Obj[QParams]]],
+    body: Option[Body[MimeType, Bdy]],
     responseSchema: ResponseSchema[O],
   ) extends HttpThunk[MimeType, O] {
-    override type InputType = I
+    override type QueryParams = QParams
+    override type BodyType = Bdy
   }
 
-  def apply[MimeType, I, O](
+  def apply[QParams, MimeType, Bdy, O](
     path: String,
     method: HttpMethod,
-    input: RequestInput[MimeType, I],
+    queryParams: Option[Value[Obj[QParams]]],
+    body: Option[Body[MimeType, Bdy]],
     responseSchema: ResponseSchema[O],
   ): HttpThunk[MimeType, O] =
-    Impl(path, method, input, responseSchema)
+    Impl(path, method, queryParams, body, responseSchema)
 }

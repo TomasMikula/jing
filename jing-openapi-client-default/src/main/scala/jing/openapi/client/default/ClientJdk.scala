@@ -8,8 +8,8 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{BodySchema, IsCaseOf, ResponseSchema, Schema, Value, ValueMotif}
-import jing.openapi.model.client.{Client, HttpThunk, RequestInput}
+import jing.openapi.model.{Body, BodySchema, IsCaseOf, Obj, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.client.{Client, HttpThunk}
 import libretto.lambda.util.Exists.Indeed
 
 class ClientJdk extends Client {
@@ -25,60 +25,50 @@ class ClientJdk extends Client {
   override def runRequest[O](
     baseUrl: String,
     req: HttpThunk[SupportedMimeType, O],
-  ): Response[O] = {
-    val HttpThunk.Impl(path, method, input, respSchema) = req
+  ): Response[O] =
+    req match {
+      case HttpThunk.Impl(path, method, qParams, body, respSchema) =>
+        val queryParams =
+          qParams match
+            case Some(params) => queryString(params)
+            case None => ""
 
-    val queryParams =
-      input
-        .queryParams
-        .map { _.iterator.map { case (k, v) => s"${urlEncode(k)}=${urlEncode(v)}" }.mkString("?", "&", "") }
-        .getOrElse("")
+        val uri = new java.net.URI(baseUrl + path + queryParams)
 
-    val uri = new java.net.URI(baseUrl + path + queryParams)
+        val (mimeTypeOpt, bodyPublisher) =
+          body.map(encodeBody) match
+            case Some((mimeType, bodyStr)) =>
+              (Some(mimeType), BodyPublishers.ofString(bodyStr))
+            case None =>
+              (None, BodyPublishers.noBody())
 
-    val (mimeTypeOpt, bodyPublisher) =
-      encodeBody(input) match
-        case Some((mimeType, bodyStr)) =>
-          (Some(mimeType), BodyPublishers.ofString(bodyStr))
-        case None =>
-          (None, BodyPublishers.noBody())
-
-    val resp =
-      try {
-        Result.Succeeded(
-          client
-            .send(
-              HttpRequest
-                .newBuilder(uri)
-                .|>(mimeTypeOpt match
-                  case Some(mt) => _.header("Content-Type", mt)
-                  case None     => identity
+        val resp =
+          try {
+            Result.Succeeded(
+              client
+                .send(
+                  HttpRequest
+                    .newBuilder(uri)
+                    .|>(mimeTypeOpt match
+                      case Some(mt) => _.header("Content-Type", mt)
+                      case None     => identity
+                    )
+                    .method(method.nameUpperCase, bodyPublisher)
+                    .build(),
+                  BodyHandlers.ofString(),
                 )
-                .method(method.nameUpperCase, bodyPublisher)
-                .build(),
-              BodyHandlers.ofString(),
             )
-        )
-      } catch {
-        case e: IOException => Result.ioError(e)
-        case e              => Result.unexpectedError(e)
-      }
+          } catch {
+            case e: IOException => Result.ioError(e)
+            case e              => Result.unexpectedError(e)
+          }
 
-    resp.flatMap(parseResponse(respSchema, _))
-  }
+        resp.flatMap(parseResponse(respSchema, _))
+    }
 
-  private def encodeBody[T](input: RequestInput[SupportedMimeType, T]): Option[(SupportedMimeType, String)] =
-    import RequestInput.*
-
-    input match
-      case NoInput                     => None
-      case Params(value)               => None
-      case BodyOnly(body)              => Some(encodeBody(body))
-      case ParamsAndBody(params, body) => Some(encodeBody(body))
-
-  private def encodeBody[T](body: RequestInput.Body[SupportedMimeType, T]): (SupportedMimeType, String) =
+  private def encodeBody[T](body: Body[SupportedMimeType, T]): (SupportedMimeType, String) =
     body match
-      case RequestInput.Body.MimeVariant(schemaVariants, i, v) =>
+      case Body.MimeVariant(schemaVariants, i, v) =>
         schemaVariants match
           case schemaVariants: BodySchema.Variants[cases] =>
             val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(i))
@@ -145,6 +135,11 @@ class ClientJdk extends Client {
 
   private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
     ValueCodecJson.decodeLenient(schema, body)
+
+  private def queryString[Qs](params: Value[Obj[Qs]]): String =
+    params
+      .toMap
+      .iterator.map { case (k, v) => s"${urlEncode(k)}=${urlEncode(v)}" }.mkString("?", "&", "")
 
   private def urlEncode(s: String): String =
     s // TODO
