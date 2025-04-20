@@ -20,7 +20,7 @@ object ClientEndpoint {
     ): HttpThunk[MimeType, O] =
       val bodySchema: BodySchema.NonEmpty[DiscriminatedUnion[Bs]] =
         endpoint.underlying.requestSchema match
-          case RequestSchema.Body(schema) => schema
+          case RequestSchema.WithBody(RequestSchema.NoParams, schema) => schema
       import endpoint.underlying.{path, method, responseSchema}
       HttpThunk(
         path,

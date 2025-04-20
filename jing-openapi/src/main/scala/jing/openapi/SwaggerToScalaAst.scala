@@ -461,30 +461,36 @@ private[openapi] object SwaggerToScalaAst {
     q: Quotes,
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
-    (paramsSchema, reqBodySchema) match
-      case (Some(ps @ Indeed((tps, sps))), Some(b @ Indeed((tb, sb)))) =>
+    requestSchemaParamsOpt(paramsSchema) match
+      case ps @ Indeed((tps, sps)) =>
         given pst: Type[ps.T] = tps
-        given bt:  Type[b.T]  = tb
-        Indeed((
-          Type.of[Void || "params" :: Obj[ps.T] || "body" :: b.T],
-          F.map2(sps, sb) { (sps, sb) => '{ RequestSchema.ParamsAndBody($sps, $sb) } },
-        ))
-      case (Some(ps @ Indeed((tps, sps))), None) =>
-        given Type[ps.T] = tps
+        reqBodySchema match
+          case Some(b @ Indeed((tb, sb))) =>
+            given Type[b.T]  = tb
+            Indeed((
+              Type.of[ps.T || "body" :: b.T],
+              F.map2(sps, sb) { (sps, sb) => '{ RequestSchema.WithBody($sps, $sb) } },
+            ))
+          case None =>
+            Indeed((tps, sps.widen))
+
+  private def requestSchemaParamsOpt[F[_]](
+    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[RequestSchema.ParamsOpt[T]]])] =
+    paramsSchema match
+      case Some(ps @ Indeed((tps, sps))) =>
+        given pst: Type[ps.T] = tps
         Indeed((
           Type.of[Void || "params" :: Obj[ps.T]],
-          sps.map { sps => '{ RequestSchema.Params($sps) } },
+          sps.map { sps => '{ RequestSchema.Parameterized($sps) } },
         ))
-      case (None, Some(b @ Indeed((tb, sb)))) =>
-        given Type[b.T]  = tb
-        Indeed((
-          Type.of[Void || "body" :: b.T],
-          sb.map { sb => '{ RequestSchema.Body($sb) } },
-        ))
-      case (None, None) =>
+      case None =>
         Indeed((
           Type.of[Void],
-          F.pure( '{ RequestSchema.NoInput } )
+          F.pure( '{ RequestSchema.NoParams } )
         ))
 
   private def protoSchema(using Quotes)(

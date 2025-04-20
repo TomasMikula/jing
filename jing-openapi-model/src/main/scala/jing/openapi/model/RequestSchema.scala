@@ -4,15 +4,19 @@ package jing.openapi.model
  *
  * @tparam Is named list of request inputs, separated by [[||]]
  */
-enum RequestSchema[Is] {
-  case NoInput extends RequestSchema[Void]
+sealed trait RequestSchema[Is]
 
-  case Params[Ps](schema: Schema[Obj[Ps]]) extends RequestSchema[Void || "params" :: Obj[Ps]]
+object RequestSchema {
+  sealed trait ParamsOpt[Is] extends RequestSchema[Is]
 
-  case Body[B](schema: BodySchema.NonEmpty[B]) extends RequestSchema[Void || "body" :: B]
-
-  case ParamsAndBody[Ps, B](
-    params: Schema[Obj[Ps]],
+  case class WithBody[Ps, B](
+    params: ParamsOpt[Ps],
     body: BodySchema.NonEmpty[B],
-  ) extends RequestSchema[Void || "params" :: Obj[Ps] || "body" :: B]
+  ) extends RequestSchema[Ps || "body" :: B]
+
+  case object NoParams extends ParamsOpt[Void]
+
+  case class Parameterized[Ps](
+    params: Schema[Obj[Ps]],
+  ) extends ParamsOpt[Void || "params" :: Obj[Ps]]
 }

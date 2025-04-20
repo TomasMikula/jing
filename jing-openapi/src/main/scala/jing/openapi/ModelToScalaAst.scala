@@ -46,29 +46,34 @@ object ModelToScalaAst {
     Quotes,
   ): (Type[T], Expr[RequestSchema[T]]) =
     x match
-      case RequestSchema.NoInput =>
-        summon[T =:= Void]
-        (Type.of[Void], '{ RequestSchema.NoInput })
-      case ps: RequestSchema.Params[ps] =>
-        summon[T =:= (Void || "params" :: Obj[ps])]
-        val (t, s) = quotedObjectSchema(ps.schema)
-        given Type[ps] = t
-        (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Params($s) })
-      case b: RequestSchema.Body[b] =>
-        summon[T =:= (Void || "body" :: b)]
-        val (t, s) = quotedBodySchemaNonEmpty(b.schema)
-        given Type[b] = t
-        (Type.of[Void || "body" :: b], '{ RequestSchema.Body($s)})
-      case pb: RequestSchema.ParamsAndBody[ps, b] =>
-        summon[T =:= (Void || "params" :: Obj[ps] || "body" :: b)]
-        val (pst, ps) = quotedObjectSchema(pb.params)
+      case ps: RequestSchema.ParamsOpt[ps] =>
+        summon[T =:= ps]
+        quotedRequestSchemaParamsOpt(ps)
+      case pb: RequestSchema.WithBody[ps, b] =>
+        summon[T =:= (ps || "body" :: b)]
+        val (pst, ps) = quotedRequestSchemaParamsOpt(pb.params)
         val (bt, b) = quotedBodySchemaNonEmpty(pb.body)
         given Type[ps] = pst
         given Type[b] = bt
         (
-          Type.of[Void || "params" :: Obj[ps] || "body" :: b],
-          '{ RequestSchema.ParamsAndBody($ps, $b) },
+          Type.of[ps || "body" :: b],
+          '{ RequestSchema.WithBody($ps, $b) },
         )
+
+  def quotedRequestSchemaParamsOpt[Ps](
+    x: RequestSchema.ParamsOpt[Ps],
+  )(using
+    Quotes,
+  ): (Type[Ps], Expr[RequestSchema.ParamsOpt[Ps]]) =
+    x match
+      case RequestSchema.NoParams =>
+        summon[Ps =:= Void]
+        (Type.of[Void], '{ RequestSchema.NoParams })
+      case ps: RequestSchema.Parameterized[ps] =>
+        summon[Ps =:= (Void || "params" :: Obj[ps])]
+        val (t, s) = quotedObjectSchema(ps.params)
+        given Type[ps] = t
+        (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Parameterized($s) })
 
   def quotedResponseSchema[T](
     x: ResponseSchema[T],
