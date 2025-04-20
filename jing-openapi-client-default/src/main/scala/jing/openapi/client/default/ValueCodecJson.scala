@@ -232,6 +232,7 @@ object ValueCodecJson {
             case Result.Failed(e) => boundary.break(Result.Failed(e))
         } finally {
           jsonLoc.pop()
+          i += 1
         }
       }
       Result.Succeeded(Value.Lenient.arr(builder.result))
