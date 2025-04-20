@@ -5,9 +5,11 @@ import jing.openapi.model.*
 trait Client extends EndpointInterpreter {
   type Response[T]
 
+  type SupportedMimeType
+
   def runRequest[O](
     baseUrl: String,
-    req: HttpThunk[O],
+    req: HttpThunk[SupportedMimeType, O],
   ): Response[O]
 
   override type Endpoint[I, O] = ClientEndpoint[I, O]

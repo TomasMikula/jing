@@ -59,27 +59,11 @@ object RequestInput {
 
   import RequestInput.*
 
-  def apply[T](
-    schema: RequestSchema[T],
-    value: Value[Obj[T]],
-  ): RequestInput[?, T] =
-    schema match
-      case RequestSchema.NoInput =>
-        NoInput
-      case ps: RequestSchema.Params[ps] =>
-        val params: Value[Obj[ps]] =
-          (value: Value[Obj[Void || "params" :: Obj[ps]]]).unsnoc._2
-        Params[ps](params)
-      case b: RequestSchema.Body[b] =>
-        val body: Value[b] =
-          (value: Value[Obj[Void || "body" :: b]]).unsnoc._2
-        BodyOnly(Body(b.schema, body))
-      case pb: RequestSchema.ParamsAndBody[ps, b] =>
-        (value: Value[Obj[Void || "params" :: Obj[ps] || "body" :: b]])
-          .unsnoc match
-            case (init, body) =>
-              init.unsnoc match
-                case (_, params) =>
-                  ParamsAndBody(params, Body(pb.body, body))
+  def bodyOnly[SchemaVariants, MimeType, BodyType](
+    schema: BodySchema.NonEmpty[DiscriminatedUnion[SchemaVariants]],
+    variantSelector: (MimeType IsCaseOf SchemaVariants) { type Type = BodyType },
+    value: Value[BodyType],
+  ): RequestInput[MimeType, Void || "body" :: DiscriminatedUnion[SchemaVariants]] =
+    BodyOnly(Body.MimeVariant(schema, variantSelector, value))
 
 }

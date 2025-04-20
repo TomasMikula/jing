@@ -8,7 +8,7 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{BodySchema, DiscriminatedUnion, IsCaseOf, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.{BodySchema, IsCaseOf, ResponseSchema, Schema, Value, ValueMotif}
 import jing.openapi.model.client.{Client, HttpThunk, RequestInput}
 import libretto.lambda.util.Exists.Indeed
 
@@ -16,7 +16,7 @@ class ClientJdk extends Client {
 
   override type Response[T] = Result[Value.Lenient[T]]
 
-  private type SupportedMimeType = "application/json"
+  override type SupportedMimeType = "application/json"
 
   private val client =
     // TODO: manage as a resource, i.e. needs to be released
@@ -24,7 +24,7 @@ class ClientJdk extends Client {
 
   override def runRequest[O](
     baseUrl: String,
-    req: HttpThunk[O],
+    req: HttpThunk[SupportedMimeType, O],
   ): Response[O] = {
     val HttpThunk.Impl(path, method, input, respSchema) = req
 
@@ -67,7 +67,7 @@ class ClientJdk extends Client {
     resp.flatMap(parseResponse(respSchema, _))
   }
 
-  private def encodeBody[T](input: RequestInput[?, T]): Option[(SupportedMimeType, String)] =
+  private def encodeBody[T](input: RequestInput[SupportedMimeType, T]): Option[(SupportedMimeType, String)] =
     import RequestInput.*
 
     input match
@@ -76,22 +76,18 @@ class ClientJdk extends Client {
       case BodyOnly(body)              => Some(encodeBody(body))
       case ParamsAndBody(params, body) => Some(encodeBody(body))
 
-  private def encodeBody[T](body: RequestInput.Body[?, T]): (SupportedMimeType, String) =
+  private def encodeBody[T](body: RequestInput.Body[SupportedMimeType, T]): (SupportedMimeType, String) =
     body match
       case RequestInput.Body.MimeVariant(schemaVariants, i, v) =>
         schemaVariants match
           case schemaVariants: BodySchema.Variants[cases] =>
             val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(i))
-            encodeBody(schema, i.label, v)
+            (i.label, encodeBody(schema, i.label, v))
 
-  private def encodeBody[T](schema: Schema[T], mimeType: String, value: Value[T]): (SupportedMimeType, String) =
+  private def encodeBody[T](schema: Schema[T], mimeType: SupportedMimeType, value: Value[T]): String =
     mimeType match
       case appJson: "application/json" =>
-        val bodyStr = ValueCodecJson.encode(schema, value)
-        (appJson, bodyStr)
-      case other =>
-        // TODO: make this illegal state unrepresentable
-        throw UnsupportedOperationException(s"MIME type '$other' not supported by ${this.getClass.getTypeName()}")
+        ValueCodecJson.encode(schema, value)
 
   private def parseResponse[T](
     schema: ResponseSchema[T],

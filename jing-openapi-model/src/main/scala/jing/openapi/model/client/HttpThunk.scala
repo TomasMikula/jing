@@ -2,32 +2,35 @@ package jing.openapi.model.client
 
 import jing.openapi.model.*
 
-sealed trait HttpThunk[O] {
+sealed trait HttpThunk[+MimeType, O] {
   type InputType
 
   def path: String
   def method: HttpMethod
-  def input: RequestInput[?, InputType]
+  def input: RequestInput[MimeType, InputType]
 
-  def runAgainst(apiBaseUrl: String)(using client: Client): client.Response[O] =
-    client.runRequest(apiBaseUrl, this)
+  def runAgainst(apiBaseUrl: String)(using
+    client: Client,
+    witness: MimeType <:< client.SupportedMimeType,
+  ): client.Response[O] =
+    client.runRequest(apiBaseUrl, witness.substituteCo[HttpThunk[_, O]](this))
 }
 
 object HttpThunk {
-  case class Impl[I, O](
+  case class Impl[MimeType, I, O](
     path: String,
     method: HttpMethod,
-    input: RequestInput[?, I],
+    input: RequestInput[MimeType, I],
     responseSchema: ResponseSchema[O],
-  ) extends HttpThunk[O] {
+  ) extends HttpThunk[MimeType, O] {
     override type InputType = I
   }
 
-  def apply[I, O](
+  def apply[MimeType, I, O](
     path: String,
     method: HttpMethod,
-    input: RequestInput[?, I],
+    input: RequestInput[MimeType, I],
     responseSchema: ResponseSchema[O],
-  ): HttpThunk[O] =
+  ): HttpThunk[MimeType, O] =
     Impl(path, method, input, responseSchema)
 }
