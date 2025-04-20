@@ -119,7 +119,7 @@ object ValueCodecJson {
                   case Some(n) => Result.Succeeded(Value.Lenient.int32(n))
                   case None => schemaViolation(s"Expected a 32-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
               case None =>
-                schemaViolation(s"Expected JSON number, got ${json.name}. At ${jsonLoc.printLoc}")
+                schemaViolation(s"Expected JSON number, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case I64() =>
             json.asNumber match
@@ -128,27 +128,27 @@ object ValueCodecJson {
                   case Some(n) => Result.Succeeded(Value.Lenient.int64(n))
                   case None => schemaViolation(s"Expected a 64-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
               case None =>
-                schemaViolation(s"Expected JSON number, got ${json.name}. At ${jsonLoc.printLoc}")
+                schemaViolation(s"Expected JSON number, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case S() =>
             json.asString match
               case Some(s) => Result.Succeeded(Value.Lenient.str(s))
-              case None => schemaViolation(s"Expected JSON string, got ${json.name}. At ${jsonLoc.printLoc}")
+              case None => schemaViolation(s"Expected JSON string, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case B() =>
             json.asBoolean match
               case Some(b) => Result.Succeeded(Value.Lenient.bool(b))
-              case None => schemaViolation(s"Expected JSON boolean, got ${json.name}. At ${jsonLoc.printLoc}")
+              case None => schemaViolation(s"Expected JSON boolean, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case Array(elemSchema) =>
             json.asArray match
               case Some(jsonElems) => decodeArrayLenient(elemSchema, jsonLoc, jsonElems)
-              case None => schemaViolation(s"Expected JSON array, got ${json.name}. At ${jsonLoc.printLoc}")
+              case None => schemaViolation(s"Expected JSON array, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case o: Object[schema, props] =>
             json.asObject match
               case Some(obj) => decodeObjectLenient(o, jsonLoc, obj)
-              case None => schemaViolation(s"Expected JSON object, got ${json.name}. At ${jsonLoc.printLoc}")
+              case None => schemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
       case Schema.Unsupported(message) =>
         Result.Succeeded(Value.Lenient.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
