@@ -14,9 +14,14 @@ object RequestSchema {
     body: BodySchema.NonEmpty[B],
   ) extends RequestSchema[Ps || "body" :: B]
 
-  case object NoParams extends ParamsOpt[Void]
+  case class ConstantPath(path: String) extends ParamsOpt[Void]
 
   case class Parameterized[Ps](
-    params: Schema[Obj[Ps]],
+    params: Params[Ps],
   ) extends ParamsOpt[Void || "params" :: Obj[Ps]]
+
+  case class Params[Ps](
+    path: String,
+    schema: Schema[Obj[Ps]],
+  )
 }

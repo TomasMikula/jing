@@ -1,6 +1,7 @@
 package jing.openapi.model.client
 
 import jing.openapi.model.*
+import jing.openapi.model.RequestSchema.ConstantPath
 
 class ClientEndpoint[Is, O](
   private val underlying: HttpEndpoint[Is, O],
@@ -18,14 +19,15 @@ object ClientEndpoint {
     def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
       body: Value[i.Type],
     ): HttpThunk[MimeType, O] =
-      val bodySchema: BodySchema.NonEmpty[DiscriminatedUnion[Bs]] =
-        endpoint.underlying.requestSchema match
-          case RequestSchema.WithBody(RequestSchema.NoParams, schema) => schema
       import endpoint.underlying.{path, method, responseSchema}
+      val (path, bodySchema) =
+        endpoint.underlying.requestSchema match
+          case RequestSchema.WithBody(RequestSchema.ConstantPath(path), schema) =>
+            (path, schema)
       HttpThunk(
-        path,
         method,
-        queryParams = None,
+        paramsSchema = RequestSchema.Params(path, Schema.objectEmpty),
+        params = Value.obj,
         body = Some(Body(bodySchema, i, body)),
         responseSchema,
       )
@@ -45,10 +47,13 @@ object ClientEndpoint {
       ev2: Remaining =:= Void,
     ): HttpThunk[Nothing, O] =
       import endpoint.underlying.{path, method, responseSchema}
+      val paramsSchema: RequestSchema.Params[Qs] =
+        ev1.substituteContra(endpoint.underlying.requestSchema) match
+          case RequestSchema.Parameterized(params) => params
       HttpThunk(
-        path,
         method,
-        queryParams = Some(params),
+        paramsSchema = paramsSchema,
+        params = params,
         body = None,
         responseSchema,
       )

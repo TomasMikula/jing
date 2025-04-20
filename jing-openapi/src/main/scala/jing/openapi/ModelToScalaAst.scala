@@ -66,14 +66,26 @@ object ModelToScalaAst {
     Quotes,
   ): (Type[Ps], Expr[RequestSchema.ParamsOpt[Ps]]) =
     x match
-      case RequestSchema.NoParams =>
+      case RequestSchema.ConstantPath(path) =>
         summon[Ps =:= Void]
-        (Type.of[Void], '{ RequestSchema.NoParams })
-      case ps: RequestSchema.Parameterized[ps] =>
+        (Type.of[Void], '{ RequestSchema.ConstantPath(${Expr(path)}) })
+      case p: RequestSchema.Parameterized[ps] =>
         summon[Ps =:= (Void || "params" :: Obj[ps])]
-        val (t, s) = quotedObjectSchema(ps.params)
+        val (t, ps) = quotedParams(p.params)
         given Type[ps] = t
-        (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Parameterized($s) })
+        (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Parameterized($ps) })
+
+  def quotedParams[Ps](
+    ps: RequestSchema.Params[Ps],
+  )(using
+    Quotes,
+  ): (Type[Ps], Expr[RequestSchema.Params[Ps]]) =
+    ps match
+      case RequestSchema.Params(path, schema) =>
+        val (t, s) = quotedObjectSchema(schema)
+        given Type[Ps] = t
+        (t, '{ RequestSchema.Params(${Expr(path)}, $s) })
+
 
   def quotedResponseSchema[T](
     x: ResponseSchema[T],

@@ -3,12 +3,16 @@ package jing.openapi.model.client
 import jing.openapi.model.*
 
 sealed trait HttpThunk[+MimeType, O] {
-  type QueryParams
+  type Params
   type BodyType
 
-  def path: String
   def method: HttpMethod
-  def queryParams: Option[Value[Obj[QueryParams]]]
+
+  def paramsSchema: RequestSchema.Params[Params]
+
+  /** includes path and query */
+  def params: Value[Obj[Params]]
+
   def body: Option[Body[MimeType, BodyType]]
 
   def runAgainst(apiBaseUrl: String)(using
@@ -19,23 +23,23 @@ sealed trait HttpThunk[+MimeType, O] {
 }
 
 object HttpThunk {
-  case class Impl[QParams, MimeType, Bdy, O](
-    path: String,
+  case class Impl[Ps, MimeType, Bdy, O](
     method: HttpMethod,
-    queryParams: Option[Value[Obj[QParams]]],
+    paramsSchema: RequestSchema.Params[Ps],
+    params: Value[Obj[Ps]],
     body: Option[Body[MimeType, Bdy]],
     responseSchema: ResponseSchema[O],
   ) extends HttpThunk[MimeType, O] {
-    override type QueryParams = QParams
+    override type Params = Ps
     override type BodyType = Bdy
   }
 
-  def apply[QParams, MimeType, Bdy, O](
-    path: String,
+  def apply[Ps, MimeType, Bdy, O](
     method: HttpMethod,
-    queryParams: Option[Value[Obj[QParams]]],
+    paramsSchema: RequestSchema.Params[Ps],
+    params: Value[Obj[Ps]],
     body: Option[Body[MimeType, Bdy]],
     responseSchema: ResponseSchema[O],
   ): HttpThunk[MimeType, O] =
-    Impl(path, method, queryParams, body, responseSchema)
+    Impl(method, paramsSchema, params, body, responseSchema)
 }

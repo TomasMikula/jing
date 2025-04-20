@@ -8,7 +8,7 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{Body, BodySchema, IsCaseOf, Obj, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.{Body, BodySchema, IsCaseOf, Obj, RequestSchema, ResponseSchema, Schema, Value, ValueMotif}
 import jing.openapi.model.client.{Client, HttpThunk}
 import libretto.lambda.util.Exists.Indeed
 
@@ -27,13 +27,9 @@ class ClientJdk extends Client {
     req: HttpThunk[SupportedMimeType, O],
   ): Response[O] =
     req match {
-      case HttpThunk.Impl(path, method, qParams, body, respSchema) =>
-        val queryParams =
-          qParams match
-            case Some(params) => queryString(params)
-            case None => ""
-
-        val uri = new java.net.URI(baseUrl + path + queryParams)
+      case HttpThunk.Impl(method, paramsSchema, params, body, respSchema) =>
+        val relativeUrl = toRelativeUrl(paramsSchema, params)
+        val uri = new java.net.URI(baseUrl + relativeUrl)
 
         val (mimeTypeOpt, bodyPublisher) =
           body.map(encodeBody) match
@@ -65,6 +61,15 @@ class ClientJdk extends Client {
 
         resp.flatMap(parseResponse(respSchema, _))
     }
+
+  def toRelativeUrl[Ps](
+    paramsSchema: RequestSchema.Params[Ps],
+    params: Value[Obj[Ps]],
+  ): String =
+    paramsSchema.path + (queryString(params) match
+      case "" => ""
+      case qs => "?" + qs
+    )
 
   private def encodeBody[T](body: Body[SupportedMimeType, T]): (SupportedMimeType, String) =
     body match
@@ -139,7 +144,7 @@ class ClientJdk extends Client {
   private def queryString[Qs](params: Value[Obj[Qs]]): String =
     params
       .toMap
-      .iterator.map { case (k, v) => s"${urlEncode(k)}=${urlEncode(v)}" }.mkString("?", "&", "")
+      .iterator.map { case (k, v) => s"${urlEncode(k)}=${urlEncode(v)}" }.mkString("&")
 
   private def urlEncode(s: String): String =
     s // TODO

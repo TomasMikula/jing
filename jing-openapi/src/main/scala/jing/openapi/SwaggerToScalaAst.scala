@@ -329,7 +329,7 @@ private[openapi] object SwaggerToScalaAst {
         .flatMap(requestBodySchema(schemas, _))
 
     val reqSchema: Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
-      requestSchema(paramSchema, reqBodySchema)
+      requestSchema(path, paramSchema, reqBodySchema)
 
     val responseSchema =
       Option(op.getResponses())
@@ -455,13 +455,14 @@ private[openapi] object SwaggerToScalaAst {
       case None => Indeed((Type.of[Unit], F.pure('{ BodySchema.Empty })))
 
   private def requestSchema[F[_]](
+    path: String,
     paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
     reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]],
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
-    requestSchemaParamsOpt(paramsSchema) match
+    requestSchemaParamsOpt(path, paramsSchema) match
       case ps @ Indeed((tps, sps)) =>
         given pst: Type[ps.T] = tps
         reqBodySchema match
@@ -475,6 +476,7 @@ private[openapi] object SwaggerToScalaAst {
             Indeed((tps, sps.widen))
 
   private def requestSchemaParamsOpt[F[_]](
+    path: String,
     paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
   )(using
     q: Quotes,
@@ -485,12 +487,12 @@ private[openapi] object SwaggerToScalaAst {
         given pst: Type[ps.T] = tps
         Indeed((
           Type.of[Void || "params" :: Obj[ps.T]],
-          sps.map { sps => '{ RequestSchema.Parameterized($sps) } },
+          sps.map { sps => '{ RequestSchema.Parameterized(RequestSchema.Params(${Expr(path)}, $sps)) } },
         ))
       case None =>
         Indeed((
           Type.of[Void],
-          F.pure( '{ RequestSchema.NoParams } )
+          F.pure( '{ RequestSchema.ConstantPath(${Expr(path)}) } )
         ))
 
   private def protoSchema(using Quotes)(
