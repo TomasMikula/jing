@@ -316,21 +316,24 @@ private[openapi] object SwaggerToScalaAst {
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[T]])] = {
     import qr.*
-    import scala.collection.immutable.::
 
-    val paramSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]] =
-      Option(op.getParameters())
-        .map(_.asScala.toList)
-        .collect { case p :: ps => NonEmptyList(p, ps) }
-        .map(parametersSchema(schemas, _))
+    val paramSchema: Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])] =
+      requestSchemaParamsOpt(
+        schemas,
+        path,
+        Option(op.getParameters())
+          .map(_.asScala.toList)
+          .getOrElse(Nil)
+      )
 
     val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]] =
       Option(op.getRequestBody())
         .flatMap(requestBodySchema(schemas, _))
 
     val reqSchema: Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
-      requestSchema(path, paramSchema, reqBodySchema)
+      requestSchema(paramSchema, reqBodySchema)
 
+    import scala.collection.immutable.::
     val responseSchema =
       Option(op.getResponses())
         .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
@@ -350,32 +353,80 @@ private[openapi] object SwaggerToScalaAst {
         Indeed((
           Type.of[HttpEndpoint[I, O]],
           F.map2(reqSchema, respSchema) { (reqSchema, respSchema) =>
-            '{ HttpEndpoint(${Expr(path)}, ${Expr(method)}, $reqSchema, $respSchema) }
+            '{ HttpEndpoint(${Expr(method)}, $reqSchema, $respSchema) }
           },
         ))
   }
 
+  private def requestSchemaParamsOpt[F[_]](
+    schemas: SchemaLookup[F],
+    path: String,
+    params: List[io.swagger.v3.oas.models.parameters.Parameter],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])] =
+    params match
+      case NonEmptyList(p, ps) =>
+        parametersSchema(schemas, path, NonEmptyList(p, ps)) match
+          case ex @ Indeed((t, e)) =>
+            given Type[ex.T] = t
+            Indeed((
+              Type.of[Void || "params" :: Obj[ex.T]],
+              e.map { e => '{ RequestSchema.Parameterized($e) } }
+            ))
+      case Nil =>
+        Indeed((Type.of[Void], F.pure('{ RequestSchema.ConstantPath(${Expr(path)}) })))
+
   private def parametersSchema[F[_]](
     schemas: SchemaLookup[F],
+    path: String,
     params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
   )(using
     q: Quotes,
     F: Applicative[F],
-  ): Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])] = {
-    val NonEmptyList(p, ps) = params
-    val pSchema = protoSchema(p.getSchema()).orientBackward
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])] = {
+    val NonEmptyList(p0, ps) = params
 
-    type G[x] = ProtoSchema.Oriented
-    val protoSchematic: SchemaMotif.Object.NonEmpty[G, ?] =
-      ps.foldLeft[SchemaMotif.Object.NonEmpty[G, ?]](
-        SchemaMotif.Object.snoc(SchemaMotif.Object.Empty[G](), p.getName, pSchema),
-      ) { (acc, p) =>
-        val pSchema = protoSchema(p.getSchema()).orientBackward
-        SchemaMotif.Object.snoc(acc, p.getName(), pSchema)
-      }
+    ps.foldLeft(
+      parametersSchemaExtend(
+        schemas,
+        '{ RequestSchema.Params.ConstantPath(${Expr(path)}) }.pure[F],
+        p0,
+      )
+    ) { case (acc @ Indeed((t, fe)), p) =>
+      given Type[acc.T] = t
+      parametersSchemaExtend(schemas, fe.widen, p)
+    }
+  }
 
-    quotedSchemaObjectNonEmptyFromProto(protoSchematic)
-      .run(schemas)
+  private def parametersSchemaExtend[F[_], Init](
+    schemas: SchemaLookup[F],
+    init: F[Expr[RequestSchema.Params[Init]]],
+    param: io.swagger.v3.oas.models.parameters.Parameter,
+  )(using
+    q: Quotes,
+    t: Type[Init],
+    F: Applicative[F],
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])] = {
+    val pName = param.getName
+
+    def go[PName <: String](pname: SingletonType[PName]): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])] =
+      val (nmt, nme) = ModelToScalaAst.quotedSingletonString(pname)
+      given Type[PName] = nmt
+      val pSchema = protoSchema(param.getSchema()).orientBackward
+
+      quotedSchemaFromProto(pSchema)
+        .run(schemas)
+          match
+            case ex @ Indeed((t, fSch)) =>
+              given Type[ex.T] = t
+              Indeed((
+                Type.of[Init || PName :: ex.T],
+                F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParam($init, $nme, $sch) } },
+              ))
+
+    go[pName.type](SingletonType(pName))
   }
 
   private def requestBodySchema[F[_]](
@@ -461,14 +512,13 @@ private[openapi] object SwaggerToScalaAst {
       case None => Indeed((Type.of[Unit], F.pure('{ BodySchema.Empty })))
 
   private def requestSchema[F[_]](
-    path: String,
-    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]],
+    paramsSchema: Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])],
     reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]],
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
-    requestSchemaParamsOpt(path, paramsSchema) match
+    paramsSchema match
       case ps @ Indeed((tps, sps)) =>
         given pst: Type[ps.T] = tps
         reqBodySchema match
@@ -480,26 +530,6 @@ private[openapi] object SwaggerToScalaAst {
             ))
           case None =>
             Indeed((tps, sps.widen))
-
-  private def requestSchemaParamsOpt[F[_]](
-    path: String,
-    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]],
-  )(using
-    q: Quotes,
-    F: Applicative[F],
-  ): Exists[[T] =>> (Type[T], F[Expr[RequestSchema.ParamsOpt[T]]])] =
-    paramsSchema match
-      case Some(ps @ Indeed((tps, sps))) =>
-        given pst: Type[ps.T] = tps
-        Indeed((
-          Type.of[Void || "params" :: Obj[ps.T]],
-          sps.map { sps => '{ RequestSchema.Parameterized(RequestSchema.Params.NonEmpty(${Expr(path)}, $sps)) } },
-        ))
-      case None =>
-        Indeed((
-          Type.of[Void],
-          F.pure( '{ RequestSchema.ConstantPath(${Expr(path)}) } )
-        ))
 
   private def protoSchema(using Quotes)(
     schema: io.swagger.v3.oas.models.media.Schema[?],
@@ -528,7 +558,6 @@ private[openapi] object SwaggerToScalaAst {
         val itemSchema = protoSchema(schema.getItems())
         ProtoSchema.arr(itemSchema)
       case "object" =>
-        // TODO: support optionality of properties
         schema.getProperties() match
           case null =>
             ProtoSchema.Unsupported("Missing properties field in schema of type 'object'")

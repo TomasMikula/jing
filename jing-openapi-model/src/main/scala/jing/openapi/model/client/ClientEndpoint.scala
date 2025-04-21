@@ -19,14 +19,14 @@ object ClientEndpoint {
     def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
       body: Value[i.Type],
     ): HttpThunk[MimeType, O] =
-      import endpoint.underlying.{path, method, responseSchema}
+      import endpoint.underlying.{method, responseSchema}
       val (path, bodySchema) =
         endpoint.underlying.requestSchema match
           case RequestSchema.WithBody(RequestSchema.ConstantPath(path), schema) =>
             (path, schema)
       HttpThunk(
         method,
-        paramsSchema = RequestSchema.Params.Empty(path),
+        paramsSchema = RequestSchema.Params.ConstantPath(path),
         params = Value.obj,
         body = Some(Body(bodySchema, i, body)),
         responseSchema,
@@ -46,7 +46,7 @@ object ClientEndpoint {
       ev1: (Void || "params" :: Obj[Qs]) =:= Is,
       ev2: Remaining =:= Void,
     ): HttpThunk[Nothing, O] =
-      import endpoint.underlying.{path, method, responseSchema}
+      import endpoint.underlying.{method, responseSchema}
       val paramsSchema: RequestSchema.Params[Qs] =
         ev1.substituteContra(endpoint.underlying.requestSchema) match
           case RequestSchema.Parameterized(params) => params

@@ -1,7 +1,6 @@
 package jing.openapi.model
 
 case class HttpEndpoint[Is, O](
-  path: String,
   method: HttpMethod,
   requestSchema: RequestSchema[Is],
   responseSchema: ResponseSchema[O],

@@ -28,7 +28,7 @@ object ModelToScalaAst {
   )(using
     Quotes,
   ): (Type[HttpEndpoint[Is, O]], Expr[HttpEndpoint[Is, O]]) =
-    val HttpEndpoint(path, meth, req, resp) = x
+    val HttpEndpoint(meth, req, resp) = x
     val (reqType, reqExpr) = quotedRequestSchema(req)
     val (respType, respExpr) = quotedResponseSchema(resp)
 
@@ -37,7 +37,7 @@ object ModelToScalaAst {
 
     (
       Type.of[HttpEndpoint[Is, O]],
-      '{ HttpEndpoint(${Expr(path)}, ${Expr(meth)}, ${reqExpr}, ${respExpr}) },
+      '{ HttpEndpoint(${Expr(meth)}, ${reqExpr}, ${respExpr}) },
     )
 
   def quotedRequestSchema[T](
@@ -71,21 +71,49 @@ object ModelToScalaAst {
         (Type.of[Void], '{ RequestSchema.ConstantPath(${Expr(path)}) })
       case p: RequestSchema.Parameterized[ps] =>
         summon[Ps =:= (Void || "params" :: Obj[ps])]
-        val (t, ps) = quotedParamsNonEmpty(p.params)
+        val (t, ps) = quotedParamsProper(p.params)
         given Type[ps] = t
         (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Parameterized($ps) })
 
-  def quotedParamsNonEmpty[Ps](
-    ps: RequestSchema.Params.NonEmpty[Ps],
+  def quotedParams[Ps](
+    ps: RequestSchema.Params[Ps],
   )(using
     Quotes,
-  ): (Type[Ps], Expr[RequestSchema.Params.NonEmpty[Ps]]) =
+  ): (Type[Ps], Expr[RequestSchema.Params[Ps]]) =
     ps match
-      case RequestSchema.Params.NonEmpty(path, schema) =>
-        val (t, s) = quotedSchemaObjectNonEmpty(schema)
-        given Type[Ps] = t
-        (t, '{ RequestSchema.Params.NonEmpty(${Expr(path)}, $s) })
+      case RequestSchema.Params.ConstantPath(path) =>
+        (Type.of[Void], '{ RequestSchema.Params.ConstantPath(${Expr(path)}) })
+      case proper: RequestSchema.Params.Proper[Ps] =>
+        quotedParamsProper(proper)
 
+  def quotedParamsProper[Ps](
+    ps: RequestSchema.Params.Proper[Ps],
+  )(using
+    Quotes,
+  ): (Type[Ps], Expr[RequestSchema.Params.Proper[Ps]]) =
+    ps match
+      case wqp: RequestSchema.Params.WithQueryParam[init, pname, ptype] =>
+        val (initt, inits) = quotedParams(wqp.init)
+        val (pnameTp, pnameEx) = quotedSingletonString(wqp.pName)
+        val (pt, ps) = quotedSchema(wqp.pSchema)
+        given Type[init] = initt
+        given Type[pname] = pnameTp
+        given Type[ptype] = pt
+        (
+          Type.of[init || pname :: ptype],
+          '{ RequestSchema.Params.WithQueryParam($inits, ${Expr(wqp.pName)}, ${ps}) },
+        )
+      case wqpo: RequestSchema.Params.WithQueryParamOpt[init, pname, ptype] =>
+        val (initt, inits) = quotedParams(wqpo.init)
+        val (pnameTp, pnameEx) = quotedSingletonString(wqpo.pName)
+        val (pt, ps) = quotedSchema(wqpo.pSchema)
+        given Type[init] = initt
+        given Type[pname] = pnameTp
+        given Type[ptype] = pt
+        (
+          Type.of[init || pname :? ptype],
+          '{ RequestSchema.Params.WithQueryParamOpt($inits, ${Expr(wqpo.pName)}, ${ps}) },
+        )
 
   def quotedResponseSchema[T](
     x: ResponseSchema[T],
@@ -544,7 +572,7 @@ object ModelToScalaAst {
   ): Items1Named.Product[||, ::, F, Label :: T] =
     Items1Named.Product.Single(label, value)
 
-  private def quotedSingletonString[T <: String](x: SingletonType[T])(using
+  def quotedSingletonString[T <: String](x: SingletonType[T])(using
     Quotes,
   ): (Type[T], Expr[SingletonType[T]]) = {
     import quotes.reflect.*
