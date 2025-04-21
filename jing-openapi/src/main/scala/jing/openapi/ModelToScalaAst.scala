@@ -71,20 +71,20 @@ object ModelToScalaAst {
         (Type.of[Void], '{ RequestSchema.ConstantPath(${Expr(path)}) })
       case p: RequestSchema.Parameterized[ps] =>
         summon[Ps =:= (Void || "params" :: Obj[ps])]
-        val (t, ps) = quotedParams(p.params)
+        val (t, ps) = quotedParamsNonEmpty(p.params)
         given Type[ps] = t
         (Type.of[Void || "params" :: Obj[ps]], '{ RequestSchema.Parameterized($ps) })
 
-  def quotedParams[Ps](
-    ps: RequestSchema.Params[Ps],
+  def quotedParamsNonEmpty[Ps](
+    ps: RequestSchema.Params.NonEmpty[Ps],
   )(using
     Quotes,
-  ): (Type[Ps], Expr[RequestSchema.Params[Ps]]) =
+  ): (Type[Ps], Expr[RequestSchema.Params.NonEmpty[Ps]]) =
     ps match
-      case RequestSchema.Params(path, schema) =>
-        val (t, s) = quotedSchemaObject(schema)
+      case RequestSchema.Params.NonEmpty(path, schema) =>
+        val (t, s) = quotedSchemaObjectNonEmpty(schema)
         given Type[Ps] = t
-        (t, '{ RequestSchema.Params(${Expr(path)}, $s) })
+        (t, '{ RequestSchema.Params.NonEmpty(${Expr(path)}, $s) })
 
 
   def quotedResponseSchema[T](
@@ -185,7 +185,7 @@ object ModelToScalaAst {
         Reader.pure( Exists((tpe, F.pure(trm))) )
   }
 
-  def quotedObjectSchemaFromProto[F[_]](
+  def quotedSchemaObjectFromProto[F[_]](
     schema: SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?],
   )(using
     q: Quotes,
@@ -200,6 +200,23 @@ object ModelToScalaAst {
       case ex @ Indeed(_, (tpe, expr)) =>
         given Type[ex.T] = tpe
         Indeed((tpe, expr.map { expr => '{ Schema.Proper($expr) } }))
+    }
+
+  def quotedSchemaObjectNonEmptyFromProto[F[_]](
+    schema: SchemaMotif.Object.NonEmpty[[x] =>> ProtoSchema.Oriented, ?],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Reader[SchemaLookup[F], Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]] =
+    quotedSchemaMotifObjectNonEmptyRelAA(
+      schema,
+      [A] => ps => quotedSchemaFromProto(ps) map {
+        case Indeed(te) => Indeed((Unrelated(), te))
+      }
+    ) map {
+      case ex @ Indeed(_, (tpe, expr)) =>
+        given Type[ex.T] = tpe
+        Indeed((tpe, expr.map { expr => '{ Schema.Object.NonEmpty.fromMotif($expr) } }))
     }
 
   def quotedSchemaMotif[F[_], T](
@@ -355,6 +372,11 @@ object ModelToScalaAst {
     given Type[Ps] = tp
     (tp, '{ Schema.Proper[Obj[Ps]]($expr) })
 
+  def quotedSchemaObjectNonEmpty[Ps](s: Schema.Object.NonEmpty[Ps])(using Quotes): (Type[Ps], Expr[Schema.Object.NonEmpty[Ps]]) =
+    val (tp, expr) = quotedSchemaMotifObjectNonEmpty(s.toMotif, [A] => sa => quotedSchema(sa))
+    given Type[Ps] = tp
+    (tp, '{ Schema.Object.NonEmpty.fromMotif($expr) })
+
   def quotedSchemaMotifObject[F[_], Ps](
     s: SchemaMotif.Object[F, Ps],
     f: [A] => F[A] => (Type[A], Expr[F[A]]),
@@ -366,6 +388,17 @@ object ModelToScalaAst {
       case Indeed((ev, res)) =>
         ev.substituteContra[[Qs] =>> (Type[Qs], Expr[SchemaMotif.Object[F, Qs]])](res)
 
+  def quotedSchemaMotifObjectNonEmpty[F[_], Ps](
+    s: SchemaMotif.Object.NonEmpty[F, Ps],
+    f: [A] => F[A] => (Type[A], Expr[F[A]]),
+  )(using
+    Quotes,
+    Type[F],
+  ): (Type[Ps], Expr[SchemaMotif.Object.NonEmpty[F, Ps]]) =
+    quotedSchemaMotifObjectNonEmptyRel[F, Ps, F, =:=](s, [A] => fa => Exists((summon[A =:= A], f(fa)))) match
+      case Indeed((ev, res)) =>
+        ev.substituteContra[[Qs] =>> (Type[Qs], Expr[SchemaMotif.Object.NonEmpty[F, Qs]])](res)
+
   def quotedSchemaMotifObjectRel[F[_], Ps, G[_], Rel[_, _]](
     s: SchemaMotif.Object[F, Ps],
     f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Type[B], Expr[G[B]]))],
@@ -375,6 +408,16 @@ object ModelToScalaAst {
     Rel: Substitutive[Rel],
   ): Exists[[Qs] =>> (Rel[Ps, Qs], (Type[Qs], Expr[SchemaMotif.Object[G, Qs]]))] =
     quotedSchemaMotifObjectRelAA[F, Ps, G, Rel, [x] =>> x, [x] =>> x](s, f)
+
+  def quotedSchemaMotifObjectNonEmptyRel[F[_], Ps, G[_], Rel[_, _]](
+    s: SchemaMotif.Object.NonEmpty[F, Ps],
+    f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Type[B], Expr[G[B]]))],
+  )(using
+    q: Quotes,
+    tg: Type[G],
+    Rel: Substitutive[Rel],
+  ): Exists[[Qs] =>> (Rel[Ps, Qs], (Type[Qs], Expr[SchemaMotif.Object.NonEmpty[G, Qs]]))] =
+    quotedSchemaMotifObjectNonEmptyRelAA[F, Ps, G, Rel, [x] =>> x, [x] =>> x](s, f)
 
   def quotedSchemaMotifObjectRelAA[F[_], Ps, G[_], Rel[_, _], M[_], N[_]](
     s: SchemaMotif.Object[F, Ps],
@@ -391,6 +434,21 @@ object ModelToScalaAst {
         M.pure(
           Exists(Rel.refl[Void], (Type.of[Void], N.pure('{ SchemaMotif.Object.Empty() })))
         )
+      case ne: SchemaMotif.Object.NonEmpty[f, ps] =>
+        quotedSchemaMotifObjectNonEmptyRelAA(ne, f).map:
+          case Indeed((rel, (tp, s))) => Indeed((rel, (tp, s.widen)))
+
+  def quotedSchemaMotifObjectNonEmptyRelAA[F[_], Ps, G[_], Rel[_, _], M[_], N[_]](
+    s: SchemaMotif.Object.NonEmpty[F, Ps],
+    f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
+  )(using
+    q: Quotes,
+    tg: Type[G],
+    Rel: Substitutive[Rel],
+    M: Applicative[M],
+    N: Applicative[N],
+  ): M[Exists[[Qs] =>> (Rel[Ps, Qs], (Type[Qs], N[Expr[SchemaMotif.Object.NonEmpty[G, Qs]]]))]] =
+    s match
       case snoc @ SchemaMotif.Object.Snoc(init, pname, ptype) =>
         quotedSchemaMotifObjectSnocRelAA(snoc, f)
       case snoc @ SchemaMotif.Object.SnocOpt(init, pname, ptype) =>
@@ -409,7 +467,7 @@ object ModelToScalaAst {
     Rel[Init || PropName :: PropType, Qs],
     (
       Type[Qs],
-      N[Expr[SchemaMotif.Object[G, Qs]]],
+      N[Expr[SchemaMotif.Object.NonEmpty[G, Qs]]],
     )
   )]] = {
     M.map2(
@@ -426,7 +484,7 @@ object ModelToScalaAst {
 
         given Type[PropName] = nt
 
-        val expr: N[Expr[SchemaMotif.Object[G, As || PropName :: B]]] =
+        val expr: N[Expr[SchemaMotif.Object.NonEmpty[G, As || PropName :: B]]] =
           N.map2(si, sl) { (si, sl) =>
             '{ SchemaMotif.Object.Snoc[G, As, PropName, B]($si, $spn, $sl) }
           }
@@ -451,7 +509,7 @@ object ModelToScalaAst {
     Rel[Init || PropName :? PropType, Qs],
     (
       Type[Qs],
-      N[Expr[SchemaMotif.Object[G, Qs]]],
+      N[Expr[SchemaMotif.Object.NonEmpty[G, Qs]]],
     )
   )]] = {
     M.map2(
@@ -468,7 +526,7 @@ object ModelToScalaAst {
 
         given Type[PropName] = nt
 
-        val expr: N[Expr[SchemaMotif.Object[G, As || PropName :? B]]] =
+        val expr: N[Expr[SchemaMotif.Object.NonEmpty[G, As || PropName :? B]]] =
           N.map2(si, sl) { (si, sl) =>
             '{ SchemaMotif.Object.SnocOpt[G, As, PropName, B]($si, $spn, $sl) }
           }

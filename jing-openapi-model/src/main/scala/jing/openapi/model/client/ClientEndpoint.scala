@@ -26,7 +26,7 @@ object ClientEndpoint {
             (path, schema)
       HttpThunk(
         method,
-        paramsSchema = RequestSchema.Params(path, Schema.objectEmpty),
+        paramsSchema = RequestSchema.Params.Empty(path),
         params = Value.obj,
         body = Some(Body(bodySchema, i, body)),
         responseSchema,

@@ -318,7 +318,7 @@ private[openapi] object SwaggerToScalaAst {
     import qr.*
     import scala.collection.immutable.::
 
-    val paramSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]] =
+    val paramSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]] =
       Option(op.getParameters())
         .map(_.asScala.toList)
         .collect { case p :: ps => NonEmptyList(p, ps) }
@@ -361,14 +361,20 @@ private[openapi] object SwaggerToScalaAst {
   )(using
     q: Quotes,
     F: Applicative[F],
-  ): Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])] = {
-    val protoSchematic: SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?] =
-      params.foldLeft[SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?]](SchemaMotif.Object.Empty()) { (acc, p) =>
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])] = {
+    val NonEmptyList(p, ps) = params
+    val pSchema = protoSchema(p.getSchema()).orientBackward
+
+    type G[x] = ProtoSchema.Oriented
+    val protoSchematic: SchemaMotif.Object.NonEmpty[G, ?] =
+      ps.foldLeft[SchemaMotif.Object.NonEmpty[G, ?]](
+        SchemaMotif.Object.snoc(SchemaMotif.Object.Empty[G](), p.getName, pSchema),
+      ) { (acc, p) =>
         val pSchema = protoSchema(p.getSchema()).orientBackward
         SchemaMotif.Object.snoc(acc, p.getName(), pSchema)
       }
 
-    quotedObjectSchemaFromProto(protoSchematic)
+    quotedSchemaObjectNonEmptyFromProto(protoSchematic)
       .run(schemas)
   }
 
@@ -456,7 +462,7 @@ private[openapi] object SwaggerToScalaAst {
 
   private def requestSchema[F[_]](
     path: String,
-    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
+    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]],
     reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]],
   )(using
     q: Quotes,
@@ -477,7 +483,7 @@ private[openapi] object SwaggerToScalaAst {
 
   private def requestSchemaParamsOpt[F[_]](
     path: String,
-    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]],
+    paramsSchema: Option[Exists[[Ps] =>> (Type[Ps], F[Expr[Schema.Object.NonEmpty[Ps]]])]],
   )(using
     q: Quotes,
     F: Applicative[F],
@@ -487,7 +493,7 @@ private[openapi] object SwaggerToScalaAst {
         given pst: Type[ps.T] = tps
         Indeed((
           Type.of[Void || "params" :: Obj[ps.T]],
-          sps.map { sps => '{ RequestSchema.Parameterized(RequestSchema.Params(${Expr(path)}, $sps)) } },
+          sps.map { sps => '{ RequestSchema.Parameterized(RequestSchema.Params.NonEmpty(${Expr(path)}, $sps)) } },
         ))
       case None =>
         Indeed((

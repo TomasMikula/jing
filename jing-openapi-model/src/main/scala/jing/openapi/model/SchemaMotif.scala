@@ -83,17 +83,19 @@ object SchemaMotif {
   object Object {
     case class Empty[F[_]]() extends Object[F, Void]
 
+    sealed trait NonEmpty[F[_], Ps] extends Object[F, Ps]
+
     case class Snoc[F[_], Init, PropName <: String, PropType](
       init: Object[F, Init],
       pname: SingletonType[PropName],
       ptype: F[PropType],
-    ) extends Object[F, Init || PropName :: PropType]
+    ) extends Object.NonEmpty[F, Init || PropName :: PropType]
 
     case class SnocOpt[F[_], Init, PropName <: String, PropType](
       init: Object[F, Init],
       pname: SingletonType[PropName],
       ptype: F[PropType],
-    ) extends Object[F, Init || PropName :? PropType]
+    ) extends Object.NonEmpty[F, Init || PropName :? PropType]
 
     def empty[F[_]]: Object[F, Void] =
       Empty()
@@ -102,14 +104,14 @@ object SchemaMotif {
       init: SchemaMotif[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
-    ): Object[F, Init || pname.type :: PropType] =
+    ): Object.NonEmpty[F, Init || pname.type :: PropType] =
       Snoc(asObject(init), SingletonType(pname), ptype)
 
     def snocOpt[F[_], Init, PropType](
       init: SchemaMotif[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
-    ): Object[F, Init || pname.type :? PropType] =
+    ): Object.NonEmpty[F, Init || pname.type :? PropType] =
       SnocOpt(asObject(init), SingletonType(pname), ptype)
   }
 

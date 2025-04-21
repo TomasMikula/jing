@@ -17,11 +17,19 @@ object RequestSchema {
   case class ConstantPath(path: String) extends ParamsOpt[Void]
 
   case class Parameterized[Ps](
-    params: Params[Ps],
+    params: Params.NonEmpty[Ps],
   ) extends ParamsOpt[Void || "params" :: Obj[Ps]]
 
-  case class Params[Ps](
-    path: String,
-    schema: Schema[Obj[Ps]],
-  )
+  sealed trait Params[Ps] {
+    def path: String
+  }
+
+  object Params {
+    case class Empty(path: String) extends Params[Void]
+
+    case class NonEmpty[Ps](
+      path: String,
+      schema: Schema.Object.NonEmpty[Ps],
+    ) extends Params[Ps]
+  }
 }

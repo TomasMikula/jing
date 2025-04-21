@@ -40,4 +40,17 @@ object Schema {
       case u: Unsupported[msg] =>
         throw AssertionError(s"Impossible for Obj[X] =:= Oops[Y], as `Obj` and `Oops` are distinct class types")
 
+  object Object {
+    opaque type NonEmpty[Props] =
+      SchemaMotif.Object.NonEmpty[Schema, Props]
+
+    object NonEmpty {
+      def fromMotif[Props](motif: SchemaMotif.Object.NonEmpty[Schema, Props]): NonEmpty[Props] =
+        motif
+
+      extension [Props](o: Object.NonEmpty[Props])
+        def toMotif: SchemaMotif.Object.NonEmpty[Schema, Props] =
+          o
+    }
+  }
 }
