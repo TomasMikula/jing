@@ -37,6 +37,12 @@ trait ValueModule[Value[_]] {
     def set(k: String, v: String): Value[Obj[Ps || k.type :: Str]] =
       set(k, str(v))
 
+    def setOpt[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :? T]] =
+      fromMotif(ValueMotif.Object.extendOpt(toMotifObject(value), k, Some(v)))
+
+    def setOpt(k: String, v: String): Value[Obj[Ps || k.type :? Str]] =
+      setOpt(k, str(v))
+
     def extend[K <: String, V](k: SingletonType[K], v: Value[V]): Value[Obj[Ps || K :: V]] =
       fromMotif(ValueMotif.Object.extend(toMotifObject(value), k.value, v))
 

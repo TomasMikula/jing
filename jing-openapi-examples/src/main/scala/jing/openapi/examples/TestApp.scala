@@ -39,7 +39,7 @@ object TestApp extends App {
       .Get
       .interpret(using DefaultClient)
       .queryParams(
-        obj.set("status", "available")
+        obj(_.set("status", "available"))
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 

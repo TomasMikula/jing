@@ -8,6 +8,7 @@ import jing.openapi.StructuralRefinement.{MemberDef, PreviousSiblings, typeRefUn
 import jing.openapi.model.{
   ||,
   ::,
+  :?,
   BodySchema,
   DiscriminatedUnion,
   HttpEndpoint,
@@ -415,16 +416,26 @@ private[openapi] object SwaggerToScalaAst {
       val (nmt, nme) = ModelToScalaAst.quotedSingletonString(pname)
       given Type[PName] = nmt
       val pSchema = protoSchema(param.getSchema()).orientBackward
+      val required: Boolean =
+        param.getRequired() match
+          case null => false
+          case other => other
 
       quotedSchemaFromProto(pSchema)
         .run(schemas)
           match
             case ex @ Indeed((t, fSch)) =>
               given Type[ex.T] = t
-              Indeed((
-                Type.of[Init || PName :: ex.T],
-                F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParam($init, $nme, $sch) } },
-              ))
+              if (required)
+                Indeed((
+                  Type.of[Init || PName :: ex.T],
+                  F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParam($init, $nme, $sch) } },
+                ))
+              else
+                Indeed((
+                  Type.of[Init || PName :? ex.T],
+                  F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParamOpt($init, $nme, $sch) } },
+                ))
 
     go[pName.type](SingletonType(pName))
   }
