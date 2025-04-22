@@ -8,7 +8,7 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{Body, BodySchema, IsCaseOf, Obj, RequestSchema, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.{||, ::, :?, Body, BodySchema, IsCaseOf, Obj, RequestSchema, ResponseSchema, Schema, Value, ValueMotif}
 import jing.openapi.model.client.{Client, HttpThunk}
 import libretto.lambda.util.Exists.Indeed
 
@@ -66,10 +66,57 @@ class ClientJdk extends Client {
     paramsSchema: RequestSchema.Params[Ps],
     params: Value[Obj[Ps]],
   ): String =
-    paramsSchema.path + (queryString(params) match
-      case "" => ""
-      case qs => "?" + qs
-    )
+    toRelativeUrl_(paramsSchema, params)._1
+
+  def toRelativeUrl_[Ps](
+    paramsSchema: RequestSchema.Params[Ps],
+    params: Value[Obj[Ps]],
+  ): (String, Boolean) = {
+    import RequestSchema.Params.*
+
+    paramsSchema match
+      case ConstantPath(path) =>
+        (path, false)
+      case ParameterizedPath(path) =>
+        (toRelativeUrl(path, params), false)
+      case wqp: WithQueryParam[init, pName, pType] =>
+        val (initParams, lastParam) =  (params: Value[Obj[init || pName :: pType]]).unsnoc
+        val (initUrl, hasQueryParams) = toRelativeUrl_(wqp.init, initParams)
+        val url =
+          initUrl
+            + (if hasQueryParams then "&" else "?")
+            + encodeQueryParam(wqp.pName.value, lastParam)
+        (url, true)
+      case wqpo: WithQueryParamOpt[init, pName, pType] =>
+        val (initParams, lastParam) =  (params: Value[Obj[init || pName :? pType]]).unsnoc
+        val (initUrl, hasQueryParams) = toRelativeUrl_(wqpo.init, initParams)
+        lastParam match
+          case None =>
+            (initUrl, hasQueryParams)
+          case Some(lastParam) =>
+            val url =
+              initUrl
+                + (if hasQueryParams then "&" else "?")
+                + encodeQueryParam(wqpo.pName.value, lastParam)
+            (url, true)
+  }
+
+  private def toRelativeUrl[Ps](
+    path: RequestSchema.Path[Ps],
+    params: Value[Obj[Ps]],
+  ): String = {
+    import RequestSchema.Path.*
+
+    path match
+      case Constant(value) =>
+        urlEncode(value)
+      case wp: WithParam[init, pname, ptype] =>
+        val WithParam(init, pName, pSchema, suffix) = wp
+        val (initParams, lastParam) = (params: Value[Obj[init || pname :: ptype]]).unsnoc
+        toRelativeUrl(init, initParams)
+          + urlEncode(lastParam)
+          + urlEncode(suffix)
+  }
 
   private def encodeBody[T](body: Body[SupportedMimeType, T]): (SupportedMimeType, String) =
     body match
@@ -141,10 +188,8 @@ class ClientJdk extends Client {
   private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
     ValueCodecJson.decodeLenient(schema, body)
 
-  private def queryString[Qs](params: Value[Obj[Qs]]): String =
-    params
-      .toMap
-      .iterator.map { case (k, v) => s"${urlEncode(k)}=${urlEncode(v)}" }.mkString("&")
+  private def encodeQueryParam[Q](k: String, v: Value[Q]): String =
+    s"${urlEncode(k)}=${urlEncode(v)}"
 
   private def urlEncode(s: String): String =
     s // TODO

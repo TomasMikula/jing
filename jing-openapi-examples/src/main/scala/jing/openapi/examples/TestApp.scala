@@ -11,6 +11,8 @@ object TestApp extends App {
   import api.schemas.{Category, Pet}
 
   // Create a pet
+  // ------------
+  // POST request with JSON body
   val postResult =
     api
       .paths
@@ -31,18 +33,41 @@ object TestApp extends App {
 
   println(postResult.map(_.show))
 
+  // Update the pet's status
+  // -----------------------
+  // POST request with path and query parameters.
+  // Notice uniform treatment of path and query parameters.
+  val updateResult =
+    api
+      .paths
+      .`/pet/{petId}`
+      .Post
+      .interpret(using DefaultClient)
+      .params(obj(_
+        .set("petId", 12345L)  // path parameter
+        .skip("name")          // optional query parameter (omitted from request)
+        .set("status", "sold") // query parameter
+      ))
+      .runAgainst("https://petstore3.swagger.io/api/v3")
+
+  println()
+  println(updateResult.map(_.show))
+
   // Find available pets
+  // -------------------
+  // GET request with a query parameter
   val findResult =
     api
       .paths
       .`/pet/findByStatus`
       .Get
       .interpret(using DefaultClient)
-      .queryParams(
+      .params(
         obj(_.set("status", "available"))
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 
+  println()
   findResult match
     case Failed(e) =>
       println(s"Failed with: $e")

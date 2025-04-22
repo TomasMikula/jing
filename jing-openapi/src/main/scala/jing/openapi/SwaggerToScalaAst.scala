@@ -307,6 +307,39 @@ private[openapi] object SwaggerToScalaAst {
         case HttpMethod.Trace   => path.getTrace()
     )
 
+  private type QuotedSchema[F[_]] =
+    Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]
+
+  private enum ProtoParam[F[_]]:
+    case PathParam(name: String, schema: QuotedSchema[F])
+    case QueryParam(name: String, schema: QuotedSchema[F], required: Boolean)
+    case Unsupported(name: String, schema: QuotedSchema[F], required: Boolean, unsupportedLocation: String)
+
+  private def resolveParam[F[_]](
+    schemas: SchemaLookup[F],
+    param: io.swagger.v3.oas.models.parameters.Parameter,
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): ProtoParam[F[_]] = {
+    val name = param.getName
+    val schema =
+      quotedSchemaFromProto(
+        protoSchema(param.getSchema()).orientBackward,
+      ).run(schemas)
+
+    val required: Boolean =
+      param.getRequired() match
+        case null => false
+        case other => other
+
+    param.getIn match
+      case "path"   => ProtoParam.PathParam(name, schema)
+      case "query"  => ProtoParam.QueryParam(name, schema, required)
+      case other    => ProtoParam.Unsupported(name, schema, required, other)
+  }
+
+
   private def operationToObject[F[_]](
     schemas: SchemaLookup[F],
     path: String,
@@ -320,11 +353,11 @@ private[openapi] object SwaggerToScalaAst {
 
     val paramSchema: Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])] =
       requestSchemaParamsOpt(
-        schemas,
         path,
         Option(op.getParameters())
           .map(_.asScala.toList)
           .getOrElse(Nil)
+          .map(resolveParam(schemas, _))
       )
 
     val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]] =
@@ -360,84 +393,184 @@ private[openapi] object SwaggerToScalaAst {
   }
 
   private def requestSchemaParamsOpt[F[_]](
-    schemas: SchemaLookup[F],
     path: String,
-    params: List[io.swagger.v3.oas.models.parameters.Parameter],
+    params: List[ProtoParam[F]],
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])] =
-    params match
-      case NonEmptyList(p, ps) =>
-        parametersSchema(schemas, path, NonEmptyList(p, ps)) match
-          case ex @ Indeed((t, e)) =>
-            given Type[ex.T] = t
-            Indeed((
-              Type.of[Void || "params" :: Obj[ex.T]],
-              e.map { e => '{ RequestSchema.Parameterized($e) } }
-            ))
-      case Nil =>
+    parametersSchema(path, params) match
+      case Some(ex @ Indeed((t, e))) =>
+        given Type[ex.T] = t
+        Indeed((
+          Type.of[Void || "params" :: Obj[ex.T]],
+          e.map { e => '{ RequestSchema.Parameterized($e) } }
+        ))
+      case None =>
         Indeed((Type.of[Void], F.pure('{ RequestSchema.ConstantPath(${Expr(path)}) })))
 
   private def parametersSchema[F[_]](
-    schemas: SchemaLookup[F],
     path: String,
-    params: NonEmptyList[io.swagger.v3.oas.models.parameters.Parameter],
+    params: List[ProtoParam[F]],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Option[Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])]] = {
+    val (pathParams, params1) =
+      params.partitionMap:
+        case p: ProtoParam.PathParam[F] => Left(p)
+        case p: (ProtoParam.QueryParam[F] | ProtoParam.Unsupported[F]) => Right(p)
+
+    val (queryParams, params2) =
+      params1.partitionMap:
+        case p: ProtoParam.QueryParam[F] => Left(p)
+        case p: ProtoParam.Unsupported[F] => Right(p)
+
+    // TODO: support header params
+
+    val unsupportedAsQueryParams: List[ProtoParam.QueryParam[F]] =
+      params2.map {
+        case ProtoParam.Unsupported(name, _, required, unsupportedLocation) =>
+          val schema = Schema.unsupported(s"'$unsupportedLocation' parameters are not yet supported")
+          val (tp, exp) = quotedSchema(schema)
+          ProtoParam.QueryParam(name, Indeed((tp, F.pure(exp))), required)
+        }
+
+    val queryParams1 = queryParams ++ unsupportedAsQueryParams
+
+    pathSchema(path, pathParams) match
+      case Some(ex @ Indeed((t, fp))) =>
+        given Type[ex.T] = t
+        Some:
+          appendQueryParams(
+            Indeed((t, fp.map { p => '{ RequestSchema.Params.ParameterizedPath($p) } })),
+            queryParams1,
+          )
+      case None =>
+        queryParams1 match
+          case NonEmptyList(p0, ps) =>
+            Some:
+              appendQueryParams(
+                appendQueryParam(
+                  '{ RequestSchema.Params.ConstantPath(${Expr(path)}) }.pure[F],
+                  p0,
+                ),
+                ps
+              )
+          case Nil =>
+            None
+  }
+
+  private def pathSchema[F[_]](
+    path: String,
+    pathParams: List[ProtoParam.PathParam[F]],
+  )(using
+    q: Quotes,
+    F: Applicative[F],
+  ): Option[Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Path.Parameterized[Ps]]])]] = {
+    // sort parameters by their occurence in path
+    // and track their start, end, and start of the next parameter
+    val sortedParams: List[(ProtoParam.PathParam[F], Int, Int, Int)] =
+      pathParams
+        .map: p =>
+          val needle = "{" + p.name + "}"
+          val i = path.indexOf(needle)
+          (p, i, i+needle.length())
+        .filter: // TODO: report error on params not found in path
+          case (p, i, j) => i != -1
+        .sortBy:
+          case (p, i, j) => i
+        .foldRight(Nil) { case ((p, i, j), acc) =>
+          acc match
+            case Nil =>
+              (p, i, j, path.length) :: Nil
+            case qs @ NonEmptyList((q, k, l, _), _) =>
+              (p, i, j, k) :: qs
+        }
+
+    sortedParams match
+      case Nil =>
+        None
+      case NonEmptyList((p0, i, j, k), ps) =>
+        Some:
+          ps.foldLeft(
+            appendPathParam(
+              '{ RequestSchema.Path.Constant(${Expr(path.substring(0, i))}) }.pure[F],
+              p0,
+              suffix = path.substring(j, k),
+            )
+          ) { case (acc @ Indeed((t, fe)), (p, i, j, k)) =>
+            given Type[acc.T] = t
+            appendPathParam(fe.widen, p, suffix = path.substring(j, k))
+          }
+  }
+
+  private def appendPathParam[F[_], Init](
+    init: F[Expr[RequestSchema.Path[Init]]],
+    param: ProtoParam.PathParam[F],
+    suffix: String,
+  )(using
+    q: Quotes,
+    t: Type[Init],
+    F: Applicative[F],
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Path.Parameterized[Ps]]])] = {
+    def go[PName <: String](
+      pname: SingletonType[PName],
+    ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Path.Parameterized[Ps]]])] =
+      val (nmt, nme) = ModelToScalaAst.quotedSingletonString(pname)
+      given Type[PName] = nmt
+
+      param.schema match
+        case ex @ Indeed((t, fSch)) =>
+          given Type[ex.T] = t
+          Indeed((
+            Type.of[Init || PName :: ex.T],
+            F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Path.WithParam($init, $nme, $sch, ${Expr(suffix)}) } },
+          ))
+
+    go[param.name.type](SingletonType(param.name))
+  }
+
+  private def appendQueryParams[F[_]](
+    init: Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])],
+    queryParams: List[ProtoParam.QueryParam[F]],
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])] = {
-    val NonEmptyList(p0, ps) = params
-
-    ps.foldLeft(
-      parametersSchemaExtend(
-        schemas,
-        '{ RequestSchema.Params.ConstantPath(${Expr(path)}) }.pure[F],
-        p0,
-      )
-    ) { case (acc @ Indeed((t, fe)), p) =>
+    queryParams.foldLeft(init) { case (acc @ Indeed((t, fe)), p) =>
       given Type[acc.T] = t
-      parametersSchemaExtend(schemas, fe.widen, p)
+      appendQueryParam(fe.widen, p)
     }
   }
 
-  private def parametersSchemaExtend[F[_], Init](
-    schemas: SchemaLookup[F],
+  private def appendQueryParam[F[_], Init](
     init: F[Expr[RequestSchema.Params[Init]]],
-    param: io.swagger.v3.oas.models.parameters.Parameter,
+    param: ProtoParam.QueryParam[F],
   )(using
     q: Quotes,
     t: Type[Init],
     F: Applicative[F],
   ): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])] = {
-    val pName = param.getName
-
     def go[PName <: String](pname: SingletonType[PName]): Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.Params.Proper[Ps]]])] =
       val (nmt, nme) = ModelToScalaAst.quotedSingletonString(pname)
       given Type[PName] = nmt
-      val pSchema = protoSchema(param.getSchema()).orientBackward
-      val required: Boolean =
-        param.getRequired() match
-          case null => false
-          case other => other
 
-      quotedSchemaFromProto(pSchema)
-        .run(schemas)
-          match
-            case ex @ Indeed((t, fSch)) =>
-              given Type[ex.T] = t
-              if (required)
-                Indeed((
-                  Type.of[Init || PName :: ex.T],
-                  F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParam($init, $nme, $sch) } },
-                ))
-              else
-                Indeed((
-                  Type.of[Init || PName :? ex.T],
-                  F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParamOpt($init, $nme, $sch) } },
-                ))
+      param.schema match
+        case ex @ Indeed((t, fSch)) =>
+          given Type[ex.T] = t
+          if (param.required)
+            Indeed((
+              Type.of[Init || PName :: ex.T],
+              F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParam($init, $nme, $sch) } },
+            ))
+          else
+            Indeed((
+              Type.of[Init || PName :? ex.T],
+              F.map2(init, fSch) { (init, sch) => '{ RequestSchema.Params.WithQueryParamOpt($init, $nme, $sch) } },
+            ))
 
-    go[pName.type](SingletonType(pName))
+    go[param.name.type](SingletonType(param.name))
   }
 
   private def requestBodySchema[F[_]](

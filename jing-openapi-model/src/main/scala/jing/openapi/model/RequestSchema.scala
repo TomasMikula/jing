@@ -22,29 +22,42 @@ object RequestSchema {
     params: Params.Proper[Ps],
   ) extends ParamsOpt[Void || "params" :: Obj[Ps]]
 
-  sealed trait Params[Ps] {
-    def path: String
-  }
+  sealed trait Params[Ps]
 
   object Params {
     case class ConstantPath(path: String) extends Params[Void]
 
     sealed trait Proper[Ps] extends Params[Ps]
 
+    case class ParameterizedPath[Ps](
+      path: Path.Parameterized[Ps],
+    ) extends Proper[Ps]
+
     case class WithQueryParam[Ps, ParamName <: String, ParamType](
       init: Params[Ps],
       pName: SingletonType[ParamName],
       pSchema: Schema[ParamType],
-    ) extends Params.Proper[Ps || ParamName :: ParamType] {
-      override def path: String = init.path
-    }
+    ) extends Params.Proper[Ps || ParamName :: ParamType]
 
     case class WithQueryParamOpt[Ps, ParamName <: String, ParamType](
       init: Params[Ps],
       pName: SingletonType[ParamName],
       pSchema: Schema[ParamType],
-    ) extends Params.Proper[Ps || ParamName :? ParamType] {
-      override def path: String = init.path
-    }
+    ) extends Params.Proper[Ps || ParamName :? ParamType]
+  }
+
+  sealed trait Path[Ps]
+
+  object Path {
+    case class Constant(value: String) extends Path[Void]
+
+    sealed trait Parameterized[Ps] extends Path[Ps]
+
+    case class WithParam[Init, ParamName <: String, ParamType](
+      prefix: Path[Init],
+      pName: SingletonType[ParamName],
+      pSchema: Schema[ParamType],
+      suffix: String,
+    ) extends Parameterized[Init || ParamName :: ParamType]
   }
 }

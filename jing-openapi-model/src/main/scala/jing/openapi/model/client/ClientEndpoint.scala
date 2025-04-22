@@ -8,7 +8,7 @@ class ClientEndpoint[Is, O](
 ) {
   import ClientEndpoint.*
 
-  def queryParams[Qs, Rest](using ev: ToRightAssoc[Is] =:= ("params" :: Obj[Qs] || Rest))(
+  def params[Qs, Rest](using ev: ToRightAssoc[Is] =:= ("params" :: Obj[Qs] || Rest))(
     params: Value[Obj[Qs]],
   ): ClientEndpoint.WithQueryParams[Is, Qs, Rest, O] =
     WithQueryParams(this, params)

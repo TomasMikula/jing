@@ -67,6 +67,10 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: String): ObjectBuilder[Acc || Label :: Str, Tail] =
       ValueMotif.Object.ObjExt(b, propName, str(value))
 
+  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Int64 || Tail])
+    def set(propName: Label, value: Long): ObjectBuilder[Acc || Label :: Int64, Tail] =
+      ValueMotif.Object.ObjExt(b, propName, int64(value))
+
   extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :? A || Tail]) {
     @targetName("setOpt")
     def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :? A, Tail] =
