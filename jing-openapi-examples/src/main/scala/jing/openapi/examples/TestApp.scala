@@ -45,7 +45,7 @@ object TestApp extends App {
       .interpret(using DefaultClient)
       .params(_
         .set("petId", 12345L)  // path parameter
-        .skip("name")          // optional query parameter (omitted from request)
+        .set("name", "Muffin") // query parameter
         .set("status", "sold") // query parameter
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")

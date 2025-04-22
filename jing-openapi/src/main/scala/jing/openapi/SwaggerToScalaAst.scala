@@ -20,6 +20,7 @@ import jing.openapi.model.{
   Schema,
   SchemaCompanion,
   SchemaMotif,
+  Str,
   Value,
 }
 import libretto.lambda.Items1Named
@@ -634,7 +635,7 @@ private[openapi] object SwaggerToScalaAst {
   ): Exists[[T] =>> (Type[T], F[Expr[ResponseSchema[T]]])] =
     quotedProductUnrelatedAA(
       byStatus.asProduct,
-      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchemaOrEmpty(sl, apiResponse)),
+      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchemaOrPlainText(sl, apiResponse)),
     ).run(schemas) match {
       case x @ Indeed((tp, bs)) =>
         given Type[x.T] = tp
@@ -644,7 +645,7 @@ private[openapi] object SwaggerToScalaAst {
         ))
     }
 
-  private def responseBodySchemaOrEmpty[F[_]](
+  private def responseBodySchemaOrPlainText[F[_]](
     schemas: SchemaLookup[F],
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
   )(using
@@ -653,7 +654,7 @@ private[openapi] object SwaggerToScalaAst {
   ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
     bodySchema(schemas, apiResponse.getContent()) match
       case Some(Indeed((tp, exp))) => Indeed((tp, exp.widen))
-      case None => Indeed((Type.of[Unit], F.pure('{ BodySchema.Empty })))
+      case None => Indeed((Type.of[Str], F.pure('{ BodySchema.AnythingAsPlainText })))
 
   private def requestSchema[F[_]](
     paramsSchema: Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])],

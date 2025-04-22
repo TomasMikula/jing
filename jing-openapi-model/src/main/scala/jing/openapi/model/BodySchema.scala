@@ -13,4 +13,5 @@ object BodySchema {
     byMediaType: Items1Named.Product[||, ::, Schema, Cases],
   ) extends BodySchema.NonEmpty[DiscriminatedUnion[Cases]]
 
+  case object AnythingAsPlainText extends NonEmpty[Str]
 }
