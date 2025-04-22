@@ -43,11 +43,11 @@ object TestApp extends App {
       .`/pet/{petId}`
       .Post
       .interpret(using DefaultClient)
-      .params(obj(_
+      .params(_
         .set("petId", 12345L)  // path parameter
         .skip("name")          // optional query parameter (omitted from request)
         .set("status", "sold") // query parameter
-      ))
+      )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 
   println()
@@ -62,8 +62,8 @@ object TestApp extends App {
       .`/pet/findByStatus`
       .Get
       .interpret(using DefaultClient)
-      .params(
-        obj(_.set("status", "available"))
+      .params(_
+        .set("status", "available")
       )
       .runAgainst("https://petstore3.swagger.io/api/v3")
 

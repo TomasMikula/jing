@@ -12,6 +12,11 @@ class ClientEndpoint[Is, O](
     params: Value[Obj[Qs]],
   ): ClientEndpoint.WithQueryParams[Is, Qs, Rest, O] =
     WithQueryParams(this, params)
+
+  def params[Qs, Rest](using ev: ToRightAssoc[Is] =:= ("params" :: Obj[Qs] || Rest))(
+    f: Value.ObjectBuilder[Void, ToRightAssoc[Qs]] => Value.ObjectBuilder[Qs, Void],
+  ): ClientEndpoint.WithQueryParams[Is, Qs, Rest, O] =
+    params(f(Value.ObjectBuilder[Qs]).result)
 }
 
 object ClientEndpoint {
