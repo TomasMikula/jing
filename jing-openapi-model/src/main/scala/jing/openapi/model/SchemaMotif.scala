@@ -19,6 +19,7 @@ sealed trait SchemaMotif[F[_], A] {
       case Array(elem) => Array(h(elem))
       case Object.Empty() => Object.Empty()
       case Object.Snoc(init, pname, ptype) => Object.Snoc(asObject(init.translate(h)), pname, h(ptype))
+      case Object.SnocOpt(init, pname, ptype) => Object.SnocOpt(asObject(init.translate(h)), pname, h(ptype))
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
