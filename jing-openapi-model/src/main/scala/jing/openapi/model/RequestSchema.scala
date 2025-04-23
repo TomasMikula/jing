@@ -36,14 +36,24 @@ object RequestSchema {
     case class WithQueryParam[Ps, ParamName <: String, ParamType](
       init: Params[Ps],
       pName: SingletonType[ParamName],
-      pSchema: Schema[ParamType],
+      pSchema: QueryParamSchema[ParamType],
     ) extends Params.Proper[Ps || ParamName :: ParamType]
 
     case class WithQueryParamOpt[Ps, ParamName <: String, ParamType](
       init: Params[Ps],
       pName: SingletonType[ParamName],
-      pSchema: Schema[ParamType],
+      pSchema: QueryParamSchema[ParamType],
     ) extends Params.Proper[Ps || ParamName :? ParamType]
+
+    enum QueryParamSchema[T]:
+      case Primitive(value: SchemaMotif.Primitive[Nothing, T])
+      case PrimitiveArray[T](elem: SchemaMotif.Primitive[Nothing, T]) extends QueryParamSchema[Arr[T]]
+      case Unsupported[S <: String](msg: SingletonType[S]) extends QueryParamSchema[Oops[S]]
+
+    object QueryParamSchema {
+      def unsupported(msg: String): QueryParamSchema[Oops[msg.type]] =
+        Unsupported(SingletonType(msg))
+    }
   }
 
   sealed trait Path[Ps]
@@ -56,8 +66,24 @@ object RequestSchema {
     case class WithParam[Init, ParamName <: String, ParamType](
       prefix: Path[Init],
       pName: SingletonType[ParamName],
-      pSchema: Schema[ParamType],
+      pSchema: ParamSchema[ParamType],
       suffix: String,
     ) extends Parameterized[Init || ParamName :: ParamType]
+
+    sealed trait ParamSchema[T] {
+      import ParamSchema.*
+
+      def toQueryParamSchema: Params.QueryParamSchema[T] =
+        this match
+          case Primitive(p) => Params.QueryParamSchema.Primitive(p)
+          case Unsupported(msg) => Params.QueryParamSchema.Unsupported(msg)
+    }
+    object ParamSchema {
+      case class Primitive[T](value: SchemaMotif.Primitive[Nothing, T]) extends ParamSchema[T]
+      case class Unsupported[S <: String](msg: SingletonType[S]) extends ParamSchema[Oops[S]]
+
+      def unsupported(msg: String): ParamSchema[Oops[msg.type]] =
+        Unsupported(SingletonType(msg))
+    }
   }
 }

@@ -8,7 +8,8 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{||, ::, :?, Body, BodySchema, IsCaseOf, Obj, RequestSchema, ResponseSchema, Schema, Value, ValueMotif}
+import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueMotif}
+import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.client.{Client, HttpThunk}
 import libretto.lambda.util.Exists.Indeed
 
@@ -85,7 +86,7 @@ class ClientJdk extends Client {
         val url =
           initUrl
             + (if hasQueryParams then "&" else "?")
-            + encodeQueryParam(wqp.pName.value, lastParam)
+            + encodeQueryParam(wqp.pName.value, lastParam, wqp.pSchema)
         (url, true)
       case wqpo: WithQueryParamOpt[init, pName, pType] =>
         val (initParams, lastParam) =  (params: Value[Obj[init || pName :? pType]]).unsnoc
@@ -97,7 +98,7 @@ class ClientJdk extends Client {
             val url =
               initUrl
                 + (if hasQueryParams then "&" else "?")
-                + encodeQueryParam(wqpo.pName.value, lastParam)
+                + encodeQueryParam(wqpo.pName.value, lastParam, wqpo.pSchema)
             (url, true)
   }
 
@@ -114,7 +115,7 @@ class ClientJdk extends Client {
         val WithParam(init, pName, pSchema, suffix) = wp
         val (initParams, lastParam) = (params: Value[Obj[init || pname :: ptype]]).unsnoc
         toRelativeUrl(init, initParams)
-          + urlEncode(lastParam)
+          + urlEncode(lastParam, pSchema.toQueryParamSchema)
           + urlEncode(suffix)
   }
 
@@ -190,48 +191,42 @@ class ClientJdk extends Client {
   private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
     ValueCodecJson.decodeLenient(schema, body)
 
-  private def encodeQueryParam[Q](k: String, v: Value[Q]): String =
-    s"${urlEncode(k)}=${urlEncode(v)}"
+  private def encodeQueryParam[Q](k: String, v: Value[Q], schema: QueryParamSchema[Q]): String =
+    s"${urlEncode(k)}=${urlEncode(v, schema)}"
 
   private def urlEncode(s: String): String =
     s // TODO
 
-  private def urlEncode[T](v: Value[T]): String =
-    urlEncode(stringify(v))
+  private def urlEncode[T](
+    v: Value[T],
+    schema: QueryParamSchema[T],
+  ): String =
+    urlEncode(stringify(v, schema))
 
-  private def stringify[T](v: Value[T]): String =
-    import ValueMotif.*
-    v.underlying match
-      case StringValue(s) => s
-      case Int64Value(i) => i.toString
-      case Int32Value(i) => i.toString
-      case BoolValue(b)  => b.toString
-      case Array(elem) =>
-        throw IllegalArgumentException("URL-encoding an array is not supported")
-      case DiscUnion(_) =>
-        throw IllegalArgumentException("URL-encoding a discriminated union is not supported")
-      case Uno =>
-        throw IllegalArgumentException("URL-encoding Unit is not supported")
-      case o: Object[Value, props] =>
-        // TODO: objects in query parameters should either
-        //  - be disallowed by construction; or
-        //  - have an associated encoder
-        // What follows is wrong
+  private def stringify[T](
+    v: Value[T],
+    schema: QueryParamSchema[T],
+  ): String =
+    schema match
+      case QueryParamSchema.Primitive(p) =>
+        stringifyPrimitive(v, p)
+      case a: QueryParamSchema.PrimitiveArray[t] =>
+        summon[T =:= Arr[t]]
+        Value.asArray(v: Value[Arr[t]]).map(stringifyPrimitive(_, a.elem)).mkString(",")
+      case _: QueryParamSchema.Unsupported[s] =>
+        summon[T =:= Oops[s]]
+        v.isNotOops[s]
 
-        val builder = new StringBuilder
-        builder += '{'
-
-        var nonEmpty = false
-        o.foreachProperty:
-          [K <: String, V] => (k, v) =>
-            if (nonEmpty) builder += ','
-            builder ++= k
-            builder += ':'
-            builder ++= stringify(v)
-            nonEmpty = true
-
-        builder += '}'
-        builder.result()
+  private def stringifyPrimitive[T](
+    v: Value[T],
+    schema: SchemaMotif.Primitive[?, T],
+  ): String =
+    import SchemaMotif.*
+    schema match
+      case I32() => Value.intValue(v).toString
+      case I64() => Value.longValue(v).toString
+      case S() => Value.stringValue(v)
+      case B() => Value.booleanValue(v).toString
 
   extension [A](a: A)
     private def |>[B](f: A => B): B = f(a)

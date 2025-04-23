@@ -42,10 +42,14 @@ sealed trait SchemaMotif[F[_], A] {
 }
 
 object SchemaMotif {
-  case class I32[F[_]]() extends SchemaMotif[F, Int32]
-  case class I64[F[_]]() extends SchemaMotif[F, Int64]
-  case class S[F[_]]() extends SchemaMotif[F, Str]
-  case class B[F[_]]() extends SchemaMotif[F, Bool]
+  sealed trait Primitive[F[_], T] extends SchemaMotif[F, T] {
+    def recast[G[_]]: Primitive[G, T] = this.asInstanceOf
+  }
+  case class I32[F[_]]() extends Primitive[F, Int32]
+  case class I64[F[_]]() extends Primitive[F, Int64]
+  case class S[F[_]]() extends Primitive[F, Str]
+  case class B[F[_]]() extends Primitive[F, Bool]
+
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 
   sealed trait Object[F[_], Ps] extends SchemaMotif[F, Obj[Ps]] {

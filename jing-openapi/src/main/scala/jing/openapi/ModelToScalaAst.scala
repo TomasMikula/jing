@@ -95,7 +95,7 @@ object ModelToScalaAst {
       case wqp: RequestSchema.Params.WithQueryParam[init, pname, ptype] =>
         val (initt, inits) = quotedParams(wqp.init)
         val (pnameTp, pnameEx) = quotedSingletonString(wqp.pName)
-        val (pt, ps) = quotedSchema(wqp.pSchema)
+        val (pt, ps) = quotedQueryParamSchema(wqp.pSchema)
         given Type[init] = initt
         given Type[pname] = pnameTp
         given Type[ptype] = pt
@@ -106,7 +106,7 @@ object ModelToScalaAst {
       case wqpo: RequestSchema.Params.WithQueryParamOpt[init, pname, ptype] =>
         val (initt, inits) = quotedParams(wqpo.init)
         val (pnameTp, pnameEx) = quotedSingletonString(wqpo.pName)
-        val (pt, ps) = quotedSchema(wqpo.pSchema)
+        val (pt, ps) = quotedQueryParamSchema(wqpo.pSchema)
         given Type[init] = initt
         given Type[pname] = pnameTp
         given Type[ptype] = pt
@@ -114,6 +114,42 @@ object ModelToScalaAst {
           Type.of[init || pname :? ptype],
           '{ RequestSchema.Params.WithQueryParamOpt($inits, ${Expr(wqpo.pName)}, ${ps}) },
         )
+      case pp: RequestSchema.Params.ParameterizedPath[ps] =>
+        ???
+
+  def quotedQueryParamSchema[T](
+    schema: RequestSchema.Params.QueryParamSchema[T],
+  )(using
+    Quotes,
+  ): (Type[T], Expr[RequestSchema.Params.QueryParamSchema[T]]) =
+    schema match
+      case RequestSchema.Params.QueryParamSchema.Primitive(s) =>
+        val (t, e) = quotedSchemaMotifPrimitive(s)
+        given Type[T] = t
+        (t, '{ RequestSchema.Params.QueryParamSchema.Primitive($e) })
+      case a: RequestSchema.Params.QueryParamSchema.PrimitiveArray[t] =>
+        val (t, e) = quotedSchemaMotifPrimitive(a.elem)
+        given Type[t] = t
+        (Type.of[Arr[t]], '{ RequestSchema.Params.QueryParamSchema.PrimitiveArray($e) })
+      case u: RequestSchema.Params.QueryParamSchema.Unsupported[msg] =>
+        val (t, e) = quotedSingletonString(u.msg)
+        given Type[msg] = t
+        (Type.of[Oops[msg]], '{ RequestSchema.Params.QueryParamSchema.Unsupported($e) })
+
+  def quotedPathParamSchema[T](
+    schema: RequestSchema.Path.ParamSchema[T],
+  )(using
+    Quotes,
+  ): (Type[T], Expr[RequestSchema.Path.ParamSchema[T]]) =
+    schema match
+      case RequestSchema.Path.ParamSchema.Primitive(s) =>
+        val (t, e) = quotedSchemaMotifPrimitive(s)
+        given Type[T] = t
+        (t, '{ RequestSchema.Path.ParamSchema.Primitive($e) })
+      case u: RequestSchema.Path.ParamSchema.Unsupported[msg] =>
+        val (t, e) = quotedSingletonString(u.msg)
+        given Type[msg] = t
+        (Type.of[Oops[msg]], '{ RequestSchema.Path.ParamSchema.Unsupported($e) })
 
   def quotedResponseSchema[T](
     x: ResponseSchema[T],
@@ -248,6 +284,21 @@ object ModelToScalaAst {
         given Type[ex.T] = tpe
         Indeed((tpe, expr.map { expr => '{ Schema.Object.NonEmpty.fromMotif($expr) } }))
     }
+
+  def quotedSchemaMotifPrimitive[F[_], T](
+    s: SchemaMotif.Primitive[F, T],
+  )(using
+    Quotes,
+    Type[F],
+  ): (Type[T], Expr[SchemaMotif.Primitive[F, T]]) = {
+    import jing.openapi.model.SchemaMotif.*
+
+    s match
+      case I32() => (Type.of[Int32], '{ I32() })
+      case I64() => (Type.of[Int64], '{ I64() })
+      case S()   => (Type.of[Str], '{ S() })
+      case B()   => (Type.of[Bool], '{ B() })
+  }
 
   def quotedSchemaMotif[F[_], T](
     s: SchemaMotif[F, T],

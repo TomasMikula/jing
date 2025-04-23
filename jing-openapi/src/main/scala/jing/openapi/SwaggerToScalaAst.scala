@@ -308,16 +308,18 @@ private[openapi] object SwaggerToScalaAst {
         case HttpMethod.Trace   => path.getTrace()
     )
 
-  private type QuotedSchema[F[_]] =
-    Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]
+  private type QuotedPathParamSchema[F[_]] =
+    Exists[[T] =>> (Type[T], F[Expr[RequestSchema.Path.ParamSchema[T]]])]
+
+  private type QuotedQueryParamSchema[F[_]] =
+    Exists[[T] =>> (Type[T], F[Expr[RequestSchema.Params.QueryParamSchema[T]]])]
 
   private enum ProtoParam[F[_]]:
-    case PathParam(name: String, schema: QuotedSchema[F])
-    case QueryParam(name: String, schema: QuotedSchema[F], required: Boolean)
-    case Unsupported(name: String, schema: QuotedSchema[F], required: Boolean, unsupportedLocation: String)
+    case PathParam(name: String, schema: QuotedPathParamSchema[F])
+    case QueryParam(name: String, schema: QuotedQueryParamSchema[F], required: Boolean)
+    case Unsupported(name: String, schema: ProtoSchema, required: Boolean, unsupportedLocation: String)
 
   private def resolveParam[F[_]](
-    schemas: SchemaLookup[F],
     param: io.swagger.v3.oas.models.parameters.Parameter,
   )(using
     q: Quotes,
@@ -325,9 +327,7 @@ private[openapi] object SwaggerToScalaAst {
   ): ProtoParam[F[_]] = {
     val name = param.getName
     val schema =
-      quotedSchemaFromProto(
-        protoSchema(param.getSchema()).orientBackward,
-      ).run(schemas)
+      protoSchema(param.getSchema())
 
     val required: Boolean =
       param.getRequired() match
@@ -335,11 +335,66 @@ private[openapi] object SwaggerToScalaAst {
         case other => other
 
     param.getIn match
-      case "path"   => ProtoParam.PathParam(name, schema)
-      case "query"  => ProtoParam.QueryParam(name, schema, required)
+      case "path"   => ProtoParam.PathParam(name, toQuotedPathParamSchema(schema))
+      case "query"  => ProtoParam.QueryParam(name, toQuotedQueryParamSchema(schema), required)
       case other    => ProtoParam.Unsupported(name, schema, required, other)
   }
 
+  private def toQuotedPathParamSchema[F[_]](schema: ProtoSchema)(using
+    q: Quotes,
+    F: Applicative[F],
+  ): QuotedPathParamSchema[F] =
+    quotedPathParamSchema(toPathParamSchema(schema)) match
+      case (t, e) => Indeed((t, F.pure(e)))
+
+  private def toQuotedQueryParamSchema[F[_]](schema: ProtoSchema)(using
+    q: Quotes,
+    F: Applicative[F],
+  ): QuotedQueryParamSchema[F] =
+    quotedQueryParamSchema(toQueryParamSchema(schema)) match
+      case (t, e) => Indeed((t, F.pure(e)))
+
+  private def toPathParamSchema(schema: ProtoSchema): RequestSchema.Path.ParamSchema[?] =
+    schema match
+      case ProtoSchema.Proper(s) =>
+        s match
+          case p: SchemaMotif.Primitive[Schema, t] =>
+            RequestSchema.Path.ParamSchema.Primitive(p.recast)
+          case SchemaMotif.Array(elem) =>
+            RequestSchema.Path.ParamSchema.unsupported("array-typed parameters not supported in path")
+          case _: SchemaMotif.Object[f, ps] =>
+            RequestSchema.Path.ParamSchema.unsupported("object-typed parameters not supported in path")
+      case ProtoSchema.Unsupported(message) =>
+        RequestSchema.Path.ParamSchema.unsupported(message)
+      case ProtoSchema.Ref(schemaName) =>
+        RequestSchema.Path.ParamSchema.unsupported(s"schema refs not supported in path parameters, found $schemaName")
+
+  private def toQueryParamSchema(schema: ProtoSchema): RequestSchema.Params.QueryParamSchema[?] =
+    schema match
+      case ProtoSchema.Proper(s) =>
+        s match
+          case p: SchemaMotif.Primitive[f, t] =>
+            RequestSchema.Params.QueryParamSchema.Primitive(p.recast)
+          case SchemaMotif.Array(elem) =>
+            elem match
+              case ProtoSchema.Proper(elem) =>
+                elem match
+                  case p: SchemaMotif.Primitive[f, t] =>
+                    RequestSchema.Params.QueryParamSchema.PrimitiveArray(p.recast)
+                  case SchemaMotif.Array(elem) =>
+                    RequestSchema.Params.QueryParamSchema.unsupported("nested arrays not supported in query parameters")
+                  case _: SchemaMotif.Object[f, ps] =>
+                    RequestSchema.Params.QueryParamSchema.unsupported("arrays of objects not supported in query parameters")
+              case ProtoSchema.Ref(schemaName) =>
+                RequestSchema.Params.QueryParamSchema.unsupported(s"schema refs not supported in query parameters, found $schemaName")
+              case ProtoSchema.Unsupported(message) =>
+                RequestSchema.Params.QueryParamSchema.unsupported(message)
+          case _: SchemaMotif.Object[f, ps] =>
+            RequestSchema.Params.QueryParamSchema.unsupported("object-typed parameters not supported in query")
+      case ProtoSchema.Ref(schemaName) =>
+        RequestSchema.Params.QueryParamSchema.unsupported(s"schema refs not supported in query parameters, found $schemaName")
+      case ProtoSchema.Unsupported(message) =>
+        RequestSchema.Params.QueryParamSchema.unsupported(message)
 
   private def operationToObject[F[_]](
     schemas: SchemaLookup[F],
@@ -358,7 +413,7 @@ private[openapi] object SwaggerToScalaAst {
         Option(op.getParameters())
           .map(_.asScala.toList)
           .getOrElse(Nil)
-          .map(resolveParam(schemas, _))
+          .map(resolveParam(_))
       )
 
     val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]] =
@@ -393,6 +448,8 @@ private[openapi] object SwaggerToScalaAst {
         ))
   }
 
+  // Even though the `F` parameter is not really needed at the moment,
+  // it will be needed when we start resolving parameter references.
   private def requestSchemaParamsOpt[F[_]](
     path: String,
     params: List[ProtoParam[F]],
@@ -432,8 +489,8 @@ private[openapi] object SwaggerToScalaAst {
     val unsupportedAsQueryParams: List[ProtoParam.QueryParam[F]] =
       params2.map {
         case ProtoParam.Unsupported(name, _, required, unsupportedLocation) =>
-          val schema = Schema.unsupported(s"'$unsupportedLocation' parameters are not yet supported")
-          val (tp, exp) = quotedSchema(schema)
+          val schema = RequestSchema.Params.QueryParamSchema.unsupported(s"'$unsupportedLocation' parameters are not yet supported")
+          val (tp, exp) = quotedQueryParamSchema(schema)
           ProtoParam.QueryParam(name, Indeed((tp, F.pure(exp))), required)
         }
 
