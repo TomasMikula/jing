@@ -317,7 +317,14 @@ private[openapi] object SwaggerToScalaAst {
   private enum ProtoParam[F[_]]:
     case PathParam(name: String, schema: QuotedPathParamSchema[F])
     case QueryParam(name: String, schema: QuotedQueryParamSchema[F], required: Boolean)
-    case Unsupported(name: String, schema: ProtoSchema, required: Boolean, unsupportedLocation: String)
+    case Unsupported(name: String, required: Boolean, reason: ProtoParam.UnsupportedReason)
+    case Error(name: String, required: Boolean, details: String)
+
+  private object ProtoParam {
+    enum UnsupportedReason:
+      case UnsupportedLocation(location: String)
+      case ContentFieldNotSupported
+  }
 
   private def resolveParam[F[_]](
     param: io.swagger.v3.oas.models.parameters.Parameter,
@@ -325,19 +332,31 @@ private[openapi] object SwaggerToScalaAst {
     q: Quotes,
     F: Applicative[F],
   ): ProtoParam[F[_]] = {
+    import ProtoParam.UnsupportedReason.*
+
     val name = param.getName
-    val schema =
-      protoSchema(param.getSchema())
 
     val required: Boolean =
-      param.getRequired() match
+      param.getRequired match
         case null => false
         case other => other
 
-    param.getIn match
-      case "path"   => ProtoParam.PathParam(name, toQuotedPathParamSchema(schema))
-      case "query"  => ProtoParam.QueryParam(name, toQuotedQueryParamSchema(schema), required)
-      case other    => ProtoParam.Unsupported(name, schema, required, other)
+    param.getSchema match
+      case null =>
+        param.getContent match
+          case null =>
+            ProtoParam.Error(name, required, details = "parameter must have either schema or content")
+          case _ =>
+            ProtoParam.Unsupported(name, required, reason = ContentFieldNotSupported)
+
+      case nnSchema =>
+        val schema: ProtoSchema =
+          protoSchema(nnSchema)
+
+        param.getIn match
+          case "path"   => ProtoParam.PathParam(name, toQuotedPathParamSchema(schema))
+          case "query"  => ProtoParam.QueryParam(name, toQuotedQueryParamSchema(schema), required)
+          case other    => ProtoParam.Unsupported(name, required, UnsupportedLocation(other))
   }
 
   private def toQuotedPathParamSchema[F[_]](schema: ProtoSchema)(using
@@ -477,22 +496,31 @@ private[openapi] object SwaggerToScalaAst {
     val (pathParams, params1) =
       params.partitionMap:
         case p: ProtoParam.PathParam[F] => Left(p)
-        case p: (ProtoParam.QueryParam[F] | ProtoParam.Unsupported[F]) => Right(p)
+        case p: (ProtoParam.QueryParam[F] | ProtoParam.Unsupported[F] | ProtoParam.Error[F]) => Right(p)
 
     val (queryParams, params2) =
       params1.partitionMap:
         case p: ProtoParam.QueryParam[F] => Left(p)
-        case p: ProtoParam.Unsupported[F] => Right(p)
+        case p: (ProtoParam.Unsupported[F] | ProtoParam.Error[F]) => Right(p)
 
     // TODO: support header params
 
     val unsupportedAsQueryParams: List[ProtoParam.QueryParam[F]] =
-      params2.map {
-        case ProtoParam.Unsupported(name, _, required, unsupportedLocation) =>
-          val schema = RequestSchema.Params.QueryParamSchema.unsupported(s"'$unsupportedLocation' parameters are not yet supported")
-          val (tp, exp) = quotedQueryParamSchema(schema)
-          ProtoParam.QueryParam(name, Indeed((tp, F.pure(exp))), required)
-        }
+      params2.map { p =>
+        val (name, required, msg) =
+          p match
+            case ProtoParam.Unsupported(name, required, reason) =>
+              import ProtoParam.UnsupportedReason.*
+              val msg = reason match
+                case UnsupportedLocation(location) => s"'$location' parameters are not yet supported"
+                case ContentFieldNotSupported => s"'content' field not yet supported. Use schema field instead."
+              (name, required, msg)
+            case ProtoParam.Error(name, required, msg) =>
+              (name, required, msg)
+        val schema = RequestSchema.Params.QueryParamSchema.unsupported(msg)
+        val (tp, exp) = quotedQueryParamSchema(schema)
+        ProtoParam.QueryParam(name, Indeed((tp, F.pure(exp))), required)
+      }
 
     val queryParams1 = queryParams ++ unsupportedAsQueryParams
 
