@@ -115,7 +115,7 @@ class ClientJdk extends Client {
         val WithParam(init, pName, pSchema, suffix) = wp
         val (initParams, lastParam) = (params: Value[Obj[init || pname :: ptype]]).unsnoc
         toRelativeUrl(init, initParams)
-          + urlEncode(lastParam, pSchema.toQueryParamSchema)
+          + encodePathParam(lastParam, pSchema)
           + urlEncode(suffix)
   }
 
@@ -191,28 +191,54 @@ class ClientJdk extends Client {
   private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
     ValueCodecJson.decodeLenient(schema, body)
 
-  private def encodeQueryParam[Q](k: String, v: Value[Q], schema: QueryParamSchema[Q]): String =
-    s"${urlEncode(k)}=${urlEncode(v, schema)}"
-
   private def urlEncode(s: String): String =
     s // TODO
 
-  private def urlEncode[T](
+  private def encodePathParam[T](
     v: Value[T],
-    schema: QueryParamSchema[T],
+    schema: RequestSchema.Path.ParamSchema[T],
   ): String =
     urlEncode(stringify(v, schema))
 
   private def stringify[T](
     v: Value[T],
+    schema: RequestSchema.Path.ParamSchema[T],
+  ): String =
+    schema match
+      case RequestSchema.Path.ParamSchema.Primitive(p, format) =>
+        stringifyPrimitive(v, p)
+
+      case _: RequestSchema.Path.ParamSchema.Unsupported[s] =>
+        summon[T =:= Oops[s]]
+        v.isNotOops[s]
+
+  private def encodeQueryParam[T](
+    name: String,
+    v: Value[T],
+    schema: QueryParamSchema[T],
+  ): String =
+    urlEncode(stringify(name, v, schema))
+
+  private def stringify[T](
+    name: String,
+    v: Value[T],
     schema: QueryParamSchema[T],
   ): String =
     schema match
-      case QueryParamSchema.Primitive(p) =>
-        stringifyPrimitive(v, p)
+      case QueryParamSchema.Primitive(p, format) =>
+        s"$name=${stringifyPrimitive(v, p)}"
+
       case a: QueryParamSchema.PrimitiveArray[t] =>
         summon[T =:= Arr[t]]
-        Value.asArray(v: Value[Arr[t]]).map(stringifyPrimitive(_, a.elem)).mkString(",")
+        val QueryParamSchema.PrimitiveArray(elemSchema, format) = a
+        val stringyElems = Value.asArray(v: Value[Arr[t]]).map(stringifyPrimitive(_, elemSchema))
+        val QueryParamSchema.Format(style, explode) = format
+        style match
+          case QueryParamSchema.Style.Form =>
+            explode match
+              case QueryParamSchema.Explode.True =>
+                stringyElems.map(el => s"$name=$el").mkString("&")
+
       case _: QueryParamSchema.Unsupported[s] =>
         summon[T =:= Oops[s]]
         v.isNotOops[s]

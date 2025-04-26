@@ -123,14 +123,14 @@ object ModelToScalaAst {
     Quotes,
   ): (Type[T], Expr[RequestSchema.Params.QueryParamSchema[T]]) =
     schema match
-      case RequestSchema.Params.QueryParamSchema.Primitive(s) =>
+      case RequestSchema.Params.QueryParamSchema.Primitive(s, fmt) =>
         val (t, e) = quotedSchemaMotifPrimitive(s)
         given Type[T] = t
-        (t, '{ RequestSchema.Params.QueryParamSchema.Primitive($e) })
+        (t, '{ RequestSchema.Params.QueryParamSchema.Primitive($e, ${quotedQueryParamFormat(fmt)}) })
       case a: RequestSchema.Params.QueryParamSchema.PrimitiveArray[t] =>
         val (t, e) = quotedSchemaMotifPrimitive(a.elem)
         given Type[t] = t
-        (Type.of[Arr[t]], '{ RequestSchema.Params.QueryParamSchema.PrimitiveArray($e) })
+        (Type.of[Arr[t]], '{ RequestSchema.Params.QueryParamSchema.PrimitiveArray($e, ${quotedQueryParamFormat(a.format)}) })
       case u: RequestSchema.Params.QueryParamSchema.Unsupported[msg] =>
         val (t, e) = quotedSingletonString(u.msg)
         given Type[msg] = t
@@ -142,14 +142,40 @@ object ModelToScalaAst {
     Quotes,
   ): (Type[T], Expr[RequestSchema.Path.ParamSchema[T]]) =
     schema match
-      case RequestSchema.Path.ParamSchema.Primitive(s) =>
+      case RequestSchema.Path.ParamSchema.Primitive(s, fmt) =>
         val (t, e) = quotedSchemaMotifPrimitive(s)
         given Type[T] = t
-        (t, '{ RequestSchema.Path.ParamSchema.Primitive($e) })
+        (t, '{ RequestSchema.Path.ParamSchema.Primitive($e, ${quotedPathParamFormat(fmt)}) })
       case u: RequestSchema.Path.ParamSchema.Unsupported[msg] =>
         val (t, e) = quotedSingletonString(u.msg)
         given Type[msg] = t
         (Type.of[Oops[msg]], '{ RequestSchema.Path.ParamSchema.Unsupported($e) })
+
+  def quotedQueryParamFormat(fmt: RequestSchema.Params.QueryParamSchema.Format)(using Quotes): Expr[RequestSchema.Params.QueryParamSchema.Format] =
+    fmt match
+      case RequestSchema.Params.QueryParamSchema.Format(style, explode) =>
+        '{ RequestSchema.Params.QueryParamSchema.Format(${quotedQueryParamStyle(style)}, ${quotedQueryParamExplode(explode)}) }
+
+  def quotedQueryParamStyle(style: RequestSchema.Params.QueryParamSchema.Style)(using Quotes): Expr[RequestSchema.Params.QueryParamSchema.Style] =
+    style match
+      case RequestSchema.Params.QueryParamSchema.Style.Form => '{ RequestSchema.Params.QueryParamSchema.Style.Form }
+
+  def quotedQueryParamExplode(explode: RequestSchema.Params.QueryParamSchema.Explode)(using Quotes): Expr[RequestSchema.Params.QueryParamSchema.Explode] =
+    explode match
+      case RequestSchema.Params.QueryParamSchema.Explode.True => '{ RequestSchema.Params.QueryParamSchema.Explode.True }
+
+  def quotedPathParamFormat(fmt: RequestSchema.Path.ParamSchema.Format)(using Quotes): Expr[RequestSchema.Path.ParamSchema.Format] =
+    fmt match
+      case RequestSchema.Path.ParamSchema.Format(style, explode) =>
+        '{ RequestSchema.Path.ParamSchema.Format(${quotedPathParamStyle(style)}, ${quotedPathParamExplode(explode)}) }
+
+  def quotedPathParamStyle(style: RequestSchema.Path.ParamSchema.Style)(using Quotes): Expr[RequestSchema.Path.ParamSchema.Style] =
+    style match
+      case RequestSchema.Path.ParamSchema.Style.Simple => '{ RequestSchema.Path.ParamSchema.Style.Simple }
+
+  def quotedPathParamExplode(explode: RequestSchema.Path.ParamSchema.Explode)(using Quotes): Expr[RequestSchema.Path.ParamSchema.Explode] =
+    explode match
+      case RequestSchema.Path.ParamSchema.Explode.False => '{ RequestSchema.Path.ParamSchema.Explode.False }
 
   def quotedResponseSchema[T](
     x: ResponseSchema[T],
