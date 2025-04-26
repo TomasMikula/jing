@@ -30,6 +30,18 @@ trait ValueModule[Value[_]] {
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*)(using ClassTag[Value[T]]): Value[Arr[T]] = arr(IArray(elems*))
 
+  @targetName("arrStr")
+  def arr(elems: String*): Value[Arr[Str]] =
+    arr(elems.map(str)*)
+
+  @targetName("arrInt32")
+  def arr(elems: Int*): Value[Arr[Int32]] =
+    arr(elems.map(int32)*)
+
+  @targetName("arrInt64")
+  def arr(elems: Long*): Value[Arr[Int64]] =
+    arr(elems.map(int64)*)
+
   extension [Ps](value: Value[Obj[Ps]]) {
     def set[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :: T]] =
       fromMotif(ValueMotif.Object.extend(toMotifObject(value), k, v))

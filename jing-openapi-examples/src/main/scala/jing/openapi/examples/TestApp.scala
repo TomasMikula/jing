@@ -72,11 +72,34 @@ object TestApp extends App {
     case Failed(e) =>
       println(s"Failed with: $e")
     case Succeeded(value) =>
-      val d = value.discriminator
       val body: Value.Lenient[Arr[Pet]] =
         value
           .assertCase["200"]
           .assertCase["application/json"]
       println(body.show)
 
+  // Find pets with the given tags
+  // -----------------------------
+  // GET request with an array-typed query parameter
+  val findByTagsResult =
+    api
+      .paths
+      .`/pet/findByTags`
+      .Get
+      .interpret(using DefaultClient)
+      .params(_
+        .set("tags", arr("tag1", "tag2")),
+      )
+      .runAgainst("https://petstore3.swagger.io/api/v3")
+
+  println()
+  findByTagsResult match
+    case Failed(e) =>
+      println(s"Failed with: $e")
+    case Succeeded(value) =>
+      val body: Value.Lenient[Arr[Pet]] =
+        value
+          .assertCase["200"]
+          .assertCase["application/json"]
+      println(body.show)
 }
