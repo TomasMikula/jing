@@ -13,6 +13,7 @@ sealed trait ||[A, B]
 sealed trait ::[A, B]
 sealed trait :?[A, B]
 sealed trait DiscriminatedUnion[Variants]
+sealed trait Enum[Base, Cases]
 sealed trait Oops[Reason]
 
 // workaround of https://github.com/scala/scala3/issues/22943
@@ -51,3 +52,7 @@ type ToRightAssoc[Props] =
 type ToRightAssocAcc[Props, Acc] = Props match
   case init || last => ToRightAssocAcc[init, last || Acc]
   case Void => Acc
+
+type ScalaUnionOf[Cases] = Cases match
+  case init || last => ScalaUnionOf[init] | last
+  case Void => Nothing

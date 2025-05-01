@@ -2,7 +2,7 @@ package jing.openapi
 
 import jing.openapi.model.*
 import scala.quoted.*
-import libretto.lambda.Items1Named
+import libretto.lambda.{Items1, Items1Named}
 import libretto.lambda.util.{Applicative, Exists, SingletonType, TypeEq}
 import libretto.lambda.util.Applicative.*
 import libretto.lambda.util.Exists.Indeed
@@ -185,7 +185,7 @@ object ModelToScalaAst {
     x match
       case rs: ResponseSchema.ByStatusCode[as] =>
         val (t, e) =
-          quotedProduct(
+          quotedNamedProduct(
             rs.items,
             [A] => bs => quotedBodySchema(bs),
           )
@@ -211,7 +211,7 @@ object ModelToScalaAst {
     s match
       case v: BodySchema.Variants[cases] =>
         val (t, e) =
-          quotedProduct(
+          quotedNamedProduct(
             v.byMediaType,
             [A] => s => quotedSchema(s),
           )
@@ -311,12 +311,38 @@ object ModelToScalaAst {
         Indeed((tpe, expr.map { expr => '{ Schema.Object.NonEmpty.fromMotif($expr) } }))
     }
 
-  def quotedSchemaMotifPrimitive[F[_], T](
+  def quotedScalaValueOf[T, U](v: ScalaValueOf[T, U])(using Quotes, Type[U]): (Type[T], Expr[ScalaValueOf[T, U]]) = {
+    import ScalaValueOf.*
+
+    v match
+      case I32(i) =>
+        summon[T <:< Int]
+        val (tp, exp) = quotedSingletonInt(i)
+        given Type[T] = tp
+        (tp, '{ I32($exp) })
+      case I64(l) =>
+        summon[T <:< Long]
+        val (tp, exp) = quotedSingletonLong(l)
+        given Type[T] = tp
+        (tp, '{ I64($exp) })
+      case S(s) =>
+        summon[T <:< String]
+        val (tp, exp) = quotedSingletonString(s)
+        given Type[T] = tp
+        (tp, '{ S($exp) })
+      case B(b) =>
+        summon[T <:< Boolean]
+        val (tp, exp) = quotedSingletonBoolean(b)
+        given Type[T] = tp
+        (tp, '{ B($exp) })
+  }
+
+  def quotedSchemaMotifPrimitive[F[_], T, G[_]](
     s: SchemaMotif.Primitive[F, T],
   )(using
     Quotes,
-    Type[F],
-  ): (Type[T], Expr[SchemaMotif.Primitive[F, T]]) = {
+    Type[G],
+  ): (Type[T], Expr[SchemaMotif.Primitive[G, T]]) = {
     import jing.openapi.model.SchemaMotif.*
 
     s match
@@ -324,6 +350,17 @@ object ModelToScalaAst {
       case I64() => (Type.of[Int64], '{ I64() })
       case S()   => (Type.of[Str], '{ S() })
       case B()   => (Type.of[Bool], '{ B() })
+      case e: Enumeration[F, base, cases] =>
+        quotedSchemaMotifPrimitive(e.baseType) match
+          case (tb, b) =>
+            given Type[base] = tb
+            quotedProduct(
+              e.cases,
+              [A] => (v: ScalaValueOf[A, base]) => quotedScalaValueOf(v)
+            ) match
+              case (tc, cs) =>
+                given Type[cases] = tc
+                (Type.of[Enum[base, cases]], '{ Enumeration[G, base, cases](${b}, ${cs})})
   }
 
   def quotedSchemaMotif[F[_], T](
@@ -358,22 +395,10 @@ object ModelToScalaAst {
     N: Applicative[N],
   ): M[Exists[[U] =>> (Rel[T, U], (Type[U], N[Expr[SchemaMotif[G, U]]]))]] =
     s match
-      case SchemaMotif.I32() =>
-        M.pure(
-          Exists((Rel.refl[Int32], (Type.of[Int32], N.pure('{ SchemaMotif.I32() }))))
-        )
-      case SchemaMotif.I64() =>
-        M.pure(
-          Exists((Rel.refl[Int64], (Type.of[Int64], N.pure('{ SchemaMotif.I64() }))))
-        )
-      case SchemaMotif.S() =>
-        M.pure(
-          Exists((Rel.refl[Str], (Type.of[Str], N.pure('{ SchemaMotif.S() }))))
-        )
-      case SchemaMotif.B() =>
-        M.pure(
-          Exists((Rel.refl[Bool], (Type.of[Bool], N.pure('{ SchemaMotif.B() }))))
-        )
+      case p: SchemaMotif.Primitive[F, T] =>
+        quotedSchemaMotifPrimitive(p) match
+          case (t, p) =>
+            M.pure(Indeed(Rel.refl[T], (t, N.pure(p))))
       case a: SchemaMotif.Array[s, a] =>
         f(a.elem) map:
           case e @ Indeed((rel, (tb, sb))) =>
@@ -386,16 +411,37 @@ object ModelToScalaAst {
             Exists(rel.lift[Obj], (Type.of[Obj[e.T]], s.widen))
 
   def quotedProduct[F[_], Items](
+    p: Items1.Product[||, Void, F, Items],
+    f: [A] => F[A] => (Type[A], Expr[F[A]]),
+  )(using
+    Quotes,
+    Type[F],
+  ): (Type[Items], Expr[Items1.Product[||, Void, F, Items]]) =
+    p match
+      case s: Items1.Product.Single[sep, nil, f, a] =>
+        summon[Items =:= (Void || a)]
+        val (t, fa) = f(s.value)
+        given Type[a] = t
+        (Type.of[Void || a], '{ Items1.Product.Single($fa) })
+      case s: Items1.Product.Snoc[sep, nil, f, init, last] =>
+        summon[Items =:= (init || last)]
+        val (initTp, initExp) = quotedProduct(s.init, f)
+        val (lastTp, lastExp) = f(s.last)
+        given Type[init] = initTp
+        given Type[last] = lastTp
+        (Type.of[init || last], '{ Items1.Product.Snoc($initExp, $lastExp) })
+
+  def quotedNamedProduct[F[_], Items](
     p: Items1Named.Product[||, ::, F, Items],
     f: [A] => F[A] => (Type[A], Expr[F[A]]),
   )(using
     Quotes,
     Type[F],
   ): (Type[Items], Expr[Items1Named.Product[||, ::, F, Items]]) =
-    quotedProductRel[F, Items, F, =:=](p, [A] => fa => Exists((summon, f(fa)))) match
+    quotedNamedProductRel[F, Items, F, =:=](p, [A] => fa => Exists((summon, f(fa)))) match
       case Indeed((TypeEq(Refl()), res)) => res
 
-  def quotedProductRel[F[_], Items, G[_], Rel[_, _]](
+  def quotedNamedProductRel[F[_], Items, G[_], Rel[_, _]](
     p: Items1Named.Product[||, ::, F, Items],
     f: [A] => F[A] => Exists[[B] =>> (Rel[A, B], (Type[B], Expr[G[B]]))],
   )(using
@@ -403,9 +449,9 @@ object ModelToScalaAst {
     G: Type[G],
     Rel: Substitutive[Rel],
   ): Exists[[Elems] =>> (Rel[Items, Elems], (Type[Elems], Expr[Items1Named.Product[||, ::, G, Elems]]))] =
-    quotedProductRelAA[F, Items, G, Rel, [x] =>> x, [x] =>> x](p, f)
+    quotedNamedProductRelAA[F, Items, G, Rel, [x] =>> x, [x] =>> x](p, f)
 
-  def quotedProductUnrelatedAA[F[_], Items, G[_], M[_], N[_]](
+  def quotedNamedProductUnrelatedAA[F[_], Items, G[_], M[_], N[_]](
     p: Items1Named.Product[||, ::, F, Items],
     f: [A] => F[A] => M[Exists[[B] =>> (Type[B], N[Expr[G[B]]])]],
   )(using
@@ -414,14 +460,14 @@ object ModelToScalaAst {
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[Elems] =>> (Type[Elems], N[Expr[Items1Named.Product[||, ::, G, Elems]]])]] =
-    quotedProductRelAA[F, Items, G, Unrelated, M, N](
+    quotedNamedProductRelAA[F, Items, G, Unrelated, M, N](
       p,
       [A] => fa => f(fa).map { case Indeed(te) => Indeed((Unrelated(), te)) }
     ) map {
       case Indeed((_, res)) => Indeed(res)
     }
 
-  def quotedProductRelAA[F[_], Items, G[_], Rel[_, _], M[_], N[_]](
+  def quotedNamedProductRelAA[F[_], Items, G[_], Rel[_, _], M[_], N[_]](
     p: Items1Named.Product[||, ::, F, Items],
     f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
   )(using
@@ -452,7 +498,7 @@ object ModelToScalaAst {
             ))
         }
       case s: Items1Named.Product.Snoc[sep, of, f, init, lbl, a] =>
-        M.map2(quotedProductRelAA(s.init, f), f(s.lastElem)) {
+        M.map2(quotedNamedProductRelAA(s.init, f), f(s.lastElem)) {
           case (ex1 @ Indeed((rel1, (tInit, fInit))), ex2 @ Indeed((rel2, (tb, fb)))) =>
             type Elems = ex1.T
             type B = ex2.T
@@ -653,10 +699,38 @@ object ModelToScalaAst {
 
   def quotedSingletonString[T <: String](x: SingletonType[T])(using
     Quotes,
+  ): (Type[T], Expr[SingletonType[T]]) =
+    quotedSingletonType(x, quotedStringLiteral)
+
+  def quotedSingletonInt[T <: Int](x: SingletonType[T])(using
+    Quotes,
+  ): (Type[T], Expr[SingletonType[T]]) =
+    quotedSingletonType(x, quotedIntLiteral)
+
+  def quotedSingletonLong[T <: Long](x: SingletonType[T])(using
+    Quotes,
+  ): (Type[T], Expr[SingletonType[T]]) =
+    quotedSingletonType(x, quotedLongLiteral)
+
+  def quotedSingletonBoolean[T <: Boolean](x: SingletonType[T])(using
+    Quotes,
+  ): (Type[T], Expr[SingletonType[T]]) =
+    quotedSingletonType(x, quotedBooleanLiteral)
+
+  given stringSingletonToExpr[T <: String]: ToExpr[SingletonType[T]] with {
+    override def apply(x: SingletonType[T])(using Quotes): Expr[SingletonType[T]] =
+      quotedSingletonString(x)._2
+  }
+
+  def quotedSingletonType[Base, T <: Base](
+    x: SingletonType[T],
+    quoteSingleton: (a: Base) => (Type[a.type], Expr[a.type]),
+  )(using
+    Quotes,
   ): (Type[T], Expr[SingletonType[T]]) = {
     import quotes.reflect.*
 
-    val (tpe, trm) = quotedStringLiteral(x.value)
+    val (tpe, trm) = quoteSingleton(x.value)
     given Type[T] = x.witness.substituteContra(tpe)
 
     (
@@ -665,16 +739,35 @@ object ModelToScalaAst {
     )
   }
 
-  given stringSingletonToExpr[T <: String]: ToExpr[SingletonType[T]] with {
-    override def apply(x: SingletonType[T])(using Quotes): Expr[SingletonType[T]] =
-      quotedSingletonString(x)._2
-  }
-
   private def quotedStringLiteral(s: String)(using Quotes): (Type[s.type], Expr[s.type]) = {
     import quotes.reflect.*
 
     val term = Literal(StringConstant(s))
     val tpe = term.tpe.asType.asInstanceOf[Type[s.type]]
     (tpe, term.asExprOf(using tpe))
-}
+  }
+
+  private def quotedIntLiteral(i: Int)(using Quotes): (Type[i.type], Expr[i.type]) = {
+    import quotes.reflect.*
+
+    val term = Literal(IntConstant(i))
+    val tpe = term.tpe.asType.asInstanceOf[Type[i.type]]
+    (tpe, term.asExprOf(using tpe))
+  }
+
+  private def quotedLongLiteral(l: Long)(using Quotes): (Type[l.type], Expr[l.type]) = {
+    import quotes.reflect.*
+
+    val term = Literal(LongConstant(l))
+    val tpe = term.tpe.asType.asInstanceOf[Type[l.type]]
+    (tpe, term.asExprOf(using tpe))
+  }
+
+  private def quotedBooleanLiteral(b: Boolean)(using Quotes): (Type[b.type], Expr[b.type]) = {
+    import quotes.reflect.*
+
+    val term = Literal(BooleanConstant(b))
+    val tpe = term.tpe.asType.asInstanceOf[Type[b.type]]
+    (tpe, term.asExprOf(using tpe))
+  }
 }

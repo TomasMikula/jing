@@ -1,5 +1,6 @@
 package jing.openapi.model
 
+import libretto.lambda.Items1
 import libretto.lambda.util.{Applicative, Exists, SingletonType}
 
 /** Schema structure parametric in the type of nested schemas.
@@ -12,10 +13,7 @@ sealed trait SchemaMotif[F[_], A] {
 
   def translate[G[_]](h: [X] => F[X] => G[X]): SchemaMotif[G, A] =
     this match
-      case I32() => I32()
-      case I64() => I64()
-      case S() => S()
-      case B() => B()
+      case p: Primitive[G, A] => p.recast[G]
       case Array(elem) => Array(h(elem))
       case Object.Empty() => Object.Empty()
       case Object.Snoc(init, pname, ptype) => Object.Snoc(asObject(init.translate(h)), pname, h(ptype))
@@ -23,22 +21,18 @@ sealed trait SchemaMotif[F[_], A] {
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
-      case I32() => I32()
-      case I64() => I64()
-      case S() => S()
-      case B() => B()
+      case p: Primitive[F, A] => p.recast[G]
       case Array(elem) => Array(h(elem).value)
       case o: Object[f, ps] => o.wipeTranslateObj(h).value
 
   def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[SchemaMotif[H, ?]] =
     this match
-      case I32() => G.pure(I32())
-      case I64() => G.pure(I64())
-      case S() => G.pure(S())
-      case B() => G.pure(B())
+      case p: Primitive[F, A] => G.pure(p.recast[H])
       case Array(elem) => h(elem).map(el => Array(el.value))
       case o: Object[f, ps] => o.wipeTranslateObjA(h).map(_.value)
 
+  def isNotOops[S](using A =:= Oops[S]): Nothing =
+    throw AssertionError("Impossible: Schemas for type Oops[S] are not representable by SchemaMotif")
 }
 
 object SchemaMotif {
@@ -49,6 +43,11 @@ object SchemaMotif {
   case class I64[F[_]]() extends Primitive[F, Int64]
   case class S[F[_]]() extends Primitive[F, Str]
   case class B[F[_]]() extends Primitive[F, Bool]
+
+  case class Enumeration[F[_], T, Cases](
+    baseType: Primitive[F, T],
+    cases: Items1.Product[||, Void, ScalaValueOf[_, T], Cases],
+  ) extends Primitive[F, Enum[T, Cases]]
 
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 

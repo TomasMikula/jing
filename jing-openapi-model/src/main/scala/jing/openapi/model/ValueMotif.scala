@@ -6,6 +6,30 @@ import scala.annotation.targetName
 
 /** Structure of values, parameterized by nested values `F`. */
 sealed trait ValueMotif[+F[_], T] {
+  import ValueMotif.*
+
+  def isNotOops[S](using T =:= Oops[S]): Nothing =
+    throw AssertionError("Impossible: Values of type Oops[S] are not representable by ValueMotif")
+
+  def sameAs[A](that: ScalaValueOf[A, T]): Boolean =
+    that match
+      case ScalaValueOf.I32(value) =>
+        summon[T =:= Int32]
+        summon[A <:< Int]
+        this.intValue == value.value
+      case ScalaValueOf.I64(value) =>
+        summon[T =:= Int64]
+        summon[A <:< Long]
+        this.longValue == value.value
+      case ScalaValueOf.S(value) =>
+        summon[T =:= Str]
+        summon[A <:< String]
+        this.stringValue == value.value
+      case ScalaValueOf.B(value) =>
+        summon[T =:= Bool]
+        summon[A <:< Boolean]
+        this.booleanValue == value.value
+
   def show(f: [A] => F[A] => String): String =
     val b = new StringBuilder
     show([A] => (fa, b) => b.append(f(fa)), b)
@@ -28,6 +52,8 @@ sealed trait ValueMotif[+F[_], T] {
         b.append(i.toString)
       case BoolValue(p) =>
         b.append(p.toString)
+      case EnumValue(value) =>
+        value.show
       case Array(elems) =>
         b.append("[")
         for (x <- elems) {
@@ -73,6 +99,7 @@ object ValueMotif {
   case class Int32Value(i: Int) extends ValueMotif[Nothing, Int32]
   case class Int64Value(i: Long) extends ValueMotif[Nothing, Int64]
   case class BoolValue(b: Boolean) extends ValueMotif[Nothing, Bool]
+  case class EnumValue[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]) extends ValueMotif[Nothing, Enum[Base, Cases]]
   case class Array[F[_], T](elems: IArray[F[T]]) extends ValueMotif[F, Arr[T]]
 
   sealed trait Object[+F[_], Ps] extends ValueMotif[F, Obj[Ps]] {
@@ -185,4 +212,36 @@ object ValueMotif {
     value: F[A],
   ): ValueMotif[F, DiscriminatedUnion[As]] =
     DiscUnion(Items1Named.Sum.Value(IsCaseOf.toMember(i), value))
+
+  extension [F[_]](value: ValueMotif[F, Str])
+    def stringValue: String =
+      value match { case StringValue(s) => s }
+
+  extension [F[_]](value: ValueMotif[F, Int32])
+    def intValue: Int =
+      value match { case Int32Value(i) => i }
+
+  extension [F[_]](value: ValueMotif[F, Int64])
+    def longValue: Long =
+      value match { case Int64Value(i) => i }
+
+  extension [F[_]](value: ValueMotif[F, Bool])
+    def booleanValue: Boolean =
+      value match { case BoolValue(b) => b }
+
+  extension [F[_], Base, Cases](value: ValueMotif[F, Enum[Base, Cases]]) {
+    def widenEnum: ValueMotif[F, Base] =
+      value match
+        case ValueMotif.EnumValue(value) =>
+          value match
+            case ScalaValueOf.I32(i) => Int32Value(i.value)
+            case ScalaValueOf.I64(l) => Int64Value(l.value)
+            case ScalaValueOf.S(s)   => StringValue(s.value)
+            case ScalaValueOf.B(b)   => BoolValue(b.value)
+
+    def extendEnum[A]: ValueMotif[F, Enum[Base, Cases || A]] =
+      value match
+        case EnumValue(value) =>
+          EnumValue(value)
+  }
 }

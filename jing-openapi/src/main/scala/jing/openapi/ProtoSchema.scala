@@ -1,6 +1,7 @@
 package jing.openapi
 
-import jing.openapi.model.{Obj, SchemaMotif}
+import jing.openapi.model.{||, Obj, ScalaValueOf, SchemaMotif, Str}
+import libretto.lambda.Items1
 import libretto.lambda.util.Exists
 import scala.annotation.tailrec
 
@@ -28,6 +29,34 @@ private[openapi] object ProtoSchema {
   def i64: ProtoSchema = Proper(motif.I64())
   def str: ProtoSchema = Proper(motif.S())
   def bool: ProtoSchema = Proper(motif.B())
+
+  def strEnum(value: String, values: String*): ProtoSchema =
+    enm(SchemaMotif.S(), ScalaValueOf.str, value, values*)
+
+  def int32Enum(value: Int, values: Int*): ProtoSchema =
+    enm(SchemaMotif.I32(), ScalaValueOf.i32, value, values*)
+
+  def int64Enum(value: Long, values: Long*): ProtoSchema =
+    enm(SchemaMotif.I64(), ScalaValueOf.i64, value, values*)
+
+  def boolEnum(value: Boolean, values: Boolean*): ProtoSchema =
+    enm(SchemaMotif.B(), ScalaValueOf.bool, value, values*)
+
+  private def enm[X, Base](
+    s: SchemaMotif.Primitive[[t] =>> ProtoSchema, Base],
+    f: (x: X) => ScalaValueOf[x.type, Base],
+    x0: X,
+    xs: X*
+  ): ProtoSchema = {
+    val values1: Items1.Product[||, Void, ScalaValueOf[_, Base], ?] =
+      xs.foldLeft[Items1.Product[||, Void, ScalaValueOf[_, Base], ?]](
+        Items1.Product.Single(f(x0))
+      ) { (acc, x) =>
+        Items1.Product.Snoc(acc, f(x))
+      }
+
+    Proper(SchemaMotif.Enumeration(s, values1))
+  }
 
   def arr(elemSchema: ProtoSchema): ProtoSchema =
     Proper(motif.Array(elemSchema))

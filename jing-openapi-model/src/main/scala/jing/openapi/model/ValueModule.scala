@@ -13,6 +13,7 @@ trait ValueModule[Value[_]] {
   def toMotifInt32(v: Value[Int32]): ValueMotif[Value, Int32]
   def toMotifInt64(v: Value[Int64]): ValueMotif[Value, Int64]
   def toMotifBool(v: Value[Bool]): ValueMotif[Value, Bool]
+  def toMotifEnum[Base, Cases](v: Value[Enum[Base, Cases]]): ValueMotif[Value, Enum[Base, Cases]]
   def toMotifArr[T](v: Value[Arr[T]]): ValueMotif[Value, Arr[T]]
   def toMotifObj[Ps](v: Value[Obj[Ps]]): ValueMotif[Value, Obj[Ps]]
   def toMotifDiscriminatedUnion[Cases](v: Value[DiscriminatedUnion[Cases]]): ValueMotif[Value, DiscriminatedUnion[Cases]]
@@ -29,6 +30,9 @@ trait ValueModule[Value[_]] {
   def obj: Value[Obj[Void]] = fromMotif(ValueMotif.Object.ObjEmpty)
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*)(using ClassTag[Value[T]]): Value[Arr[T]] = arr(IArray(elems*))
+
+  def enm[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
+    fromMotif(ValueMotif.EnumValue[Base, Cases, T](value))
 
   @targetName("arrStr")
   def arr(elems: String*): Value[Arr[Str]] =
@@ -83,6 +87,11 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: Long): ObjectBuilder[Acc || Label :: Int64, Tail] =
       ValueMotif.Object.ObjExt(b, propName, int64(value))
 
+  extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :: Enum[Str, Cases] || Tail])
+    @targetName("setEnum")
+    def set(propName: Label, value: ScalaUnionOf[Cases] & String): ObjectBuilder[Acc || Label :: Enum[Str, Cases], Tail] =
+      ValueMotif.Object.ObjExt(b, propName, enm(ScalaValueOf.str(value)))
+
   extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :? A || Tail]) {
     @targetName("setOpt")
     def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :? A, Tail] =
@@ -99,6 +108,11 @@ trait ValueModule[Value[_]] {
     def skip(propName: Label): ObjectBuilder[Acc || Label :? A, Tail] =
       ValueMotif.Object.ObjExtOpt(b, propName, None)
   }
+
+  extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :? Enum[Str, Cases] || Tail])
+    @targetName("setEnumOpt")
+    def set(propName: Label, value: ScalaUnionOf[Cases] & String): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
+      ValueMotif.Object.ObjExtOpt(b, propName, Some(enm(ScalaValueOf.str(value))))
 
   def obj[Props](
     f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
@@ -130,23 +144,27 @@ trait ValueModule[Value[_]] {
 
   extension (value: Value[Str])
     def stringValue: String =
-      toMotifStr(value) match
-        case ValueMotif.StringValue(s) => s
+      toMotifStr(value).stringValue
 
   extension (value: Value[Int64])
     def longValue: Long =
-      toMotifInt64(value) match
-        case ValueMotif.Int64Value(n) => n
+      toMotifInt64(value).longValue
 
   extension (value: Value[Int32])
     def intValue: Int =
-      toMotifInt32(value) match
-        case ValueMotif.Int32Value(n) => n
+      toMotifInt32(value).intValue
 
   extension (value: Value[Bool])
     def booleanValue: Boolean =
-      toMotifBool(value) match
-        case ValueMotif.BoolValue(b) => b
+      toMotifBool(value).booleanValue
+
+  extension [Base, Cases](value: Value[Enum[Base, Cases]]) {
+    def widenEnum: Value[Base] =
+      fromMotif(toMotifEnum(value).widenEnum)
+
+    def extendEnum[A]: Value[Enum[Base, Cases || A]] =
+      fromMotif(toMotifEnum(value).extendEnum)
+  }
 
   extension [T](value: Value[Arr[T]]) {
     def asArray: IArray[Value[T]] =

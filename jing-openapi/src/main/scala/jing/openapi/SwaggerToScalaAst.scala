@@ -738,7 +738,7 @@ private[openapi] object SwaggerToScalaAst {
     Quotes,
     Applicative[F],
   ): Exists[[Ts] =>> (Type[Ts], F[Expr[Items1Named.Product[||, ::, Schema, Ts]]])] =
-    quotedProductUnrelatedAA(
+    quotedNamedProductUnrelatedAA(
       mediaTypes
         .mapToProduct[[x] =>> ProtoSchema.Oriented](mt => Exists(protoSchema(mt.getSchema()).orientBackward)),
         [A] => ps => quotedSchemaFromProto[F](ps),
@@ -751,7 +751,7 @@ private[openapi] object SwaggerToScalaAst {
     Quotes,
     Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[ResponseSchema[T]]])] =
-    quotedProductUnrelatedAA(
+    quotedNamedProductUnrelatedAA(
       byStatus.asProduct,
       [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchemaOrPlainText(sl, apiResponse)),
     ).run(schemas) match {
@@ -808,13 +808,36 @@ private[openapi] object SwaggerToScalaAst {
           case ref =>
             ProtoSchema.Unsupported(s"The following $$ref format not yet supported: $ref")
       case "string" =>
-        // TODO: look for modifiers such as format and enum
-        ProtoSchema.str
+        schema.getEnum match
+          case null =>
+            // TODO: look for format modifier
+            ProtoSchema.str
+          case vals =>
+            vals.asScala.toList.map(_.asInstanceOf[String]) match
+              case Nil                 => ProtoSchema.Unsupported("empty enum")
+              case NonEmptyList(v, vs) => ProtoSchema.strEnum(v, vs*)
       case "integer" =>
         schema.getFormat() match
-          case "int32" => ProtoSchema.i32
-          case "int64" => ProtoSchema.i64
-          case other => ProtoSchema.Unsupported(s"Unsupported integer format: $other")
+          case "int32" =>
+            schema.getEnum match
+              case null =>
+                ProtoSchema.i32
+              case vals =>
+                // TODO: detect and report the parser giving use Longs if values don't fit into Int range
+                vals.asScala.toList.map(_.asInstanceOf[Integer].toInt) match
+                  case Nil                 => ProtoSchema.Unsupported("empty enum")
+                  case NonEmptyList(v, vs) => ProtoSchema.int32Enum(v, vs*)
+          case "int64" =>
+            schema.getEnum match
+              case null =>
+                ProtoSchema.i64
+              case vals =>
+                // using Number instead of Long, as the parser uses Integer if all cases fit into Int
+                vals.asScala.toList.map(_.asInstanceOf[java.lang.Number].longValue()) match
+                  case Nil                 => ProtoSchema.Unsupported("empty enum")
+                  case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
+          case other =>
+            ProtoSchema.Unsupported(s"Unsupported integer format: $other")
       case "boolean" =>
         ProtoSchema.bool
       case "array" =>

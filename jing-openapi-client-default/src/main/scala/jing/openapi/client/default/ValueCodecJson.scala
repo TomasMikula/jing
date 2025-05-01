@@ -2,8 +2,9 @@ package jing.openapi.client.default
 
 import io.circe.{Json, JsonObject}
 import jing.openapi.client.default.Result.schemaViolation
-import jing.openapi.model.{||, ::, :?, Arr, Obj, Oops, Schema, SchemaMotif, Value}
-import jing.openapi.model.SchemaMotif.{Array, I32, I64, S, B, Object}
+import jing.openapi.model.{||, ::, :?, Arr, Enum, Obj, Oops, ScalaUnionOf, ScalaValueOf, Schema, SchemaMotif, Value, ValueMotif}
+import jing.openapi.model.SchemaMotif.{Array, Enumeration, I32, I64, S, B, Object}
+import libretto.lambda.Items1
 import libretto.lambda.util.SingletonType
 import scala.util.boundary
 import scala.collection.mutable.Stack
@@ -22,6 +23,9 @@ object ValueCodecJson {
           case I64() => writeJsonNumber(Value.longValue(value), builder)
           case S()   => writeJsonString(Value.stringValue(value), builder)
           case B()   => writeJsonBoolean(Value.booleanValue(value), builder)
+          case e: Enumeration[Schema, base, cases] =>
+            summon[T =:= Enum[base, cases]]
+            encode(Schema.Proper(e.baseType), Value.widenEnum(value: Value[Enum[base, cases]]))
           case a: Array[schema, t] =>
             summon[T =:= Arr[t]]
             builder += '['
@@ -140,6 +144,22 @@ object ValueCodecJson {
               case Some(b) => Result.Succeeded(Value.Lenient.bool(b))
               case None => schemaViolation(s"Expected JSON boolean, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
+          case Enumeration(base, cases) =>
+            decodeLenientAt(Schema.Proper(base), jsonLoc, json)
+              .flatMap {
+                case p: Value.Lenient.Proper[t] =>
+                  val Value.Lenient.Proper(v) = p
+                  decodeEnumValueLenient(cases, v) match
+                    case Some(v) =>
+                      Result.Succeeded(Value.Lenient.Proper(v))
+                    case None =>
+                      val expected = cases.toList([a] => a => a.show).mkString(", ")
+                      val actual = Value.Lenient.Proper(v).show
+                      schemaViolation(s"Expected one of ${expected}, got ${actual}. At ${jsonLoc.printLoc}")
+                case _: Value.Lenient.Oopsy[s] =>
+                  base.isNotOops[s]
+              }
+
           case Array(elemSchema) =>
             json.asArray match
               case Some(jsonElems) => decodeArrayLenient(elemSchema, jsonLoc, jsonElems)
@@ -153,6 +173,28 @@ object ValueCodecJson {
       case Schema.Unsupported(message) =>
         Result.Succeeded(Value.Lenient.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
     }
+
+  private def decodeEnumValueLenient[F[_], Base, Cases](
+    cases: Items1.Product[||, Void, ScalaValueOf[_, Base], Cases],
+    value: ValueMotif[F, Base],
+  ): Option[ValueMotif[F, Enum[Base, Cases]]] =
+    cases match
+      case s: Items1.Product.Single[sep, void, svo, a] =>
+        summon[Cases =:= (Void || a)]
+        summon[a <:< ScalaUnionOf[Void || a]]
+        if (value.sameAs(s.value))
+          Some(ValueMotif.EnumValue[Base, Void || a, a](s.value))
+        else
+          None
+      case s: Items1.Product.Snoc[sep, void, svo, init, last] =>
+        summon[Cases =:= (init || last)]
+        summon[last <:< ScalaUnionOf[init || last]]
+        val Items1.Product.Snoc(init, last) = s
+        if (value.sameAs(last))
+          Some(ValueMotif.EnumValue[Base, init || last, last](last))
+        else
+          decodeEnumValueLenient[F, Base, init](init, value)
+            .map(_.extendEnum[last])
 
   // Note: Ignores any superfluous fields, for better or worse.
   private def decodeObjectLenient[Props](

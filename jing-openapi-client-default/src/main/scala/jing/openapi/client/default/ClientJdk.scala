@@ -8,7 +8,7 @@ import java.net.http.HttpResponse.BodyHandlers
 import scala.jdk.OptionConverters.*
 
 import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueMotif}
+import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueMotif}
 import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.client.{Client, HttpThunk}
 import libretto.lambda.util.Exists.Indeed
@@ -253,6 +253,9 @@ class ClientJdk extends Client {
       case I64() => Value.longValue(v).toString
       case S() => Value.stringValue(v)
       case B() => Value.booleanValue(v).toString
+      case e: Enumeration[value, base, cases] =>
+        summon[T =:= Enum[base, cases]]
+        stringifyPrimitive(Value.widenEnum(v: Value[Enum[base, cases]]), e.baseType)
 
   extension [A](a: A)
     private def |>[B](f: A => B): B = f(a)
