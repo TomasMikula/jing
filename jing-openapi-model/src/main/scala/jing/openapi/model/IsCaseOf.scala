@@ -15,9 +15,7 @@ object IsCaseOf {
   def toMember[Label, A, Cases](
     c: IsCaseOf[Label, Cases] { type Type = A },
   ): Member[||, ::, Label, A, Cases] =
-    c.asInstanceOf[Member[||, ::, Label, A, Cases]] // XXX
-    // Avoid asInstanceOf after libretto-lambda 0.3.5 is released:
-    // c.typeWitness.substituteCo[Member[||, ::, Label, _, Cases]](c)
+    c.typeWitness.substituteCo[Member[||, ::, Label, _, Cases]](c)
 
   extension [Label, Cases](i: IsCaseOf[Label, Cases]) {
     def label: Label & String =
