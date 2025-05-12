@@ -25,7 +25,7 @@ object ValueCodecJson {
           case B()   => writeJsonBoolean(Value.booleanValue(value), builder)
           case e: Enumeration[Schema, base, cases] =>
             summon[T =:= Enum[base, cases]]
-            encode(Schema.Proper(e.baseType), Value.widenEnum(value: Value[Enum[base, cases]]))
+            encode(Schema.Proper(e.baseType), Value.widenEnum(value: Value[Enum[base, cases]]), builder)
           case a: Array[schema, t] =>
             summon[T =:= Arr[t]]
             builder += '['

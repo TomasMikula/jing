@@ -53,7 +53,7 @@ sealed trait ValueMotif[+F[_], T] {
       case BoolValue(p) =>
         b.append(p.toString)
       case EnumValue(value) =>
-        value.show
+        b.append(value.show)
       case Array(elems) =>
         b.append("[")
         for (x <- elems) {
