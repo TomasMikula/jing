@@ -1,6 +1,8 @@
 package jing.openapi
 
 import io.swagger.parser.OpenAPIParser
+import java.net.URI
+import java.nio.file.Path
 import jing.openapi.Mode.IsSubsumedBy
 import jing.openapi.Mode.IsSubsumedBy.given
 import jing.openapi.ModelToScalaAst.{*, given}
@@ -28,16 +30,26 @@ import libretto.lambda.util.{Applicative, Exists, Functor, SingletonType, TypeEq
 import libretto.lambda.util.Applicative.pure
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
+import scala.annotation.tailrec
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.CollectionConverters.*
 import scala.quoted.*
-import scala.annotation.tailrec
+import scala.util.{Failure, Success, Try}
 
 private[openapi] object SwaggerToScalaAst {
   def apply(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
 
-    val spec = new OpenAPIParser().readLocation(location, null, null).getOpenAPI()
+    val spec =
+      resolveLocation(location) match
+        case Left(uri) =>
+          new OpenAPIParser().readLocation(uri.toString, null, null).getOpenAPI()
+        case Right(path) =>
+          scala.util.Try { java.nio.file.Files.readString(path) } match
+            case Success(str) =>
+              new OpenAPIParser().readContents(str, null, null).getOpenAPI()
+            case Failure(e) =>
+              report.errorAndAbort(s"Failed to read spec from file '$path': $e")
 
     val schemas0: List[(String, ProtoSchema)] = {
       val b = List.newBuilder[(String, ProtoSchema)]
@@ -894,4 +906,32 @@ private[openapi] object SwaggerToScalaAst {
       mapToProduct[[x] =>> A](a => Indeed(a))
 
   }
+
+  private def resolveLocation(location: String)(using Quotes): Either[URI, Path] =
+    import scala.util.Try
+    import quotes.reflect.*
+
+    Try { new URI(location) } match
+      case Success(uri) =>
+        if (uri.getScheme != null)
+          // proper URI
+          Left(uri)
+        else
+          Try { Path.of(location) } match
+            case Success(p) =>
+              Position.ofMacroExpansion.sourceFile.getJPath match
+                case Some(sourceFile) =>
+                  Right(sourceFile.getParent.resolve(p))
+                case None =>
+                  // no source file, we are in a REPL.
+                  // Use the current working directory to resolve paths
+                  System.getProperty("user.dir") match
+                    case null =>
+                      report.errorAndAbort(s"Cannot resolve relative path '$location': neither source file nor working directory are known")
+                    case base =>
+                      Right(Path.of(base).resolve(p))
+            case Failure(e) =>
+              report.errorAndAbort(s"The given location has no URI schema and is not a valid path: '$location' (${e.getMessage})")
+      case Failure(e) =>
+        report.errorAndAbort(s"Not a proper URI or path: '$location'")
 }

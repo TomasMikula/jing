@@ -7,7 +7,8 @@ import jing.openapi.model.Value.{arr, discriminatedUnion, obj, str}
 
 object TestApp extends App {
 
-  val api = jing.openapi("https://petstore3.swagger.io/api/v3/openapi.json")
+  // val api = jing.openapi("https://petstore3.swagger.io/api/v3/openapi.json")
+  val api = jing.openapi("petstore3.json") // relative to this source file
   import api.schemas.{Category, Pet}
 
   // Create a pet
