@@ -34,7 +34,7 @@ lazy val jingOpenApi = project
   .settings(
     libraryDependencies ++= Seq(
       "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
-      "io.swagger.parser.v3" % "swagger-parser" % "2.1.25",
+      "io.swagger.parser.v3" % "swagger-parser" % "2.1.26",
     ),
     scalacOptions ++=
       scalacOptionsCommon ++
