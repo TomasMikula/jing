@@ -36,7 +36,7 @@ api
   .paths
   .`/pet/findByStatus`
   .Get
-  .interpret(using DefaultClient)
+  .as[ClientEndpoint]
   .params(_
     .set("status", "available")
   )
@@ -54,7 +54,7 @@ See more in [TestApp.scala](https://github.com/TomasMikula/jing/blob/main/jing-o
    👍 type-drivenness, IDE-friendliness, helpful compilation errors
 
    👎 chains of implicits, orphan typeclasses
-   
+
  - **Safety**
 
    Make it very hard to shoot yourself in the foot.

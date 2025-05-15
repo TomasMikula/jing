@@ -1,8 +1,9 @@
 package jing.openapi.examples
 
-import jing.openapi.client.default.{instance as DefaultClient}
 import jing.openapi.client.default.Result.{Failed, Succeeded}
+import jing.openapi.client.default.instance
 import jing.openapi.model.*
+import jing.openapi.model.client.ClientEndpoint
 import jing.openapi.model.Value.{arr, discriminatedUnion, obj, str}
 
 object TestApp extends App {
@@ -24,7 +25,7 @@ object TestApp extends App {
       .paths
       .`/pet`
       .Post
-      .interpret(using DefaultClient)
+      .as[ClientEndpoint]
       .body["application/json"](
         Pet(obj(_
           .set("id", 12345L)
@@ -48,7 +49,7 @@ object TestApp extends App {
       .paths
       .`/pet/{petId}`
       .Post
-      .interpret(using DefaultClient)
+      .as[ClientEndpoint]
       .params(_
         .set("petId", 12345L)  // path parameter
         .set("name", "Muffin") // query parameter
@@ -67,7 +68,7 @@ object TestApp extends App {
       .paths
       .`/pet/findByStatus`
       .Get
-      .interpret(using DefaultClient)
+      .as[ClientEndpoint]
       .params(_
         .set("status", "available")
       )
@@ -92,7 +93,7 @@ object TestApp extends App {
       .paths
       .`/pet/findByTags`
       .Get
-      .interpret(using DefaultClient)
+      .as[ClientEndpoint]
       .params(_
         .set("tags", arr("tag1", "tag2")),
       )

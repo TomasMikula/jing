@@ -20,6 +20,14 @@ class ClientEndpoint[Is, O](
 }
 
 object ClientEndpoint {
+  given endpointInterpreter: (EndpointInterpreter { type Endpoint[A, B] = ClientEndpoint[A, B] }) =
+    new EndpointInterpreter {
+      override type Endpoint[I, O] = ClientEndpoint[I, O]
+
+      def interpret[I, O](ep: HttpEndpoint[I, O]): Endpoint[I, O] =
+        ClientEndpoint(ep)
+    }
+
   extension [Bs, O](endpoint: ClientEndpoint[Void || "body" :: DiscriminatedUnion[Bs], O])
     def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
       body: Value[i.Type],
