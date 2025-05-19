@@ -26,15 +26,47 @@ private object StructuralRefinement {
     Typed(term, TypeTree.of(using tpe.asType))
   }
 
+  /** Returns a structurally typed term, i.e.
+   *
+   * ```scala
+   * new Base with Selectable { <refinements> } : Base & Selectable { <refinements> }
+   * ```
+   *
+   * Member definitions can take state and pass new state forward.
+   */
+  def typedTermStateful[Base](using baseType: Type[Base])[Q <: Quotes & Singleton](using q: Q)[S[_[_]]](
+    owner : qr.Symbol,
+    members: MemberDefsPoly[q.type, "term-synth", S],
+    anonClassNameSuffix: String,
+  ): (qr.Term, S[[x] =>> Unit]) = {
+    import qr.*
+
+    val (tpe, s, termFn) = StructuralRefinement.forModeStateful["term-synth"][Base](members, anonClassNameSuffix)
+    val term = termFn(owner)
+    (Typed(term, TypeTree.of(using tpe.asType)), s)
+  }
+
   def forMode[M](using
     q: Quotes,
     mode: Mode[q.type, M],
   )[Base](using
     baseType: Type[Base],
   )(
-    members : List[(String, MemberDef.Poly[q.type, M])],
+    members: List[(String, MemberDef.Poly[q.type, M])],
     anonClassNameSuffix: String,
-  ): (qr.TypeRepr, mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
+  ): (qr.TypeRepr, mode.OutEff[(owner: qr.Symbol) => qr.Term]) =
+    val (tp, (), trm) = forModeStateful[M][Base](MemberDefsPoly.stateless(members), anonClassNameSuffix)
+    (tp, trm)
+
+  def forModeStateful[M](using
+    q: Quotes,
+    mode: Mode[q.type, M],
+  )[Base](using
+    baseType: Type[Base],
+  )[S[_[_]]](
+    members: MemberDefsPoly[q.type, M, S],
+    anonClassNameSuffix: String,
+  ): (qr.TypeRepr, S[[x] =>> Unit], mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import qr.*
 
     val baseTypeRepr = TypeRepr.of[Base]
@@ -45,12 +77,14 @@ private object StructuralRefinement {
       else
         List(baseTypeRepr, TypeRepr.of[reflect.Selectable])
 
-    (
+    val (tpe, s) =
       refinementType(selectableBase) { b =>
-        val (_, b1) =
-          members.foldLeft((PreviousSiblings.empty["type-synth"](using q), b)) {
-            case ((ctx, b), (name, defn)) =>
-              defn["type-synth"](ctx) match
+        val ((_, b1), s) =
+          members.foldLeft["type-synth"]((PreviousSiblings.empty["type-synth"](using q), b)) {
+            [X] => (acc, name, defn) => {
+              val (ctx, b) = acc
+              val (m, x) = defn(ctx)
+              val acc1 = m match
                 case _: MemberDef.Type[q] =>
                   val (b1, ref) = b.addAbstractType(name)
                   (ctx.addType(name, ref), b1)
@@ -60,11 +94,16 @@ private object StructuralRefinement {
                 case md: MemberDef.Method[q, tref] =>
                   val (b1, ref) = b.addMember(name, md.tpe)
                   (ctx.addTerm(name, ref), b1)
+              (acc1, x)
+            }
           }
 
-        b1.result
-      },
+        (b1.result, s)
+      }
 
+    (
+      tpe,
+      s,
       mode.isTermSynth.map { case TypeEq(Refl()) =>
         summon[M =:= "term-synth"]
         { (owner: Symbol) =>
@@ -74,12 +113,14 @@ private object StructuralRefinement {
               name = "$anon_" + anonClassNameSuffix,
               parents = parents,
               decls = selfSym => {
-                val (_, symsRev) =
-                  members.foldLeft((
+                val ((_, symsRev), _) =
+                  members.foldLeft["type-synth"]((
                     PreviousSiblings.empty["type-synth"](using q),
                     List.empty[Symbol],
-                  )) { case ((ctx, acc), (name, defn)) =>
-                    defn["type-synth"](ctx) match
+                  )) { [X] => (acc, name, defn) =>
+                    val (ctx, syms) = acc
+                    val (m, x) = defn(ctx)
+                    val acc1 = m match
                       case td: MemberDef.Type[q] =>
                         val tp = td.body
                         val tpSym =
@@ -90,7 +131,7 @@ private object StructuralRefinement {
                             tpe = tp,
                             privateWithin = Symbol.noSymbol,
                           )
-                        (ctx.addType(name, tpSym.typeRef), tpSym :: acc)
+                        (ctx.addType(name, tpSym.typeRef), tpSym :: syms)
                       case tm: MemberDef.Val[q, term] =>
                         val sym =
                           Symbol.newVal(
@@ -100,7 +141,7 @@ private object StructuralRefinement {
                             flags = Flags.EmptyFlags,
                             privateWithin = Symbol.noSymbol,
                           )
-                        (ctx.addTerm(name, sym.termRef), sym :: acc)
+                        (ctx.addTerm(name, sym.termRef), sym :: syms)
                       case md: MemberDef.Method[q, term] =>
                         val sym =
                           Symbol.newMethod(
@@ -110,7 +151,8 @@ private object StructuralRefinement {
                             flags = Flags.EmptyFlags,
                             privateWithin = Symbol.noSymbol,
                           )
-                        (ctx.addTerm(name, sym.termRef), sym :: acc)
+                        (ctx.addTerm(name, sym.termRef), sym :: syms)
+                    (acc1, x)
                   }
 
                 symsRev.reverse
@@ -137,26 +179,30 @@ private object StructuralRefinement {
             definedTypeSymbols.map(TypeDef(_))
 
           val valDefs =
-            members.flatMap { case (name, defn) =>
-              defn["term-synth"](ctx)
-                .acceptVisitor[Option[Definition]](
-                  caseType = _ => None,
-                  caseVal = (_, bodyF) => {
-                    val body = mode.outEffId.at(bodyF)
-                    val sym = clsSym.declaredField(name)
-                    Some(ValDef(sym, Some(body(selfSym = sym))))
-                  },
-                  caseMethod = (_, bodyF) => {
-                    val body = mode.outEffId.at(bodyF)
-                    val sym =
-                      clsSym.declaredMethod(name) match
-                        case m :: Nil => m
-                        case Nil => report.errorAndAbort(s"Bug: Method `$name` not found in declared methods")
-                        case _ => report.errorAndAbort(s"Bug: Multiple methods named `$name` found in declared methods")
-                    Some(DefDef(sym, argss => Some(body(sym, argss))))
-                  }
-                )
-            }
+            members.foldLeft["term-synth"](List.empty[Option[Definition]]) {
+              [X] => (revAcc, name, defn) =>
+                val (m, x) = defn(ctx)
+                val revAcc1 =
+                  m.acceptVisitor[Option[Definition]](
+                    caseType = _ => None,
+                    caseVal = (_, bodyF) => {
+                      val body = mode.outEffId.at(bodyF)
+                      val sym = clsSym.declaredField(name)
+                      Some(ValDef(sym, Some(body(selfSym = sym))))
+                    },
+                    caseMethod = (_, bodyF) => {
+                      val body = mode.outEffId.at(bodyF)
+                      val sym =
+                        clsSym.declaredMethod(name) match
+                          case m :: Nil => m
+                          case Nil => report.errorAndAbort(s"Bug: Method `$name` not found in declared methods")
+                          case _ => report.errorAndAbort(s"Bug: Multiple methods named `$name` found in declared methods")
+                      Some(DefDef(sym, argss => Some(body(sym, argss))))
+                    }
+                  )
+                  :: revAcc
+                (revAcc1, x)
+            }._1.reverse.flatten
 
           val clsDef = ClassDef(
             clsSym,
@@ -269,14 +315,69 @@ private object StructuralRefinement {
       f
   }
 
+  /**
+    * @tparam Q (typically singleton) subtype of Quotes
+    * @tparam M upper bound on mode
+    * @tparam S accumulated output from member definitions, parameterized by the mode's `OutEff`.
+    */
+  sealed trait MemberDefsPoly[Q <: Quotes, M, S[_[_]]] {
+    def foldLeft
+      [N](using mode: Mode[Q, N], sub: N IsSubsumedBy M)
+      [B](b: B)(f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X))
+    : (B, S[mode.OutEff])
+  }
+
+  object MemberDefsPoly {
+    case class Empty[Q <: Quotes, M, S[_[_]]](
+      initialState: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> S[mode.OutEff]
+    ) extends MemberDefsPoly[Q, M, S] {
+      override def foldLeft[N](using mode: Mode[Q, N], sub: N IsSubsumedBy M)[B](b: B)(f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X)): (B, S[mode.OutEff]) =
+        (b, initialState[N])
+    }
+
+    case class Snoc[Q <: Quotes, M, S[_[_]], T[_[_]]](
+      init: MemberDefsPoly[Q, M, S],
+      lastName: String,
+      lastDef: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S[mode.OutEff], name: String, ctx: PreviousSiblings[Q, N]) => (T[mode.OutEff], MemberDef[Q, mode.OutEff]),
+    ) extends MemberDefsPoly[Q, M, T] {
+      override def foldLeft[N](using mode: Mode[Q, N], sub: N IsSubsumedBy M)[B](b: B)(f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X)): (B, T[mode.OutEff]) =
+        val (b1, s) = init.foldLeft[N](b)(f)
+        f(b1, lastName, lastDef[N](s, lastName, _).swap)
+    }
+
+    def stateless[M](using
+      q: Quotes,
+      mode: Mode[q.type, M],
+    )(
+      members: List[(String, MemberDef.Poly[q.type, M])],
+    ): MemberDefsPoly[q.type, M, [F[_]] =>> Unit] = {
+      val init: MemberDefsPoly[q.type, M, [F[_]] =>> Unit] =
+        Empty([N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M) ?=> ())
+      members.foldLeft(init) { case (acc, (name, defn)) =>
+        Snoc(
+          acc,
+          name,
+          [N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M) ?=> (_, _, ctx) => ((), defn[N](ctx)),
+        )
+      }
+    }
+  }
+
   private def refinementType(using q: Quotes)(
     baseType: qr.TypeRepr,
-  )(
-    f: RefinementTypeBuilder[q.type] => qr.TypeRepr
-  ): qr.TypeRepr =
-    qr.RecursiveType { self =>
-      f(RefinementTypeBuilder[q.type](q)(self, baseType))
+  )[W](
+    f: RefinementTypeBuilder[q.type] => (qr.TypeRepr, W)
+  ): (qr.TypeRepr, W) = {
+    var written: Option[W] = None
+    val res = qr.RecursiveType { self =>
+      assert(written.isEmpty, "Unexpected multiple invocations of `f` in `quotes.reflect.RecursiveType(f)")
+      val (t, w) = f(RefinementTypeBuilder[q.type](q)(self, baseType))
+      written = Some(w)
+      t
     }
+    assert(written.nonEmpty, "Unexpected non-invocation of `f` in `quotes.reflect.RecursiveType(f)")
+    (res, written.get)
+  }
 
   private class RefinementTypeBuilder[Q <: Quotes](
     val q: Q,
