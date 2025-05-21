@@ -6,7 +6,7 @@ import java.nio.file.Path
 import jing.openapi.Mode.IsSubsumedBy
 import jing.openapi.Mode.IsSubsumedBy.given
 import jing.openapi.ModelToScalaAst.{*, given}
-import jing.openapi.StructuralRefinement.{MemberDef, PreviousSiblings, typeRefUnsafe}
+import jing.openapi.StructuralRefinement.{MemberDef, MemberDefsPoly, PreviousSiblings, typeRefUnsafe}
 import jing.openapi.model.{
   ||,
   ::,
@@ -66,14 +66,13 @@ private[openapi] object SwaggerToScalaAst {
       b.result()
     }
 
-    StructuralRefinement.typedTerm[OpenApiSpec](
+    StructuralRefinement.typedTermStateful[OpenApiSpec][q.type][[f[_]] =>> List[(String, List[(String, q.reflect.TypeRepr)])]](
       owner = Symbol.spliceOwner,
-      members = List(
-        "schemas" -> schemasField["term-synth"](schemas),
-        "paths"   -> pathsField["term-synth"](schemas, paths),
-      ),
+      members = MemberDefsPoly.emptyUnit[q.type, "term-synth"]
+        .next("schemas", MemberDef.PolyS.fromStateless(schemasField["term-synth"](schemas)))
+        .next("paths", pathsField["term-synth"](schemas, paths)),
       "Api",
-    ).asExpr
+    )._1.asExpr
   }
 
   private def schemasField[M](using q: Quotes)(
@@ -121,26 +120,33 @@ private[openapi] object SwaggerToScalaAst {
   private def pathsField[M](using q: Quotes)(
     schemas: List[(String, ProtoSchema.Oriented)],
     paths: List[(String, io.swagger.v3.oas.models.PathItem)],
-  ): MemberDef.Poly[q.type, M] = {
+  ): MemberDef.PolyS[q.type, M, [f[_]] =>> Unit, [f[_]] =>> List[(String, List[(String, qr.TypeRepr)])]] = {
     import quotes.reflect.*
 
-    MemberDef.poly[q.type, M] { [M1] => (m1, _) ?=> ctx =>
+    MemberDef.PolyS.writer[q.type, M, [f[_]] =>> List[(String, List[(String, TypeRepr)])]] { [M1] => (m1, _) ?=> (_, ctx) =>
       val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
         schemaLookupFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
-      val (tpe, bodyFn) = StructuralRefinement.forMode[M1][AnyRef](
-        members = paths.map { case (path, pathItem) =>
-          path -> MemberDef.poly[q.type, M1] { [M2] => (m2, sub) ?=> _ =>
-            val (tpe, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem)
-            MemberDef.Val(tpe, bodyFn)
-          }
+      type State[F[_]] = List[(String, List[(String, TypeRepr)])]
+      val init: MemberDefsPoly[q.type, M1, State] =
+        MemberDefsPoly.Empty[q.type, M1, State]([N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M1) ?=> Nil)
+
+      val (tpe, endpoints, bodyFn) = StructuralRefinement.forModeStateful[M1][AnyRef][State](
+        members = paths.foldLeft(init) { case (acc, (path, pathItem)) =>
+          acc.next(
+            path,
+            MemberDef.PolyS[q.type, M1, State, State] { [M2] => (m2, sub) ?=> (s, name, _) =>
+              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem)
+              ((name, endpoints) :: s, MemberDef.Val(tpe, bodyFn))
+            }
+          )
         },
         "paths",
       )
-      MemberDef.Val(tpe, bodyFn)
+      (endpoints.reverse, MemberDef.Val(tpe, bodyFn))
     }
   }
 
@@ -286,23 +292,38 @@ private[openapi] object SwaggerToScalaAst {
     schemas: SchemaLookup[mode.OutEff],
     path: String,
     pathItem: io.swagger.v3.oas.models.PathItem,
-  ): (qr.TypeRepr, mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
+  ): (qr.TypeRepr, List[(String, qr.TypeRepr)], mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import quotes.reflect.*
 
     val operations =
       HttpMethod.values.toList
         .flatMap { m => pathOperation(pathItem, m).map((m, _)) }
 
-    StructuralRefinement.forMode[M][AnyRef](
-      members = operations.map { case (meth, op) =>
-        meth.toString -> MemberDef.poly[q.type, M] { [N] => (_, sub) ?=> _ =>
-          operationToObject(schemas.mapK(sub.downgrader), path, meth, op) match
-            case Indeed((tp, body)) =>
-              MemberDef.Val(TypeRepr.of(using tp), body.map { b => (_: Symbol) => b.asTerm })
-        }
-      },
-      path,
-    )
+    type State[F[_]] = List[(String, TypeRepr)]
+    val init: MemberDefsPoly[q.type, M, State] =
+      MemberDefsPoly.Empty[q.type, M, State]([N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M) ?=> Nil)
+
+    val (tp, endpoints, bodyFn) =
+      StructuralRefinement.forModeStateful[M][AnyRef][State](
+        members = operations.foldLeft(init) { case (acc, (meth, op)) =>
+          val methStr = meth.toString
+          acc.next(
+            methStr,
+            MemberDef.PolyS[q.type, M, State, State] { [N] => (_, sub) ?=> (s, _, _) =>
+              operationToObject(schemas.mapK(sub.downgrader), path, meth, op) match
+                case Indeed((tp, body)) =>
+                  val tr = TypeRepr.of(using tp)
+                  (
+                    (methStr, tr) :: s,
+                    MemberDef.Val(tr, body.map { b => (_: Symbol) => b.asTerm })
+                  )
+            }
+          )
+        },
+        path,
+      )
+
+    (tp, endpoints.reverse, bodyFn)
   }
 
   private def pathOperation(
