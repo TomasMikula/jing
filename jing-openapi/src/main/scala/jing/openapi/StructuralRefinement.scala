@@ -332,6 +332,13 @@ private object StructuralRefinement {
           [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (_: Unit, name: String, ctx: PreviousSiblings[Q, N]) => f[N](name, ctx)
         )
 
+      def reader[Q <: Quotes, M, R[_[_]]](
+        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (env: R[mode.OutEff], name: String, ctx: PreviousSiblings[Q, N]) => MemberDef[Q, mode.OutEff],
+      ): PolyS[Q, M, R, [f[_]] =>> Unit] =
+        PolyS[Q, M, R, [f[_]] =>> Unit](
+          [N] => (mode, sub) ?=> (env, name, ctx) => ((), f[N](env, name, ctx))
+        )
+
       def fromStateless[Q <: Quotes, M, S[_[_]]](m: MemberDef.Poly[Q, M]): MemberDef.PolyS[Q, M, S, [f[_]] =>> Unit] =
         PolyS([N] => (mode, sub) ?=> (_, _, ctx) => ((), m[N](ctx)))
     }
