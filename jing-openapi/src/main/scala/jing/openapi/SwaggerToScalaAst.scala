@@ -96,7 +96,7 @@ private[openapi] object SwaggerToScalaAst {
             // "opaque" type alias
             name -> MemberDef.poly[q.type, N] { [N] => (_, _) ?=> ctx =>
               val tpe = resolveSchema[N](ctx, s).value._1
-              MemberDef.Type(TypeRepr.of(using tpe))
+              MemberDef.Type(TypeRepr.of(using tpe), isAbstract = true)
             },
 
             // companion "object"
@@ -172,7 +172,8 @@ private[openapi] object SwaggerToScalaAst {
       MemberDef.Type(
         TypeRepr
           .of[NamedTuple.NamedTuple]
-          .appliedTo(List(namesTuple, typesTuple))
+          .appliedTo(List(namesTuple, typesTuple)),
+        isAbstract = false,
       )
     }
   }

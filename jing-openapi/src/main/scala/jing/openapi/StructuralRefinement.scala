@@ -85,8 +85,12 @@ private object StructuralRefinement {
               val (ctx, b) = acc
               val (m, x) = defn(ctx)
               val acc1 = m match
-                case _: MemberDef.Type[q] =>
-                  val (b1, ref) = b.addAbstractType(name)
+                case td: MemberDef.Type[q] =>
+                  val (b1, ref) =
+                    if (td.isAbstract)
+                      b.addTypeMember(name)
+                    else
+                      b.addTypeMember(name, Some(td.body))
                   (ctx.addType(name, ref), b1)
                 case tm: MemberDef.Val[q, tref] =>
                   val (b1, ref) = b.addMember(name, tm.tpe)
@@ -271,6 +275,7 @@ private object StructuralRefinement {
   object MemberDef {
     class Type[Q <: Quotes & Singleton](using val q: Q)(
       val body: qr.TypeRepr,
+      val isAbstract: Boolean,
     ) extends MemberDef[Q, Nothing] {
       override def acceptVisitor[R](
         caseType: (q: Q) ?=> q.reflect.TypeRepr => R,
@@ -425,8 +430,11 @@ private object StructuralRefinement {
   ) {
     import q.reflect.*
 
-    def addAbstractType(name: String): (RefinementTypeBuilder[Q], TypeRef) = {
-      val acc1 = Refinement(acc, name, TypeBounds.empty)
+    def addTypeMember(name: String, tpe: Option[TypeRepr] = None): (RefinementTypeBuilder[Q], TypeRef) = {
+      val typeBounds = tpe match
+        case Some(tpe) => TypeBounds(tpe, tpe)
+        case None => TypeBounds.empty
+      val acc1 = Refinement(acc, name, typeBounds)
       val ref = typeRefUnsafe(using q)(self.recThis, name)
 
       (RefinementTypeBuilder(q)(self, acc1), ref)
