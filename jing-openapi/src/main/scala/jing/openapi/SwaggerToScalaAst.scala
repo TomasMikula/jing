@@ -13,6 +13,7 @@ import jing.openapi.model.{
   :?,
   BodySchema,
   DiscriminatedUnion,
+  EndpointList,
   HttpEndpoint,
   HttpMethod,
   Obj,
@@ -71,7 +72,7 @@ private[openapi] object SwaggerToScalaAst {
       members = MemberDefsPoly.emptyUnit[q.type, "term-synth"]
         .next("schemas", MemberDef.PolyS.fromStateless(schemasField["term-synth"](schemas)))
         .next("paths", pathsField["term-synth"](schemas, paths))
-        .next("Endpoints", endpointsType["term-synth"])
+        .next("endpointList", endpointsField["term-synth"])
         ,
       "Api",
     )._1.asExpr
@@ -152,28 +153,42 @@ private[openapi] object SwaggerToScalaAst {
     }
   }
 
-  private def endpointsType[M](using q: Quotes): MemberDef.PolyS[q.type, M, [f[_]] =>> List[(String, List[(HttpMethod, qr.TypeRepr)])], [f[_]] =>> Unit] = {
+  private def endpointsField[M](using q: Quotes): MemberDef.PolyS[q.type, M, [f[_]] =>> List[(String, List[(HttpMethod, qr.TypeRepr)])], [f[_]] =>> Unit] = {
     import quotes.reflect.*
 
-    MemberDef.PolyS.reader { [M1] => (m1, sub) ?=> (endpoints, _, _) =>
-      val (namesTuple, typesTuple) =
-        endpoints.foldRight[(TypeRepr, TypeRepr)](
-          (TypeRepr.of[EmptyTuple], TypeRepr.of[EmptyTuple]),
+    MemberDef.PolyS.reader { [M1] => (m1, sub) ?=> (endpoints, _, ctx) =>
+      import m1.applicativeOutEff
+
+      val pathsField: ctx.mode.InTerm =
+        ctx.terms.getOrElse("paths", { throw AssertionError("field `paths` not previously defined") })
+      val endpointMap: List[(String, List[(HttpMethod, Exists[[T] =>> (Type[T], m1.OutEff[Expr[T]])])])] =
+        endpointMapFromPathsField(Mode.sameInTerm(ctx.mode, m1)(pathsField), endpoints)
+      val (namesTuple, typesTuple, expr) =
+        endpointMap.foldRight[(TypeRepr, TypeRepr, m1.OutEff[Expr[EndpointList[? <: NamedTuple.AnyNamedTuple]]])](
+          (TypeRepr.of[EmptyTuple], TypeRepr.of[EmptyTuple], '{ EndpointList.empty }.pure[m1.OutEff]),
         ) { case ((path, ops), acc) =>
-          ops.foldRight(acc) { case ((method, tp), (namesAcc, typesAcc)) =>
+          ops.foldRight(acc) { case ((method, ep), (namesAcc, typesAcc, termAcc)) =>
             val name = s"${path}_${method.nameUpperCase}"
-            val nameTpe = Literal(StringConstant(name)).tpe
+            val (nameTpe, nameExp) = ModelToScalaAst.quotedSingletonString(SingletonType(name))
+            given Type[ep.T] = ep.value._1
             (
-              TypeRepr.of[*:].appliedTo(List(nameTpe, namesAcc)),
-              TypeRepr.of[*:].appliedTo(List(tp, typesAcc)),
+              TypeRepr.of[*:].appliedTo(List(TypeRepr.of(using nameTpe), namesAcc)),
+              TypeRepr.of[*:].appliedTo(List(TypeRepr.of(using ep.value._1), typesAcc)),
+              (ep.value._2 zipWith termAcc):
+                case ('{ $e: HttpEndpoint[a, b] }, termAcc) =>
+                  val typeAcc = TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesAcc, typesAcc))
+                  def go[T <: NamedTuple.AnyNamedTuple](termAcc: Expr[EndpointList[T]]) =
+                    given Type[T] = typeAcc.asType.asInstanceOf[Type[T]]
+                    def go[S <: String](nameExp: Expr[SingletonType[S]])(using Type[S]) =
+                      '{ EndpointList.Cons($nameExp, $e, $termAcc) }
+                    go(nameExp)(using nameTpe)
+                  go((termAcc: Expr[EndpointList[? <: NamedTuple.AnyNamedTuple]]).asInstanceOf[Expr[EndpointList[NamedTuple.AnyNamedTuple]]])
             )
           }
         }
-      MemberDef.Type(
-        TypeRepr
-          .of[NamedTuple.NamedTuple]
-          .appliedTo(List(namesTuple, typesTuple)),
-        isAbstract = false,
+      MemberDef.Val(
+        TypeRepr.of[EndpointList].appliedTo(TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, typesTuple))),
+        expr.map(expr => (owner: Symbol) => expr.asTerm),
       )
     }
   }
@@ -243,7 +258,7 @@ private[openapi] object SwaggerToScalaAst {
           val schemasFieldRef: TermRef =
             m.inTermRefOnly(schemasField)
           val fabricate: [A] => Unit => m.OutEff[A] =
-            val ev = m.outEffConstUnit.flip;
+            val ev = m.outEffConstUnit.flip
             [A] => (u: Unit) => ev.at[A](())
           schemaNames
             .map[(String, Exists[[T] =>> (Type[T], m.OutEff[Expr[Schema[T]]])])] { name =>
@@ -256,6 +271,48 @@ private[openapi] object SwaggerToScalaAst {
     SchemaLookup.fromMap[m.OutEff](typesAndTerms)
   }
 
+  private def endpointMapFromPathsField[M](using q: Quotes, m: Mode[q.type, M])(
+    pathsField: m.InTerm,
+    endpoints: List[(String, List[(HttpMethod, qr.TypeRepr)])],
+  ): List[(String, List[(HttpMethod, Exists[[T] =>> (Type[T], m.OutEff[Expr[T]])])])] = {
+    import q.reflect.*
+
+    m match {
+      case _: Mode.TermSynth[q] =>
+        val pathsFieldTerm: Term =
+          m.inTermProper(pathsField)
+        endpoints
+          .map { case (path, ops) =>
+            val pathField =
+              Select.unique(pathsFieldTerm, "selectDynamic")
+                .appliedTo(Literal(StringConstant(path)))
+            val pathFieldTyped =
+              Select.unique(pathField, "$asInstanceOf$").appliedToType(TypeRepr.of[scala.reflect.Selectable])
+            path -> ops.map { case (method, tp) =>
+              val endpointTerm =
+                Select.unique(pathFieldTyped, "selectDynamic")
+                  .appliedTo(Literal(StringConstant(method.toString)))
+              val endpointTermTyped =
+                Select.unique(endpointTerm, "$asInstanceOf$").appliedToType(tp)
+              method -> endpointTypeAndExpr(tp, endpointTermTyped.pure[m.OutEff])
+            }
+          }
+
+      case _: Mode.TypeSynth[q] =>
+        val pathsFieldRef: TermRef =
+          m.inTermRefOnly(pathsField)
+        val fabricate: [A] => Unit => m.OutEff[A] =
+          val ev = m.outEffConstUnit.flip
+          [A] => (u: Unit) => ev.at[A](())
+        endpoints
+          .map { case (path, ops) =>
+            path -> ops.map { case (method, tp) =>
+              method -> endpointTypeAndExpr(tp, fabricate(()))
+            }
+          }
+    }
+  }
+
   private def typeAndSchemaExpr[F[_]](using Quotes)(
     tpe: qr.TypeRepr,
     schemaTerm: F[qr.Term],
@@ -263,6 +320,13 @@ private[openapi] object SwaggerToScalaAst {
     tpe.asType match
       case '[t] => Indeed((Type.of[t], schemaTerm.map(_.asExprOf[Schema[t]])))
   }
+
+  private def endpointTypeAndExpr[F[_]](using Quotes)(
+    endpointType: qr.TypeRepr,
+    endpointTerm: F[qr.Term],
+  )(using Functor[F]): Exists[[T] =>> (Type[T], F[Expr[T]])] =
+    endpointType.asType match
+      case '[t] => Indeed((Type.of[t], endpointTerm.map(_.asExprOf[t])))
 
   /**
     * @tparam A the abstract ("opaque") alias (of `T`) for which we are creating the companion object
