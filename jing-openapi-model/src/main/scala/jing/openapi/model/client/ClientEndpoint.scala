@@ -20,8 +20,8 @@ class ClientEndpoint[Is, O](
 }
 
 object ClientEndpoint {
-  given endpointInterpreter: (EndpointInterpreter { type Endpoint[A, B] = ClientEndpoint[A, B] }) =
-    new EndpointInterpreter {
+  given endpointInterpreter: (HttpEndpoint.Interpreter { type Endpoint[A, B] = ClientEndpoint[A, B] }) =
+    new HttpEndpoint.Interpreter {
       override type Endpoint[I, O] = ClientEndpoint[I, O]
 
       def interpret[I, O](ep: HttpEndpoint[I, O]): Endpoint[I, O] =
