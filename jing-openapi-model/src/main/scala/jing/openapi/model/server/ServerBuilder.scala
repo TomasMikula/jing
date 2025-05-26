@@ -7,15 +7,15 @@ trait ServerBuilder extends EndpointList.Interpreter {
   import ServerBuilder.*
 
   type RequestHandler[I, O]
-  type Server
+  type ServerDefinition
 
-  def build(endpointHandlers: List[EndpointHandler[RequestHandler]]): Server
+  def build(endpointHandlers: List[EndpointHandler[RequestHandler]]): ServerDefinition
 
   type MatchingHandler[Endpoint] = Endpoint match
     case HttpEndpoint[a, b] => RequestHandler[a, b]
 
   override type Result[Endpoints <: AnyNamedTuple] =
-    NamedTuple.Map[Endpoints, MatchingHandler] => Server
+    NamedTuple.Map[Endpoints, MatchingHandler] => ServerDefinition
 
   override def interpret[Endpoints <: AnyNamedTuple](endpoints: EndpointList[Endpoints]): Result[Endpoints] =
     (handlers) => build(

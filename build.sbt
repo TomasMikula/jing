@@ -56,6 +56,19 @@ lazy val jingOpenApiClientDefault = project
     ),
   )
 
+lazy val jingOpenApiServerHttp4s = project
+  .in(file("jing-openapi-server-http4s"))
+  .dependsOn(
+    jingOpenApiModel,
+  )
+  .settings(
+    scalacOptions ++=
+      scalacOptionsCommon,
+    libraryDependencies ++= Seq(
+      "org.http4s" %% "http4s-core" % "0.23.30",
+    ),
+  )
+
 lazy val jingOpenApiExamples = project
   .in(file("jing-openapi-examples"))
   .dependsOn(
