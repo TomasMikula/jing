@@ -3,10 +3,11 @@ package jing.openapi
 import io.swagger.parser.OpenAPIParser
 import java.net.URI
 import java.nio.file.Path
-import jing.openapi.Mode.IsSubsumedBy
-import jing.openapi.Mode.IsSubsumedBy.given
+import jing.macroUtil.{Mode, StructuralRefinement, qr}
+import jing.macroUtil.Mode.IsSubsumedBy
+import jing.macroUtil.Mode.IsSubsumedBy.given
+import jing.macroUtil.StructuralRefinement.{MemberDef, MemberDefsPoly, PreviousSiblings, typeRefUnsafe}
 import jing.openapi.ModelToScalaAst.{*, given}
-import jing.openapi.StructuralRefinement.{MemberDef, MemberDefsPoly, PreviousSiblings, typeRefUnsafe}
 import jing.openapi.model.{
   ||,
   ::,

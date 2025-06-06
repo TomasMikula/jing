@@ -17,7 +17,7 @@ sealed trait EndpointList[EPs <: AnyNamedTuple] {
   def namedTuple: EPs =
     evidence.flip(NamedTuple[Names, Types](tuple))
 
-  def ::[A, B](name: String, ep: HttpEndpoint[A, B]): EndpointList[NamedTuples.Cons[name.type, HttpEndpoint[A, B], EPs]] =
+  def *:[A, B](name: String, ep: HttpEndpoint[A, B]): EndpointList[NamedTuples.Cons[name.type, HttpEndpoint[A, B], EPs]] =
     EndpointList.Cons(SingletonType(name), ep, this)
 
   def interpret(using i: EndpointList.Interpreter): i.Result[EPs] =

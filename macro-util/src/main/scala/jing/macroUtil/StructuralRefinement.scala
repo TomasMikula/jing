@@ -1,12 +1,14 @@
-package jing.openapi
+package jing.macroUtil
 
-import jing.openapi.Mode.IsSubsumedBy
-import jing.openapi.Mode.IsSubsumedBy.given
+import jing.macroUtil.Mode.IsSubsumedBy
+import jing.macroUtil.Mode.IsSubsumedBy.given
 import libretto.lambda.util.TypeEq
 import libretto.lambda.util.TypeEq.Refl
+import scala.annotation.experimental
 import scala.quoted.*
 
-private object StructuralRefinement {
+@experimental("Relying on experimental macro features.")
+object StructuralRefinement {
 
   /** Returns a structurally typed term, i.e.
    *

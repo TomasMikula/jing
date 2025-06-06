@@ -13,8 +13,5 @@ package object openapi {
     SwaggerToScalaAst(url)
   }
 
-  private transparent inline def qr(using q: Quotes): q.reflect.type =
-    q.reflect
-
 }
 

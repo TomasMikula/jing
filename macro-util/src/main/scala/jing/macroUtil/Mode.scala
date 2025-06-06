@@ -1,9 +1,9 @@
-package jing.openapi
+package jing.macroUtil
 
 import libretto.lambda.util.{Applicative, TypeEqK}
 import scala.quoted.*
 
-private sealed trait Mode[Q <: Quotes, M] {
+sealed trait Mode[Q <: Quotes, M] {
   val q: Q
   type InTerm
   type OutEff[A]
@@ -29,7 +29,7 @@ private sealed trait Mode[Q <: Quotes, M] {
     name
 }
 
-private object Mode {
+object Mode {
   class TypeSynth[Q <: Quotes & Singleton](using val q: Q) extends Mode[Q, "type-synth"] {
     override type InTerm = qr.TermRef
     override type OutEff[A] = Unit

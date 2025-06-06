@@ -17,12 +17,27 @@ val scalacOptionsCommon =
     "-Xkind-projector:underscores",
   )
 
+val LibrettoVersion = "0.3.6-SNAPSHOT"
+
+lazy val macroUtil = project
+  .in(file("macro-util"))
+  .settings(
+    libraryDependencies ++= Seq(
+      "dev.continuously.libretto" %% "libretto-lambda" % LibrettoVersion,
+      "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
+    ),
+    scalacOptions ++= scalacOptionsCommon,
+  )
+
 lazy val jingOpenApiModel = project
   .in(file("jing-openapi-model"))
+  .dependsOn(
+    macroUtil,
+  )
   .settings(
     scalacOptions ++= scalacOptionsCommon,
     libraryDependencies ++= Seq(
-      "dev.continuously.libretto" %% "libretto-lambda" % "0.3.6-SNAPSHOT",
+      "dev.continuously.libretto" %% "libretto-lambda" % LibrettoVersion,
     )
   )
 
@@ -30,10 +45,10 @@ lazy val jingOpenApi = project
   .in(file("jing-openapi"))
   .dependsOn(
     jingOpenApiModel,
+    macroUtil,
   )
   .settings(
     libraryDependencies ++= Seq(
-      "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
       "io.swagger.parser.v3" % "swagger-parser" % "2.1.26",
     ),
     scalacOptions ++=
@@ -74,6 +89,7 @@ lazy val jingOpenApiExamples = project
   .dependsOn(
     jingOpenApiModel,
     jingOpenApiClientDefault,
+    jingOpenApiServerHttp4s,
     jingOpenApi % Provided,
   )
   .settings(
