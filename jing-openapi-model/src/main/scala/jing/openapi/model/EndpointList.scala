@@ -1,21 +1,27 @@
 package jing.openapi.model
 
-import libretto.lambda.util.{SingletonType, TypeEq}
+import libretto.lambda.util.{Exists, SingletonType, TypeEq}
 import libretto.lambda.util.TypeEq.Refl
-import scala.NamedTuple.{AnyNamedTuple, NamedTuple}
-import scala.NamedTupleDecomposition.DropNames
+import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
+import jing.openapi.model.NamedTuples.Uncons
 
 sealed trait EndpointList[EPs <: AnyNamedTuple] {
-  type Names <: Tuple
-  type Types <: Tuple
   type Endpoints = EPs
 
-  def evidence: EPs =:= NamedTuple[Names, Types]
+  def evidence: EPs =:= NamedTuple[Names[EPs], DropNames[EPs]]
 
-  def tuple: Types
+  def tuple: DropNames[EPs]
+
+  def uncons(using u: NamedTuples.Uncons[EPs]): (
+    Exists[[A] =>> Exists[[B] =>> (HttpEndpoint[A, B], u.HeadType =:= HttpEndpoint[A, B])]],
+    EndpointList[u.Tail]
+  )
 
   def namedTuple: EPs =
-    evidence.flip(NamedTuple[Names, Types](tuple))
+    evidence.flip((tuple))
+
+  def ntExpand: EndpointList[NamedTuple[Names[EPs], DropNames[EPs]]] =
+    TypeEq(evidence).substUpperBounded(this)
 
   def *:[A, B](name: String, ep: HttpEndpoint[A, B]): EndpointList[NamedTuples.Cons[name.type, HttpEndpoint[A, B], EPs]] =
     EndpointList.Cons(SingletonType(name), ep, this)
@@ -30,14 +36,23 @@ sealed trait EndpointList[EPs <: AnyNamedTuple] {
 
 object EndpointList {
   case object Empty extends EndpointList[NamedTuple.Empty] {
-    override type Names = EmptyTuple
-    override type Types = EmptyTuple
-
     override def evidence: NamedTuple.Empty =:= NamedTuple[EmptyTuple, EmptyTuple] =
       summon
 
-    override def tuple: Types =
+    override def tuple: EmptyTuple =
       EmptyTuple
+
+    override def uncons(using u: Uncons[scala.NamedTuple.Empty]): (
+      Exists[[A] =>> Exists[[B] =>> (HttpEndpoint[A, B], u.HeadType =:= HttpEndpoint[A, B])]],
+      EndpointList[u.Tail],
+    ) = {
+      // absurd
+      u.evidence: =:=[
+        NamedTuple[       EmptyTuple        ,        EmptyTuple        ],
+        NamedTuple[u.HeadName *: u.TailNames, u.HeadType *: u.TailTypes]
+      ]
+      throw AssertionError("Impossible: empty tuple is non-empty")
+    }
 
     override def zipWithMapped[F[_], C](
       that: NamedTuple[EmptyTuple, EmptyTuple]
@@ -52,18 +67,28 @@ object EndpointList {
     headValue: HttpEndpoint[A, B],
     tail: EndpointList[T],
   ) extends EndpointList[NamedTuples.Cons[S, HttpEndpoint[A, B], T]] {
-    override type Names = S *: tail.Names
-    override type Types = HttpEndpoint[A, B] *: tail.Types
-
     override def evidence: =:=[
       NamedTuples.Cons[S, HttpEndpoint[A, B], T],
-      NamedTuples.Cons[S, HttpEndpoint[A, B], NamedTuple[tail.Names, tail.Types]]
+      NamedTuples.Cons[S, HttpEndpoint[A, B], NamedTuple[Names[T], DropNames[T]]]
     ] =
       TypeEq(tail.evidence)
         .liftUpperBounded[AnyNamedTuple, [t <: AnyNamedTuple] =>> NamedTuples.Cons[S, HttpEndpoint[A, B], t]]
         .to_=:=
 
-    override def tuple: Types = headValue *: tail.tuple
+    override def tuple: HttpEndpoint[A, B] *: DropNames[T] =
+      headValue *: tail.tuple
+
+    override def uncons(using u: Uncons[NamedTuples.Cons[S, HttpEndpoint[A, B], T]]): (
+      Exists[[A] =>> Exists[[B] =>> (HttpEndpoint[A, B], u.HeadType =:= HttpEndpoint[A, B])]],
+      EndpointList[u.Tail],
+    ) =
+      // Named tuples are a misfit for this:
+      //  - cannot prove injectivity;
+      //  - bounds (e.g. N <: Tuple) only complicate things (e.g. cannot fabricadte BiInjectivity instance, because of the bounds) at no benefit.
+      // Should back out of named tuples and avoid these unsafe casts.
+      ( Exists(Exists((headValue, summon[u.HeadType =:= u.HeadType].asInstanceOf[u.HeadType =:= HttpEndpoint[A, B]])))
+      , tail.asInstanceOf[EndpointList[u.Tail]]
+      )
 
     override def zipWithMapped[F[_], C](
       that: NamedTuple[S *: NamedTuple.Names[T], Tuple.Map[HttpEndpoint[A, B] *: DropNames[T], F]],

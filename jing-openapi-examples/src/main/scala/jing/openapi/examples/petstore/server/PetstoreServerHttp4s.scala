@@ -9,8 +9,11 @@ object PetstoreServerHttp4s extends App {
 
   val serverBuilder =
     api
-    .endpointList
-    .interpret(using Http4sServerBuilder.forIO)
+      .endpointList
+      .interpret(using Http4sServerBuilder.forIO)
+
+  serverBuilder
+    .handle["/pet_POST"](???)
 
   serverBuilder.withRequestHandlersTuple(
     ???,
