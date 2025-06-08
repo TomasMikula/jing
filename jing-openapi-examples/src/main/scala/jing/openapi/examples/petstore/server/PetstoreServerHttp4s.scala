@@ -14,6 +14,8 @@ object PetstoreServerHttp4s extends App {
 
   serverBuilder
     .handle["/pet_POST"](???)
+    .handle["/pet_PUT"](???)
+    .handle["/pet/findByStatus_GET"](???)
 
   serverBuilder.withRequestHandlersTuple(
     ???,

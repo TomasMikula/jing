@@ -164,31 +164,39 @@ private[openapi] object SwaggerToScalaAst {
         ctx.terms.getOrElse("paths", { throw AssertionError("field `paths` not previously defined") })
       val endpointMap: List[(String, List[(HttpMethod, Exists[[T] =>> (Type[T], m1.OutEff[Expr[T]])])])] =
         endpointMapFromPathsField(Mode.sameInTerm(ctx.mode, m1)(pathsField), endpoints)
-      val (namesTuple, typesTuple, expr) =
-        endpointMap.foldRight[(TypeRepr, TypeRepr, m1.OutEff[Expr[EndpointList[? <: NamedTuple.AnyNamedTuple]]])](
-          (TypeRepr.of[EmptyTuple], TypeRepr.of[EmptyTuple], '{ EndpointList.empty }.pure[m1.OutEff]),
+      val (endpointTypes, namesTuple, typesTuple, expr) =
+        endpointMap.foldRight[(TypeRepr, TypeRepr, TypeRepr, m1.OutEff[Expr[EndpointList[?, ? <: NamedTuple.AnyNamedTuple]]])](
+          (TypeRepr.of[Void], TypeRepr.of[EmptyTuple], TypeRepr.of[EmptyTuple], '{ EndpointList.empty }.pure[m1.OutEff]),
         ) { case ((path, ops), acc) =>
-          ops.foldRight(acc) { case ((method, ep), (namesAcc, typesAcc, termAcc)) =>
+          ops.foldRight(acc) { case ((method, ep), (esAcc, namesAcc, typesAcc, termAcc)) =>
             val name = s"${path}_${method.nameUpperCase}"
             val (nameTpe, nameExp) = ModelToScalaAst.quotedSingletonString(SingletonType(name))
             given Type[ep.T] = ep.value._1
+            val headNameTpe = TypeRepr.of(using nameTpe)
+            val headTypeTpe = TypeRepr.of(using ep.value._1)
+            val headTpe = TypeRepr.of[::].appliedTo(List(headNameTpe, headTypeTpe))
             (
-              TypeRepr.of[*:].appliedTo(List(TypeRepr.of(using nameTpe), namesAcc)),
-              TypeRepr.of[*:].appliedTo(List(TypeRepr.of(using ep.value._1), typesAcc)),
+              TypeRepr.of[||].appliedTo(List(headTpe, esAcc)),
+              TypeRepr.of[*:].appliedTo(List(headNameTpe, namesAcc)),
+              TypeRepr.of[*:].appliedTo(List(headTypeTpe, typesAcc)),
               (ep.value._2 zipWith termAcc):
                 case ('{ $e: HttpEndpoint[a, b] }, termAcc) =>
-                  val typeAcc = TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesAcc, typesAcc))
-                  def go[T <: NamedTuple.AnyNamedTuple](termAcc: Expr[EndpointList[T]]) =
-                    given Type[T] = typeAcc.asType.asInstanceOf[Type[T]]
+                  val ntTypeAcc = TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesAcc, typesAcc))
+                  def go[Es, T <: NamedTuple.AnyNamedTuple](termAcc: Expr[EndpointList[Es, T]]) =
+                    given Type[Es] = esAcc.asType.asInstanceOf[Type[Es]]
+                    given Type[T] = ntTypeAcc.asType.asInstanceOf[Type[T]]
                     def go[S <: String](nameExp: Expr[SingletonType[S]])(using Type[S]) =
                       '{ EndpointList.Cons($nameExp, $e, $termAcc) }
                     go(nameExp)(using nameTpe)
-                  go((termAcc: Expr[EndpointList[? <: NamedTuple.AnyNamedTuple]]).asInstanceOf[Expr[EndpointList[NamedTuple.AnyNamedTuple]]])
+                  go((termAcc: Expr[EndpointList[?, ? <: NamedTuple.AnyNamedTuple]]).asInstanceOf[Expr[EndpointList[Any, NamedTuple.AnyNamedTuple]]])
             )
           }
         }
       MemberDef.Val(
-        TypeRepr.of[EndpointList].appliedTo(TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, typesTuple))),
+        TypeRepr.of[EndpointList].appliedTo(List(
+          endpointTypes,
+          TypeRepr.of[NamedTuple.NamedTuple].appliedTo(List(namesTuple, typesTuple))
+        )),
         expr.map(expr => (owner: Symbol) => expr.asTerm),
       )
     }

@@ -5,5 +5,5 @@ abstract class OpenApiSpec {
   val paths: {}
 
   /** A (heterogenous) list of all endpoints found in [[paths]]. */
-  val endpointList: EndpointList[?]
+  val endpointList: EndpointList[?, ?]
 }

@@ -1,10 +1,7 @@
 package jing.openapi.model.server
 
 import jing.macroUtil.TupledFunctions
-import jing.openapi.model.{EndpointList, HttpEndpoint}
-import jing.openapi.model.NamedTuples.Uncons
-import libretto.lambda.util.Exists.Indeed
-import libretto.lambda.util.TypeEq
+import jing.openapi.model.{::, ||, EndpointList, HttpEndpoint}
 import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
 import scala.annotation.experimental
 
@@ -16,13 +13,15 @@ trait ServerBuilder extends EndpointList.Interpreter {
 
   def build(endpointHandlers: List[EndpointHandler[RequestHandler]]): ServerDefinition
 
-  override type Result[Endpoints <: AnyNamedTuple] =
-    PendingHandlers[Names[Endpoints], DropNames[Endpoints], RequestHandler, ServerDefinition]
+  override type Result[Endpoints, EndpointsTuple <: AnyNamedTuple] =
+    PendingHandlers[RequestHandler, ServerDefinition, Endpoints, Names[EndpointsTuple], DropNames[EndpointsTuple]]
 
-  override def interpret[Endpoints <: AnyNamedTuple](endpoints: EndpointList[Endpoints]): Result[Endpoints] =
+  override def interpret[Endpoints, EndpointsTuple <: AnyNamedTuple](
+    endpoints: EndpointList[Endpoints, EndpointsTuple],
+  ): Result[Endpoints, EndpointsTuple] =
     PendingHandlers(
-      endpoints.ntExpand,
       build(_),
+      endpoints.ntExpand,
     )
 }
 
@@ -48,13 +47,14 @@ object ServerBuilder {
   }
 
   class PendingHandlers[
-    EndpointNames <: Tuple,
-    EndpointTypes <: Tuple,
     RequestHandler[_, _],
     ServerDefinition,
+    Endpoints,
+    EndpointNames <: Tuple,
+    EndpointTypes <: Tuple,
   ](
-    endpoints: EndpointList[NamedTuple[EndpointNames, EndpointTypes]],
-    build: (handlers: List[EndpointHandler[RequestHandler]]) => ServerDefinition,
+    private[PendingHandlers] val build: (handlers: List[EndpointHandler[RequestHandler]]) => ServerDefinition,
+    private[PendingHandlers] val endpoints: EndpointList[Endpoints, NamedTuple[EndpointNames, EndpointTypes]],
   ) {
     type MatchingHandler[Endpoint] = Endpoint match
       case HttpEndpoint[a, b] => RequestHandler[a, b]
@@ -101,38 +101,79 @@ object ServerBuilder {
     @experimental("Has experimental dependencies")
     transparent inline def implementRequestHandlers =
       TupledFunctions.untupledMethod[EndpointNames, HandlerTypes, ServerDefinition](buildServer)
+  }
 
-    def handle(using
-      u: Uncons[NamedTuple[EndpointNames, EndpointTypes]],
-    ): HandlerAccumulator.PendingNext[u.HeadName, u.HeadType, u.TailNames, u.TailTypes] =
-      HandlerAccumulator.PendingNext(Nil, TypeEq(u.evidence).substUpperBounded(endpoints))
-
-    class HandlerAccumulator[Remaining <: AnyNamedTuple](
-      acc: List[EndpointHandler[RequestHandler]],
-      remaining: EndpointList[Remaining],
+  object PendingHandlers {
+    extension [ReqHandler[_, _], ServerDefn, Name, In, Out, Tail](
+      ph: PendingHandlers[ReqHandler, ServerDefn, Name :: HttpEndpoint[In, Out] || Tail, ?, ?]
     ) {
-      def handle(using u: Uncons[Remaining]): HandlerAccumulator.PendingNext[u.HeadName, u.HeadType, u.TailNames, u.TailTypes] =
-        HandlerAccumulator.PendingNext(acc, TypeEq(u.evidence).substUpperBounded(remaining))
+      /** Handle the next endpoint.
+       *
+       * Request handler is passed to the apply method of the resulting object.
+       * This indirection provides better IDE hints than [[on]], because it works around
+       * https://github.com/scalameta/metals/issues/7556.
+       */
+      def handle: HandlerAccumulator.PendingNext[ReqHandler, ServerDefn, Name, In, Out, Tail] =
+        HandlerAccumulator.PendingNext(ph.build, Nil, ph.endpoints)
 
-      def end(using Remaining =:= NamedTuple.Empty): ServerDefinition =
+      /** Handle the first endpoint using the given request handler. */
+      def on[EndpointName](using EndpointName =:= Name)(
+          handler: ReqHandler[In, Out],
+        ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
+          val (e, es) = ph.endpoints.uncons
+          val h: EndpointHandler[ReqHandler] =
+            EndpointHandler(e, handler)
+          HandlerAccumulator(ph.build, h :: Nil, es)
+    }
+
+    class HandlerAccumulator[ReqHandler[_, _], ServerDefn, Remaining](
+      private[HandlerAccumulator] val build: (handlers: List[EndpointHandler[ReqHandler]]) => ServerDefn,
+      private[HandlerAccumulator] val acc: List[EndpointHandler[ReqHandler]],
+      private[HandlerAccumulator] val remaining: EndpointList[Remaining, ?],
+    ) {
+      def end(using Remaining =:= Void): ServerDefn =
         build(acc.reverse)
     }
 
     object HandlerAccumulator {
-      class PendingNext[HeadName, HeadType, TailNames <: Tuple, TailTypes <: Tuple](
-        acc: List[EndpointHandler[RequestHandler]],
-        remaining: EndpointList[NamedTuple[HeadName *: TailNames, HeadType *: TailTypes]],
+      // might seem superfluous, but helps reduce the types in the IDE by
+      // working around https://github.com/scalameta/metals/issues/7556
+      class PendingNext[ReqHandler[_, _], ServerDefn, Name, In, Out, Tail](
+        build: (handlers: List[EndpointHandler[ReqHandler]]) => ServerDefn,
+        acc: List[EndpointHandler[ReqHandler]],
+        remaining: EndpointList[Name :: HttpEndpoint[In, Out] || Tail, ?],
       ) {
-        def apply[EndpointName](using EndpointName =:= HeadName)(
-          handler: MatchingHandler[HeadType]
-        ): HandlerAccumulator[NamedTuple[TailNames, TailTypes]] =
+        def apply[EndpointName](using EndpointName =:= Name)(
+          handler: ReqHandler[In, Out],
+        ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
           val (e, es) = remaining.uncons
-          val h: EndpointHandler[RequestHandler] =
-            e match
-              case Indeed(Indeed((e, ev))) =>
-                EndpointHandler(e, ev.substituteCo[MatchingHandler](handler))
+          val h: EndpointHandler[ReqHandler] =
+            EndpointHandler(e, handler)
 
-          HandlerAccumulator(h :: acc, es)
+          HandlerAccumulator(build, h :: acc, es)
+      }
+
+      extension [ReqHandler[_, _], ServerDefn, Name, In, Out, Tail](
+        acc: HandlerAccumulator[ReqHandler, ServerDefn, Name :: HttpEndpoint[In, Out] || Tail]
+      ) {
+
+        /** Handle the next endpoint.
+         *
+         * Request handler is passed to the apply method of the resulting object.
+         * This indirection provides better IDE hints than [[on]], because it works around
+         * https://github.com/scalameta/metals/issues/7556.
+         */
+        def handle: HandlerAccumulator.PendingNext[ReqHandler, ServerDefn, Name, In, Out, Tail] =
+          HandlerAccumulator.PendingNext(acc.build, acc.acc, acc.remaining)
+
+        /** Handle the next endpoint using the given request handler. */
+        def on[EndpointName](using EndpointName =:= Name)(
+            handler: ReqHandler[In, Out],
+          ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
+            val (e, es) = acc.remaining.uncons
+            val h: EndpointHandler[ReqHandler] =
+              EndpointHandler(e, handler)
+            HandlerAccumulator(acc.build, h :: acc.acc, es)
       }
     }
   }
