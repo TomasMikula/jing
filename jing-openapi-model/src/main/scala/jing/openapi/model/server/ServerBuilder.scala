@@ -125,8 +125,11 @@ object ServerBuilder {
       def handle: HandlerAccumulator.PendingHandler[ReqHandler, ServerDefn, Name, In, Out, Tail] =
         HandlerAccumulator.PendingHandler(ph.build, Nil, ph.endpoints)
 
-      /** Handle the first endpoint using the given request handler. */
-      def next[EndpointName](using EndpointName =:= Name)(
+      /** Handle the first endpoint using the given request handler.
+       *
+       * @tparam EndpointName allows to optionally spell out the endpoint name.
+       */
+      def next[EndpointName <: Name](
           handler: ReqHandler[In, Out],
         ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
           val (e, es) = ph.endpoints.uncons
@@ -158,7 +161,10 @@ object ServerBuilder {
         acc: List[EndpointHandler[ReqHandler]],
         remaining: EndpointList[Name :: HttpEndpoint[In, Out] || Tail, ?],
       ) {
-        def apply[EndpointName](using EndpointName =:= Name)(
+        /**
+          * @tparam EndpointName allows to optionally spell out the endpoint name.
+          */
+        def apply[EndpointName <: Name](
           handler: ReqHandler[In, Out],
         ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
           val (e, es) = remaining.uncons
@@ -210,8 +216,11 @@ object ServerBuilder {
         def handle: HandlerAccumulator.PendingHandler[ReqHandler, ServerDefn, Name, In, Out, Tail] =
           HandlerAccumulator.PendingHandler(acc.build, acc.acc, acc.remaining)
 
-        /** Handle the next endpoint using the given request handler. */
-        def next[EndpointName](using EndpointName =:= Name)(
+        /** Handle the next endpoint using the given request handler.
+         *
+         * @tparam EndpointName allows to optionally spell out the endpoint name.
+         */
+        def next[EndpointName <: Name](
           handler: ReqHandler[In, Out],
         ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
           val (e, es) = acc.remaining.uncons
