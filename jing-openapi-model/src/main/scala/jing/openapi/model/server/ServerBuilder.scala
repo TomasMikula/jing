@@ -110,20 +110,35 @@ object ServerBuilder {
       /** Handle the next endpoint.
        *
        * Request handler is passed to the apply method of the resulting object.
+       * This indirection provides better IDE hints than [[next]], because it works around
+       * https://github.com/scalameta/metals/issues/7556.
+       */
+      def handleNext: HandlerAccumulator.PendingNext[ReqHandler, ServerDefn, Name, In, Out, Tail] =
+        HandlerAccumulator.PendingNext(ph.build, Nil, ph.endpoints)
+
+      /** Handle the next endpoint.
+       *
+       * Endpoint name and request handler are passed to the apply method of the resulting object.
        * This indirection provides better IDE hints than [[on]], because it works around
        * https://github.com/scalameta/metals/issues/7556.
        */
-      def handle: HandlerAccumulator.PendingNext[ReqHandler, ServerDefn, Name, In, Out, Tail] =
-        HandlerAccumulator.PendingNext(ph.build, Nil, ph.endpoints)
+      def handle: HandlerAccumulator.PendingHandler[ReqHandler, ServerDefn, Name, In, Out, Tail] =
+        HandlerAccumulator.PendingHandler(ph.build, Nil, ph.endpoints)
 
       /** Handle the first endpoint using the given request handler. */
-      def on[EndpointName](using EndpointName =:= Name)(
+      def next[EndpointName](using EndpointName =:= Name)(
           handler: ReqHandler[In, Out],
         ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
           val (e, es) = ph.endpoints.uncons
           val h: EndpointHandler[ReqHandler] =
             EndpointHandler(e, handler)
           HandlerAccumulator(ph.build, h :: Nil, es)
+
+      /** Handle the first endpoint using the given request handler. */
+      def on(endpointName: Name)(
+        handler: ReqHandler[In, Out],
+      ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
+        next[Name](handler)
     }
 
     class HandlerAccumulator[ReqHandler[_, _], ServerDefn, Remaining](
@@ -153,6 +168,26 @@ object ServerBuilder {
           HandlerAccumulator(build, h :: acc, es)
       }
 
+      class PendingHandler[ReqHandler[_, _], ServerDefn, Name, In, Out, Tail](
+        build: (handlers: List[EndpointHandler[ReqHandler]]) => ServerDefn,
+        acc: List[EndpointHandler[ReqHandler]],
+        remaining: EndpointList[Name :: HttpEndpoint[In, Out] || Tail, ?],
+      ) {
+        /**
+          * @param endpointName for readability purposes only.
+          *   Should be able to fill out via Metals completion when
+          *   https://github.com/scalameta/metals/issues/7564 is fixed.
+          */
+        def apply(endpointName: Name)(
+          handler: ReqHandler[In, Out],
+        ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
+          val (e, es) = remaining.uncons
+          val h: EndpointHandler[ReqHandler] =
+            EndpointHandler(e, handler)
+
+          HandlerAccumulator(build, h :: acc, es)
+      }
+
       extension [ReqHandler[_, _], ServerDefn, Name, In, Out, Tail](
         acc: HandlerAccumulator[ReqHandler, ServerDefn, Name :: HttpEndpoint[In, Out] || Tail]
       ) {
@@ -160,20 +195,35 @@ object ServerBuilder {
         /** Handle the next endpoint.
          *
          * Request handler is passed to the apply method of the resulting object.
+         * This indirection provides better IDE hints than [[next]], because it works around
+         * https://github.com/scalameta/metals/issues/7556.
+         */
+        def handleNext: HandlerAccumulator.PendingNext[ReqHandler, ServerDefn, Name, In, Out, Tail] =
+          HandlerAccumulator.PendingNext(acc.build, acc.acc, acc.remaining)
+
+        /** Handle the next endpoint.
+         *
+         * Endpoint name and request handler is passed to the apply method of the resulting object.
          * This indirection provides better IDE hints than [[on]], because it works around
          * https://github.com/scalameta/metals/issues/7556.
          */
-        def handle: HandlerAccumulator.PendingNext[ReqHandler, ServerDefn, Name, In, Out, Tail] =
-          HandlerAccumulator.PendingNext(acc.build, acc.acc, acc.remaining)
+        def handle: HandlerAccumulator.PendingHandler[ReqHandler, ServerDefn, Name, In, Out, Tail] =
+          HandlerAccumulator.PendingHandler(acc.build, acc.acc, acc.remaining)
 
         /** Handle the next endpoint using the given request handler. */
-        def on[EndpointName](using EndpointName =:= Name)(
-            handler: ReqHandler[In, Out],
-          ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
-            val (e, es) = acc.remaining.uncons
-            val h: EndpointHandler[ReqHandler] =
-              EndpointHandler(e, handler)
-            HandlerAccumulator(acc.build, h :: acc.acc, es)
+        def next[EndpointName](using EndpointName =:= Name)(
+          handler: ReqHandler[In, Out],
+        ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
+          val (e, es) = acc.remaining.uncons
+          val h: EndpointHandler[ReqHandler] =
+            EndpointHandler(e, handler)
+          HandlerAccumulator(acc.build, h :: acc.acc, es)
+
+        /** Handle the next endpoint using the given request handler. */
+        def on(endpointName: Name)(
+          handler: ReqHandler[In, Out],
+        ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
+          next[Name](handler)
       }
     }
   }
