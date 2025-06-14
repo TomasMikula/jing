@@ -2,6 +2,8 @@ package jing.openapi.model
 
 import libretto.lambda.Items1Named
 import libretto.lambda.Items1Named.Member
+import libretto.lambda.util.{BiInjective, TypeEqK, TypeEq}
+import libretto.lambda.util.TypeEq.Refl
 import scala.annotation.targetName
 
 /** Structure of values, parameterized by nested values `F`. */
@@ -103,6 +105,8 @@ object ValueMotif {
   case class Array[F[_], T](elems: IArray[F[T]]) extends ValueMotif[F, Arr[T]]
 
   sealed trait Object[+F[_], Ps] extends ValueMotif[F, Obj[Ps]] {
+    def get[K](using i: IsPropertyOf[K, Ps]): i.Modality[F[i.Type]]
+
     def foreachProperty(
       f: [K <: String, V] => (k: K, v: F[V]) => Unit,
     ): Unit
@@ -110,6 +114,9 @@ object ValueMotif {
 
   object Object {
     case object ObjEmpty extends ValueMotif.Object[Nothing, Void] {
+      override def get[K](using i: IsPropertyOf[K, Void]): i.Modality[Nothing] =
+        i.propertiesNotVoid
+
       override def foreachProperty(f: [K <: String, V] => (k: K, v: Nothing) => Unit): Unit =
         () // do nothing
     }
@@ -119,6 +126,36 @@ object ValueMotif {
       lastName: PropName,
       lastValue: F[PropType],
     ) extends ValueMotif.Object[F, Init || PropName :: PropType] {
+      override def get[K](using i: IsPropertyOf[K, Init || PropName :: PropType]): i.Modality[F[i.Type]] =
+        i.switch[i.Modality[F[i.Type]]](
+          caseLastProp =
+            [init] => (
+              ev1: (Init || PropName :: PropType) =:= (init || K :: i.Type),
+              ev2: TypeEqK[i.Modality, [A] =>> A],
+            ) => {
+              ev1 match
+                case BiInjective[||](_, BiInjective[::](_, TypeEq(Refl()))) =>
+                  ev2.flip.at[F[i.Type]](lastValue)
+            },
+          caseOptLastProp =
+            [init] => (
+              ev1: (Init || PropName :: PropType) =:= (init || K :? i.Type),
+              ev2: TypeEqK[i.Modality, Option],
+            ) => {
+              ev1 match
+                case BiInjective[||](_, ev) => :?.isNot_::[K, i.Type, PropName, PropType](using ev.flip)
+            },
+          caseInitProp =
+            [init, last] => (
+              ev1: (Init || PropName :: PropType) =:= (init || last),
+              j:   IsPropertyOf.Aux[K, init, i.Type, i.Modality],
+            ) => {
+              ev1 match
+                case BiInjective[||](TypeEq(Refl()), _) =>
+                  init.get[K](using j)
+            },
+        )
+
       override def foreachProperty(f: [K <: String, V] => (k: K, v: F[V]) => Unit): Unit =
         init.foreachProperty(f)
         f(lastName, lastValue)
@@ -129,6 +166,37 @@ object ValueMotif {
       lastName: PropName,
       lastValue: Option[F[PropType]],
     ) extends ValueMotif.Object[F, Init || PropName :? PropType] {
+      override def get[K](using i: IsPropertyOf[K, Init || PropName :? PropType]): i.Modality[F[i.Type]] =
+        i.switch[i.Modality[F[i.Type]]](
+          caseLastProp =
+            [init] => (
+              ev1: (Init || PropName :? PropType) =:= (init || K :: i.Type),
+              ev2: TypeEqK[i.Modality, [A] =>> A],
+            ) => {
+              ev1 match
+                case BiInjective[||](_, ev) =>
+                  :?.isNot_::(using ev)
+            },
+          caseOptLastProp =
+            [init] => (
+              ev1: (Init || PropName :? PropType) =:= (init || K :? i.Type),
+              ev2: TypeEqK[i.Modality, Option],
+            ) => {
+              ev1 match
+                case BiInjective[||](_, BiInjective[:?](_, TypeEq(Refl()))) =>
+                  ev2.flip.at[F[i.Type]](lastValue)
+            },
+          caseInitProp =
+            [init, last] => (
+              ev1: (Init || PropName :? PropType) =:= (init || last),
+              j:   IsPropertyOf.Aux[K, init, i.Type, i.Modality],
+            ) => {
+              ev1 match
+                case BiInjective[||](TypeEq(Refl()), _) =>
+                  init.get[K](using j)
+            },
+        )
+
       override def foreachProperty(f: [K <: String, V] => (k: K, v: F[V]) => Unit): Unit =
         init.foreachProperty(f)
         lastValue match

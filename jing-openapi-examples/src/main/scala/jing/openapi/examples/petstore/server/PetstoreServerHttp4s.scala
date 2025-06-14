@@ -12,7 +12,10 @@ object PetstoreServerHttp4s extends App {
       .interpret(using Http4sServerBuilder.forIO)
 
   serverBuilder
-    .handleNext["/pet_POST"](???)
+    .handleNext["/pet_POST"] { in =>
+      val body = in.get["body"]
+      ???
+    }
     .handleNext["/pet_PUT"](???)
     .handleNext["/pet/findByStatus_GET"](???)
     .handleNext["/pet/findByTags_GET"](???)

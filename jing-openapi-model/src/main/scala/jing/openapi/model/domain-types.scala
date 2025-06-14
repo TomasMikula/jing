@@ -30,6 +30,9 @@ object || {
     override def unapply[A, B, X, Y](ev: (A || B) =:= (X || Y)): (A =:= X, B =:= Y) =
       ev match { case TypeEq(Refl()) => (summon, summon) }
   }
+
+  def isNotVoid[A, B](using (A || B) =:= Void): Nothing =
+    throw AssertionError("Impossible: (A || B) =:= Void")
 }
 
 object :: {
@@ -44,6 +47,9 @@ object  :? {
     override def unapply[A, B, X, Y](ev: A :? B =:= X :? Y): (A =:= X, B =:= Y) =
       ev match { case TypeEq(Refl()) => (summon, summon) }
   }
+
+  def isNot_::[A, B, C, D](using (A :? B) =:= (C :: D)): Nothing =
+    throw AssertionError("Impossible: (A :? B) =:= (C :: D)")
 }
 
 type ToRightAssoc[Props] =
@@ -56,3 +62,11 @@ type ToRightAssocAcc[Props, Acc] = Props match
 type ScalaUnionOf[Cases] = Cases match
   case init || last => ScalaUnionOf[init] | last
   case Void => Nothing
+
+type NamesOf[NamedCases] = NamedCases match
+  case init || kv =>
+    kv match
+      case k :: _ => NamesOf[init] | k
+      case k :? _ => NamesOf[init] | k
+  case Void =>
+    Nothing

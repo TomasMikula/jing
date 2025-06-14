@@ -187,6 +187,10 @@ trait ValueModule[Value[_]] {
       val (init, v) = toMotifObject(value).unsnoc
       (fromMotif(init), v)
 
+  extension [Ps](value: Value[Obj[Ps]])
+    def get[K <: NamesOf[Ps]](using i: IsPropertyOf[K, Ps]): i.Modality[Value[i.Type]] =
+      toMotifObject(value).get[K]
+
   extension [Cases](value: Value[DiscriminatedUnion[Cases]]) {
     private def asDiscriminatedUnion: ValueMotif.DiscUnion[? <: Value, Cases] =
       toMotifDiscriminatedUnion(value) match
