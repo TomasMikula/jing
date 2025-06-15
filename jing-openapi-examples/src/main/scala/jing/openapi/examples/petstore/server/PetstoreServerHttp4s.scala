@@ -1,8 +1,10 @@
 package jing.openapi.examples.petstore.server
 
+import cats.effect.IO
 import jing.openapi.examples.petstore.api
-
+import jing.openapi.model.Value.discriminatedUnion
 import jing.openapi.server.http4s.Http4sServerBuilder
+import org.http4s.HttpRoutes
 
 object PetstoreServerHttp4s extends App {
 
@@ -11,36 +13,44 @@ object PetstoreServerHttp4s extends App {
       .endpointList
       .interpret(using Http4sServerBuilder.forIO)
 
-  serverBuilder
-    .handleNext["/pet_POST"] { in =>
-      val body = in.props["body"]
-      val pet = body.discriminator match
-        case "application/json"                  => body.assertCase["application/json"]
-        case "application/xml"                   => body.assertCase["application/xml"]
-        case "application/x-www-form-urlencoded" => body.assertCase["application/x-www-form-urlencoded"]
-      ???
-    }
-    .handleNext["/pet_PUT"](???)
-    .handleNext["/pet/findByStatus_GET"](???)
-    .handleNext["/pet/findByTags_GET"](???)
-    .handleNext["/pet/{petId}_GET"](???)
-    .handleNext["/pet/{petId}_POST"](???)
-    .handleNext["/pet/{petId}_DELETE"](???)
-    .handleNext["/pet/{petId}/uploadImage_POST"](???)
-    .handleNext["/store/inventory_GET"](???)
-    .handleNext["/store/order_POST"](???)
-    .handleNext["/store/order/{orderId}_GET"](???)
-    .handleNext["/store/order/{orderId}_DELETE"](???)
-    .handleNext["/user_POST"](???)
-    .handleNext["/user/createWithList_POST"](???)
-    .handleNext["/user/login_GET"](???)
-    .handleNext["/user/logout_GET"](???)
-    .handleNext["/user/{username}_GET"](???)
-    .handleNext["/user/{username}_PUT"](???)
-    .handleNext["/user/{username}_DELETE"](???)
-    .end
+  def routes(store: InMemoryPetstore): HttpRoutes[IO] =
+    serverBuilder
+      .handleNext["/pet_POST"] { in =>
+        val body = in.props["body"]
+        val pet = body.discriminator match
+          case "application/json"                  => body.assertCase["application/json"]
+          case "application/xml"                   => body.assertCase["application/xml"]
+          case "application/x-www-form-urlencoded" => body.assertCase["application/x-www-form-urlencoded"]
+        store
+          .createPet(pet)
+          .map: pet =>
+            discriminatedUnion:
+              _.`200`:
+                discriminatedUnion:
+                  _.`application/json`:
+                    pet
+      }
+      .handleNext["/pet_PUT"](???)
+      .handleNext["/pet/findByStatus_GET"](???)
+      .handleNext["/pet/findByTags_GET"](???)
+      .handleNext["/pet/{petId}_GET"](???)
+      .handleNext["/pet/{petId}_POST"](???)
+      .handleNext["/pet/{petId}_DELETE"](???)
+      .handleNext["/pet/{petId}/uploadImage_POST"](???)
+      .handleNext["/store/inventory_GET"](???)
+      .handleNext["/store/order_POST"](???)
+      .handleNext["/store/order/{orderId}_GET"](???)
+      .handleNext["/store/order/{orderId}_DELETE"](???)
+      .handleNext["/user_POST"](???)
+      .handleNext["/user/createWithList_POST"](???)
+      .handleNext["/user/login_GET"](???)
+      .handleNext["/user/logout_GET"](???)
+      .handleNext["/user/{username}_GET"](???)
+      .handleNext["/user/{username}_PUT"](???)
+      .handleNext["/user/{username}_DELETE"](???)
+      .end
 
-  def alternative_endpointNamesAsValues =
+  def routes_alternative_endpointNamesAsValues: HttpRoutes[IO] =
     serverBuilder
       .handle("/pet_POST")(???)
       .handle("/pet_PUT")(???)
@@ -63,7 +73,7 @@ object PetstoreServerHttp4s extends App {
       .handle("/user/{username}_DELETE")(???)
       .end
 
-  def alternative_direct =
+  def routes_alternative_direct: HttpRoutes[IO] =
     serverBuilder
       .next["/pet_POST"](???)
       .next["/pet_PUT"](???)
@@ -87,7 +97,7 @@ object PetstoreServerHttp4s extends App {
       .end
 
 
-  def alternative_directEndpointNamesAsValues =
+  def routes_alternative_directEndpointNamesAsValues: HttpRoutes[IO] =
     serverBuilder
       .on("/pet_POST")(???)
       .on("/pet_PUT")(???)
@@ -110,7 +120,7 @@ object PetstoreServerHttp4s extends App {
       .on("/user/{username}_DELETE")(???)
       .end
 
-  def alternative_namedTuple =
+  def routes_alternative_namedTuple: HttpRoutes[IO] =
     serverBuilder.withRequestHandlersTuple((
       `/pet_POST` = ???,
       `/pet_PUT` = ???,
@@ -133,7 +143,7 @@ object PetstoreServerHttp4s extends App {
       `/user/{username}_DELETE` = ???,
     ))
 
-  def alternative_nAryFunction =
+  def routes_alternative_nAryFunction: HttpRoutes[IO] =
     serverBuilder.withRequestHandlers(
       `/pet_POST` = ???,
       `/pet_PUT` = ???,
@@ -156,7 +166,7 @@ object PetstoreServerHttp4s extends App {
       `/user/{username}_DELETE` = ???,
     )
 
-  def alternative_nAryMethod =
+  def routes_alternative_nAryMethod: HttpRoutes[IO] =
     serverBuilder.implementRequestHandlers(
       `/pet_POST` = ???,
       `/pet_PUT` = ???,
