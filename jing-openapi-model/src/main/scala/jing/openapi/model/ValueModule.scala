@@ -187,9 +187,57 @@ trait ValueModule[Value[_]] {
       val (init, v) = toMotifObject(value).unsnoc
       (fromMotif(init), v)
 
-  extension [Ps](value: Value[Obj[Ps]])
+  extension [Ps](value: Value[Obj[Ps]]) {
+    /** Get the property `K` of this object.
+     *
+     * Example:
+     *
+     *     val p: Value[Obj[Void || "x" :: Int32 || "y" :: Int32 || "z" :? Int32]] =
+     *       ???
+     *
+     *     obj.get["x"]: Value[Int32]
+     *     obj.get["y"]: Value[Int32]
+     *     obj.get["z"]: Option[Value[Int32]]
+     *
+     * The type argument `K` is constrained to (the union of) property names (`"x" | "y" | "z"`).
+     *
+     * **For better IDE hints** on the possible values of `K`, try the indirect alternative `obj.props.apply[K]`:
+     *
+     *     obj.props["x"]: Value[Int32]
+     *     obj.props["y"]: Value[Int32]
+     *     obj.props["z"]: Option[Value[Int32]]
+     *
+     * @see [[props]] The indirect alternative with better IDE hints about the actual property names.
+     */
     def get[K <: NamesOf[Ps]](using i: IsPropertyOf[K, Ps]): i.Modality[Value[i.Type]] =
       toMotifObject(value).get[K]
+
+    /** Intermediary for accessing `Obj`ects properties.
+     *
+     * Methods on the resulting object get better IDE hints than extension methods directly on `Value[Obj[...]]`,
+     * likely due to https://github.com/scalameta/metals/issues/7556.
+     */
+    def props: PropGetter[Ps, NamesOf[Ps]] =
+      PropGetter(toMotifObject(value))
+  }
+
+  class PropGetter[Ps, KeySet <: NamesOf[Ps]](obj: ValueMotif.Object[Value, Ps]) {
+    /** Get the property `K` of this object.
+     *
+     * Example:
+     *
+     *     val p: Value[Obj[Void || "x" :: Int32 || "y" :: Int32 || "z" :? Int32]] =
+     *       ???
+     *
+     *     obj.props["x"]: Value[Int32]
+     *     obj.props["y"]: Value[Int32]
+     *     obj.props["z"]: Option[Value[Int32]]
+     *
+     * The type argument `K` is constrained to (the union of) property names (`"x" | "y" | "z"`).
+     */
+    def apply[K <: KeySet](using i: IsPropertyOf[K, Ps]): i.Modality[Value[i.Type]] =
+      obj.get[K]
+  }
 
   extension [Cases](value: Value[DiscriminatedUnion[Cases]]) {
     private def asDiscriminatedUnion: ValueMotif.DiscUnion[? <: Value, Cases] =

@@ -13,7 +13,7 @@ object PetstoreServerHttp4s extends App {
 
   serverBuilder
     .handleNext["/pet_POST"] { in =>
-      val body = in.get["body"]
+      val body = in.props["body"]
       ???
     }
     .handleNext["/pet_PUT"](???)
