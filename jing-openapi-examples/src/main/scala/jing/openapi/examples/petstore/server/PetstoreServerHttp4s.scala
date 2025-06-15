@@ -14,6 +14,10 @@ object PetstoreServerHttp4s extends App {
   serverBuilder
     .handleNext["/pet_POST"] { in =>
       val body = in.props["body"]
+      val pet = body.discriminator match
+        case "application/json"                  => body.assertCase["application/json"]
+        case "application/xml"                   => body.assertCase["application/xml"]
+        case "application/x-www-form-urlencoded" => body.assertCase["application/x-www-form-urlencoded"]
       ???
     }
     .handleNext["/pet_PUT"](???)

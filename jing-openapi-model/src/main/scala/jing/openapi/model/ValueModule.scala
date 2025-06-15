@@ -253,8 +253,13 @@ trait ValueModule[Value[_]] {
     def discriminator: DiscriminatorOf[Cases] =
       asDiscriminatedUnion.discriminatorValue
 
-    def assertCase[C <: DiscriminatorOf[Cases]](using ev: C IsCaseOf Cases): Value[ev.Type] =
-      val s = value.asDiscriminatedUnion.underlying
+    def assertCase: AssertCase[Cases, DiscriminatorOf[Cases]] =
+      AssertCase(value.asDiscriminatedUnion)
+  }
+
+  class AssertCase[Cases, DiscriminatorSet <: DiscriminatorOf[Cases]](value: ValueMotif.DiscUnion[? <: Value, Cases]) {
+    def apply[C <: DiscriminatorSet](using ev: C IsCaseOf Cases): Value[ev.Type] =
+      val s = value.underlying
       assertCaseImpl(IsCaseOf.toMember(ev), s.tag, s.value)
   }
 
