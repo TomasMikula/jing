@@ -125,17 +125,44 @@ trait ValueModule[Value[_]] {
   ): Value[DiscriminatedUnion[As]] =
     fromMotif(ValueMotif.discUnion(discriminator, value))
 
-  opaque type DiscriminatedUnionBuilder[Cases] = Unit
+  class DiscriminatedUnionBuilder[Cases, D <: DiscriminatorOf[Cases]] extends Selectable {
+    import DiscriminatedUnionBuilder.*
 
-  extension [Cases](b: DiscriminatedUnionBuilder[Cases]) {
-    def pick[C <: String](using i: C IsCaseOf Cases)(value: Value[i.Type]): Value[DiscriminatedUnion[Cases]] =
-      discriminatedUnion(i, value)
+    type Fields = CaseConstructors[Cases]
+
+    def pick[C <: D & String](using i: C IsCaseOf Cases): PendingValue[Cases, C, i.Type] =
+      PendingValue[Cases, C, i.Type](i)
+
+    def selectDynamic(fieldName: D & String): Any =
+      (i: IsCaseOf[fieldName.type, Cases]) ?=> (v: Value[i.Type]) =>
+        discriminatedUnion[fieldName.type, i.Type, Cases](i, v.asInstanceOf[Value[i.Type]])
+  }
+
+  object DiscriminatedUnionBuilder {
+    type CaseConstructor[Cases, K <: String, V] =
+      (i: K IsCaseOf Cases) ?=> PendingValue[Cases, K, i.Type]
+
+    type CaseConstructors[Cases] =
+      CaseConstructorsAcc[Cases, Cases, NamedTuple.Empty]
+
+    type CaseConstructorsAcc[AllCases, Remaining, Acc] <: NamedTuple.AnyNamedTuple =
+      Remaining match
+        case k :: v => NamedTuples.Cons[k, CaseConstructor[AllCases, k, v], Acc]
+        case (init || last) =>
+          last match
+            case k :: v => CaseConstructorsAcc[AllCases, init, NamedTuples.Cons[k, CaseConstructor[AllCases, k, v], Acc]]
+
+    class PendingValue[Cases, K <: String, V](i: (K IsCaseOf Cases) { type Type = V }) {
+      def apply(value: Value[V]): Value[DiscriminatedUnion[Cases]] =
+        discriminatedUnion(i, value)
+    }
+
   }
 
   def discriminatedUnion[Cases](
-    f: DiscriminatedUnionBuilder[Cases] => Value[DiscriminatedUnion[Cases]],
+    f: DiscriminatedUnionBuilder[Cases, DiscriminatorOf[Cases]] => Value[DiscriminatedUnion[Cases]],
   ): Value[DiscriminatedUnion[Cases]] =
-    f(())
+    f(DiscriminatedUnionBuilder[Cases, DiscriminatorOf[Cases]])
 
 
   /***************************
