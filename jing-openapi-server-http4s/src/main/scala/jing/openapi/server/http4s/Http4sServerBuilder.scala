@@ -9,7 +9,8 @@ import jing.openapi.model.RequestSchema.{ConstantPath, Parameterized, WithBody}
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
 import jing.openapi.model.{::, BodySchema, HttpEndpoint, Obj, RequestSchema, Value, ||}
-import org.http4s.{Headers, HttpRoutes, MediaType, Request, Response, Status, Uri}
+import org.http4s
+import org.http4s.{Headers, HttpRoutes, MediaType, Request, Status, Uri}
 
 import java.nio.charset.StandardCharsets.UTF_8
 
@@ -21,15 +22,17 @@ class Http4sServerBuilder[F[_]](using
 
   override type RequestHandler[I, O] =
     // TODO: introduce dedicated ADT for RequestHandler, to support multiple forms of handlers
-    Value[Obj[I]] => F[Value[O]]
+    Value[Obj[I]] => F[Response[F, O]]
 
   override type ServerDefinition =
-    HttpRoutes[F]
+    Routes[F]
 
-  override def build(endpointHandlers: List[EndpointHandler[RequestHandler]]): HttpRoutes[F] =
-    endpointHandlers.foldRight(HttpRoutes.empty[F]) { (h, fallback) =>
-      endpointRoute(h).orElse(fallback)
-    }
+  override def build(endpointHandlers: List[EndpointHandler[RequestHandler]]): Routes[F] =
+    Routes(
+      endpointHandlers.foldRight(HttpRoutes.empty[F]) { (h, fallback) =>
+        endpointRoute(h).orElse(fallback)
+      }
+    )
 
   private def endpointRoute(h: EndpointHandler[RequestHandler]): HttpRoutes[F] =
     HttpRoutes { req =>
@@ -40,14 +43,14 @@ class Http4sServerBuilder[F[_]](using
           // TODO: best effort to respect Accept request header
           error match
             case BadRequest(detail) =>
-              OptionT.some(Response(
+              OptionT.some(http4s.Response(
                 Status.BadRequest,
                 headers = Headers("Content-Type" -> "text/plain"),
                 body = Stream.chunk(Chunk.byteBuffer(UTF_8.encode(detail))),
               ))
             case UnsupportedContentType(mediaType) =>
               // TODO: return BadRequest if the given media type is not permitted by the spec
-              OptionT.some(Response(
+              OptionT.some(http4s.Response(
                 Status.NotImplemented,
                 headers = Headers("Content-Type" -> "text/plain"),
                 body = Stream.chunk(Chunk.byteBuffer(UTF_8.encode(s"Unsupported Content-Type ${mediaType.toString}. Expected application/json"))),
@@ -56,7 +59,7 @@ class Http4sServerBuilder[F[_]](using
         case Some(Right(inValue)) =>
           OptionT.liftF(
             h.requestHandler(inValue)
-              .map(valueToResponse(h.endpoint, _))
+              .map(encodeResponse(h.endpoint, _))
           )
     }
 }
@@ -127,9 +130,9 @@ object Http4sServerBuilder {
   ): Either[BadRequest, Value[B]] =
     ???
 
-  private def valueToResponse[O, F[_]](
+  private def encodeResponse[O, F[_]](
     ep: HttpEndpoint[?, O],
-    value: Value[O],
-  ): Response[F] =
+    resp: Response[F, O],
+  ): http4s.Response[F] =
     ???
 }

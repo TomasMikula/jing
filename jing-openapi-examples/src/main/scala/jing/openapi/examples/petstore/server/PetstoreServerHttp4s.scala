@@ -1,19 +1,38 @@
 package jing.openapi.examples.petstore.server
 
-import cats.effect.IO
+import cats.effect.{ExitCode, IO, IOApp}
+import com.comcast.ip4s.*
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value.discriminatedUnion
-import jing.openapi.server.http4s.Http4sServerBuilder
-import org.http4s.HttpRoutes
+import jing.openapi.server.http4s.{Http4sServerBuilder, Response, Routes}
+import org.http4s.ember.server.EmberServerBuilder
+import org.http4s.Status
 
-object PetstoreServerHttp4s extends App {
+object PetstoreServerHttp4s extends IOApp {
+
+  override def run(args: List[String]): IO[ExitCode] =
+    for
+      store <- InMemoryPetstore.initialize
+      httpApp = routes(store).http4sApp
+      _ <-
+        EmberServerBuilder
+          .default[IO]
+          .withHost(ipv4"0.0.0.0")
+          .withPort(port"8080")
+          .withHttpApp(httpApp)
+          .build
+          .use: server =>
+            IO.println(s"Listening on ${server.address}") *>
+            IO.never
+    yield
+      ExitCode.Success
 
   val serverBuilder =
     api
       .endpointList
       .interpret(using Http4sServerBuilder.forIO)
 
-  def routes(store: InMemoryPetstore): HttpRoutes[IO] =
+  def routes(store: InMemoryPetstore): Routes[IO] =
     serverBuilder
       .handleNext["/pet_POST"] { in =>
         val body = in.props["body"]
@@ -24,33 +43,34 @@ object PetstoreServerHttp4s extends App {
         store
           .createPet(pet)
           .map: pet =>
-            discriminatedUnion:
-              _.`200`:
-                discriminatedUnion:
-                  _.`application/json`:
-                    pet
+            Response:
+              discriminatedUnion:
+                _.`200`:
+                  discriminatedUnion:
+                    _.`application/json`:
+                      pet
       }
-      .handleNext["/pet_PUT"](???)
-      .handleNext["/pet/findByStatus_GET"](???)
-      .handleNext["/pet/findByTags_GET"](???)
-      .handleNext["/pet/{petId}_GET"](???)
-      .handleNext["/pet/{petId}_POST"](???)
-      .handleNext["/pet/{petId}_DELETE"](???)
-      .handleNext["/pet/{petId}/uploadImage_POST"](???)
-      .handleNext["/store/inventory_GET"](???)
-      .handleNext["/store/order_POST"](???)
-      .handleNext["/store/order/{orderId}_GET"](???)
-      .handleNext["/store/order/{orderId}_DELETE"](???)
-      .handleNext["/user_POST"](???)
-      .handleNext["/user/createWithList_POST"](???)
-      .handleNext["/user/login_GET"](???)
-      .handleNext["/user/logout_GET"](???)
-      .handleNext["/user/{username}_GET"](???)
-      .handleNext["/user/{username}_PUT"](???)
-      .handleNext["/user/{username}_DELETE"](???)
+      .handleNext["/pet_PUT"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/pet/findByStatus_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/pet/findByTags_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/pet/{petId}_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/pet/{petId}_POST"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/pet/{petId}_DELETE"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/pet/{petId}/uploadImage_POST"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/store/inventory_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/store/order_POST"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/store/order/{orderId}_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/store/order/{orderId}_DELETE"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user_POST"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user/createWithList_POST"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user/login_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user/logout_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user/{username}_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user/{username}_PUT"](_ => IO(Response.plainText(Status.NotImplemented)))
+      .handleNext["/user/{username}_DELETE"](_ => IO(Response.plainText(Status.NotImplemented)))
       .end
 
-  def routes_alternative_endpointNamesAsValues: HttpRoutes[IO] =
+  def routes_alternative_endpointNamesAsValues: Routes[IO] =
     serverBuilder
       .handle("/pet_POST")(???)
       .handle("/pet_PUT")(???)
@@ -73,7 +93,7 @@ object PetstoreServerHttp4s extends App {
       .handle("/user/{username}_DELETE")(???)
       .end
 
-  def routes_alternative_direct: HttpRoutes[IO] =
+  def routes_alternative_direct: Routes[IO] =
     serverBuilder
       .next["/pet_POST"](???)
       .next["/pet_PUT"](???)
@@ -97,7 +117,7 @@ object PetstoreServerHttp4s extends App {
       .end
 
 
-  def routes_alternative_directEndpointNamesAsValues: HttpRoutes[IO] =
+  def routes_alternative_directEndpointNamesAsValues: Routes[IO] =
     serverBuilder
       .on("/pet_POST")(???)
       .on("/pet_PUT")(???)
@@ -120,7 +140,7 @@ object PetstoreServerHttp4s extends App {
       .on("/user/{username}_DELETE")(???)
       .end
 
-  def routes_alternative_namedTuple: HttpRoutes[IO] =
+  def routes_alternative_namedTuple: Routes[IO] =
     serverBuilder.withRequestHandlersTuple((
       `/pet_POST` = ???,
       `/pet_PUT` = ???,
@@ -143,7 +163,7 @@ object PetstoreServerHttp4s extends App {
       `/user/{username}_DELETE` = ???,
     ))
 
-  def routes_alternative_nAryFunction: HttpRoutes[IO] =
+  def routes_alternative_nAryFunction: Routes[IO] =
     serverBuilder.withRequestHandlers(
       `/pet_POST` = ???,
       `/pet_PUT` = ???,
@@ -166,7 +186,7 @@ object PetstoreServerHttp4s extends App {
       `/user/{username}_DELETE` = ???,
     )
 
-  def routes_alternative_nAryMethod: HttpRoutes[IO] =
+  def routes_alternative_nAryMethod: Routes[IO] =
     serverBuilder.implementRequestHandlers(
       `/pet_POST` = ???,
       `/pet_PUT` = ???,

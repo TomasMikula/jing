@@ -16,10 +16,20 @@ class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
 }
 
 object InMemoryPetstore {
+  def initialize: IO[InMemoryPetstore] =
+    Ref[IO]
+      .of(PetstoreState.empty)
+      .map(InMemoryPetstore(_))
+
   case class PetstoreState(
     nextId: Long,
     pets: Map[Long, model.Pet],
   )
+
+  object PetstoreState {
+    def empty: PetstoreState =
+      PetstoreState(1L, Map.empty)
+  }
 
   val nextId: State[PetstoreState, Long] =
     State { s => (s.copy(nextId = s.nextId + 1), s.nextId) }
@@ -40,9 +50,4 @@ object InMemoryPetstore {
 
   private def setPet(pet: model.Pet): State[PetstoreState, Unit] =
     State.modify { s => s.copy(pets = s.pets.updated(pet.id, pet)) }
-
-  object PetstoreState {
-    def empty: PetstoreState =
-      PetstoreState(1L, Map.empty)
-  }
 }

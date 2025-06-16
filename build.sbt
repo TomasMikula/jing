@@ -18,6 +18,7 @@ val scalacOptionsCommon =
   )
 
 val LibrettoVersion = "0.3.6-SNAPSHOT"
+val Http4sVersion = "0.23.30"
 
 lazy val macroUtil = project
   .in(file("macro-util"))
@@ -80,7 +81,7 @@ lazy val jingOpenApiServerHttp4s = project
     scalacOptions ++=
       scalacOptionsCommon,
     libraryDependencies ++= Seq(
-      "org.http4s" %% "http4s-core" % "0.23.30",
+      "org.http4s" %% "http4s-core" % Http4sVersion,
     ),
   )
 
@@ -98,4 +99,7 @@ lazy val jingOpenApiExamples = project
       Seq(
         "-experimental",
       ),
+    libraryDependencies ++= Seq(
+      "org.http4s" %% "http4s-ember-server" % Http4sVersion,
+    )
   )

@@ -1,9 +1,10 @@
 package jing.openapi.model
 
-import libretto.lambda.util.{Exists, SingletonType, TypeEq}
-import libretto.lambda.util.TypeEq.Refl
-import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
 import jing.openapi.model.{::, ||}
+import libretto.lambda.util.TypeEq.Refl
+import libretto.lambda.util.{BiInjective, Exists, SingletonType, TypeEq}
+
+import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
 
 sealed trait EndpointList[EPs, EPTuple <: AnyNamedTuple] {
   type Endpoints = EPs
@@ -13,8 +14,7 @@ sealed trait EndpointList[EPs, EPTuple <: AnyNamedTuple] {
 
   def tuple: DropNames[EPTuple]
 
-  def uncons[N, I, O, T](using EPs =:= (N :: HttpEndpoint[I, O] || T)): (HttpEndpoint[I, O], EndpointList[T, ?]) =
-    ???
+  def uncons[N, I, O, T](using EPs =:= (N :: HttpEndpoint[I, O] || T)): (HttpEndpoint[I, O], EndpointList[T, ?])
 
   def namedTuple: EPTuple =
     evidence.flip((tuple))
@@ -44,6 +44,9 @@ object EndpointList {
     override def tuple: EmptyTuple =
       EmptyTuple
 
+    override def uncons[N, I, O, T](using ev: Void =:= (N :: HttpEndpoint[I, O] || T)): (HttpEndpoint[I, O], EndpointList[T, ?]) =
+      ||.isNotVoid(using ev.flip)
+
     override def zipWithMapped[F[_], C](
       that: NamedTuple[EmptyTuple, EmptyTuple]
     )(
@@ -67,6 +70,13 @@ object EndpointList {
 
     override def tuple: HttpEndpoint[A, B] *: DropNames[T] =
       headValue *: tail.tuple
+
+    override def uncons[N, I, O, Tail](using
+      ev: (S :: HttpEndpoint[A, B] || Es) =:= (N :: HttpEndpoint[I, O] || Tail)
+    ): (HttpEndpoint[I, O], EndpointList[Tail, ?]) =
+      ev match
+        case BiInjective[||](BiInjective[::](_, ev1), ev2) =>
+          (ev1(headValue), ev2.substituteCo[EndpointList[_, T]](tail))
 
     override def zipWithMapped[F[_], C](
       that: NamedTuple[S *: NamedTuple.Names[T], Tuple.Map[HttpEndpoint[A, B] *: DropNames[T], F]],
