@@ -13,7 +13,16 @@ object PetstoreServerHttp4s extends IOApp {
   override def run(args: List[String]): IO[ExitCode] =
     for
       store <- InMemoryPetstore.initialize
-      httpApp = routes(store).http4sApp
+      httpApp =
+        routes(store)
+          .foreachRequestResponseAttempt(
+            req => IO.println(s"Request ${req.method} ${req.uri}"),
+            (_, resp) => resp match
+              case Left(e) => IO.println(s"Error: $e\n${e.getStackTrace().map(el => s"  at $el").mkString("\n")}")
+              case Right(Some(resp)) => IO.println(s"Response ${resp.status}")
+              case Right(None) => IO.println(s"Not found"),
+          )
+          .http4sApp
       _ <-
         EmberServerBuilder
           .default[IO]
