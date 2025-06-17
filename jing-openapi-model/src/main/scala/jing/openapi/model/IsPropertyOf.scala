@@ -12,7 +12,7 @@ import libretto.lambda.util.TypeEqK
  *
  * @see [[IsCaseOf]] is an analogue for lists without optional elements, such as variants of a [[DiscriminatedUnion]].
  */
-sealed trait IsPropertyOf[K, Ps] {
+infix sealed trait IsPropertyOf[K, Ps] {
   type Type
   type Modality[+_]
 

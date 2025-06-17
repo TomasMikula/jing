@@ -139,7 +139,7 @@ trait ValueModule[Value[_]] {
   }
 
   object DiscriminatedUnionBuilder {
-    type CaseConstructor[Cases, K <: String, V] =
+    type CaseConstructor[Cases, K <: String] =
       (i: K IsCaseOf Cases) ?=> PendingValue[Cases, K, i.Type]
 
     type CaseConstructors[Cases] =
@@ -147,10 +147,10 @@ trait ValueModule[Value[_]] {
 
     type CaseConstructorsAcc[AllCases, Remaining, Acc] <: NamedTuple.AnyNamedTuple =
       Remaining match
-        case k :: v => NamedTuples.Cons[k, CaseConstructor[AllCases, k, v], Acc]
+        case k :: _ => NamedTuples.Cons[k, CaseConstructor[AllCases, k], Acc]
         case (init || last) =>
           last match
-            case k :: v => CaseConstructorsAcc[AllCases, init, NamedTuples.Cons[k, CaseConstructor[AllCases, k, v], Acc]]
+            case k :: _ => CaseConstructorsAcc[AllCases, init, NamedTuples.Cons[k, CaseConstructor[AllCases, k], Acc]]
 
     class PendingValue[Cases, K <: String, V](i: (K IsCaseOf Cases) { type Type = V }) {
       def apply(value: Value[V]): Value[DiscriminatedUnion[Cases]] =
@@ -239,7 +239,7 @@ trait ValueModule[Value[_]] {
     def get[K <: NamesOf[Ps]](using i: IsPropertyOf[K, Ps]): i.Modality[Value[i.Type]] =
       toMotifObject(value).get[K]
 
-    /** Intermediary for accessing `Obj`ects properties.
+    /** Intermediary for accessing `Obj`ect's properties.
      *
      * Methods on the resulting object get better IDE hints than extension methods directly on `Value[Obj[...]]`,
      * likely due to https://github.com/scalameta/metals/issues/7556.
@@ -248,7 +248,30 @@ trait ValueModule[Value[_]] {
       PropGetter(toMotifObject(value))
   }
 
-  class PropGetter[Ps, KeySet <: NamesOf[Ps]](obj: ValueMotif.Object[Value, Ps]) {
+  class PropGetter[Ps, KeySet <: NamesOf[Ps]](obj: ValueMotif.Object[Value, Ps]) extends Selectable {
+    // TODO: If we had proof of name uniqueness, we could simplify each field's type
+    // to be directly what we want (Value[v] or Option[Value[v]]), without taking further given IsPropertyOf witnesses.
+    type PropertyGetters[Remaining, Acc] =
+      Remaining match
+        case Void => Acc
+        case init || last =>
+          last match
+            case k :: v =>
+              PropertyGetters[
+                init,
+                NamedTuples.Cons[k, (ev: (k IsPropertyOf Ps) { type Type = v; type Modality[A] = A }) ?=> Value[v], Acc]
+              ]
+            case k :? v =>
+              PropertyGetters[
+                init,
+                NamedTuples.Cons[k, (ev: (k IsPropertyOf Ps) { type Type = v; type Modality = Option }) ?=> Option[Value[v]], Acc]
+              ]
+
+    type Fields = PropertyGetters[Ps, NamedTuple.Empty]
+
+    def selectDynamic(propName: String): (ev: propName.type IsPropertyOf Ps) ?=> ev.Modality[Value[ev.Type]] =
+      (ev: propName.type IsPropertyOf Ps) ?=> obj.get[propName.type]
+
     /** Get the property `K` of this object.
      *
      * Example:

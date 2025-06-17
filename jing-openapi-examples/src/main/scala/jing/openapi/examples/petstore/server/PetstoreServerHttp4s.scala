@@ -35,7 +35,7 @@ object PetstoreServerHttp4s extends IOApp {
   def routes(store: InMemoryPetstore): Routes[IO] =
     serverBuilder
       .handleNext["/pet_POST"] { in =>
-        val body = in.props["body"]
+        val body = in.props.body
         val pet = body.discriminator match
           case "application/json"                  => body.assertCase["application/json"]
           case "application/xml"                   => body.assertCase["application/xml"]
