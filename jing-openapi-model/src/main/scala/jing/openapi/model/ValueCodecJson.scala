@@ -1,7 +1,6 @@
-package jing.openapi.client.default
+package jing.openapi.model
 
 import io.circe.{Json, JsonObject}
-import jing.openapi.client.default.Result.schemaViolation
 import jing.openapi.model.{||, ::, :?, Arr, Enum, Obj, Oops, ScalaUnionOf, ScalaValueOf, Schema, SchemaMotif, Value, ValueMotif}
 import jing.openapi.model.SchemaMotif.{Array, Enumeration, I32, I64, S, B, Object}
 import libretto.lambda.Items1
@@ -10,6 +9,30 @@ import scala.util.boundary
 import scala.collection.mutable.Stack
 
 object ValueCodecJson {
+  enum DecodeResult[T]:
+    case Succeeded(value: T)
+    case SchemaViolation(details: String)
+
+    def map[U](f: T => U): DecodeResult[U] =
+      this match
+        case Succeeded(value) => Succeeded(f(value))
+        case SchemaViolation(details) => SchemaViolation(details)
+
+    def flatMap[U](f: T => DecodeResult[U]): DecodeResult[U] =
+      this match
+        case Succeeded(value) => f(value)
+        case SchemaViolation(details) => SchemaViolation(details)
+
+  object DecodeResult:
+    // TODO: accumulate errors (but first need to be able to represent multiple errors)
+    def map2[A, B, R](a: DecodeResult[A], b: DecodeResult[B])(f: (A, B) => R): DecodeResult[R] =
+      (a, b) match
+        case (Succeeded(a), Succeeded(b)) => Succeeded(f(a, b))
+        case (SchemaViolation(details), _) => SchemaViolation(details)
+        case (_, SchemaViolation(details)) => SchemaViolation(details)
+
+  import DecodeResult.{SchemaViolation, Succeeded}
+
   def encode[T](schema: Schema[T], value: Value[T]): String =
     val builder = new StringBuilder()
     encode(schema, value, builder)
@@ -104,7 +127,7 @@ object ValueCodecJson {
   private def writeJsonBoolean(b: Boolean, builder: StringBuilder): Unit =
     builder.append(b)
 
-  def decodeLenient[T](schema: Schema[T], json: Json): Result[Value.Lenient[T]] =
+  def decodeLenient[T](schema: Schema[T], json: Json): DecodeResult[Value.Lenient[T]] =
     val jsonLoc = Stack("<root>")
     decodeLenientAt(schema, jsonLoc, json)
 
@@ -112,7 +135,7 @@ object ValueCodecJson {
     schema: Schema[T],
     jsonLoc: Stack[String],
     json: Json,
-  ): Result[Value.Lenient[T]] =
+  ): DecodeResult[Value.Lenient[T]] =
     schema match {
       case Schema.Proper(s) =>
         s match
@@ -120,29 +143,29 @@ object ValueCodecJson {
             json.asNumber match
               case Some(jsonNumber) =>
                 jsonNumber.toInt match
-                  case Some(n) => Result.Succeeded(Value.Lenient.int32(n))
-                  case None => schemaViolation(s"Expected a 32-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
+                  case Some(n) => Succeeded(Value.Lenient.int32(n))
+                  case None => SchemaViolation(s"Expected a 32-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
               case None =>
-                schemaViolation(s"Expected JSON number, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+                SchemaViolation(s"Expected JSON number, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case I64() =>
             json.asNumber match
               case Some(jsonNumber) =>
                 jsonNumber.toLong match
-                  case Some(n) => Result.Succeeded(Value.Lenient.int64(n))
-                  case None => schemaViolation(s"Expected a 64-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
+                  case Some(n) => Succeeded(Value.Lenient.int64(n))
+                  case None => SchemaViolation(s"Expected a 64-bit integer, got ${jsonNumber}. At ${jsonLoc.printLoc}")
               case None =>
-                schemaViolation(s"Expected JSON number, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+                SchemaViolation(s"Expected JSON number, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case S() =>
             json.asString match
-              case Some(s) => Result.Succeeded(Value.Lenient.str(s))
-              case None => schemaViolation(s"Expected JSON string, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+              case Some(s) => Succeeded(Value.Lenient.str(s))
+              case None => SchemaViolation(s"Expected JSON string, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case B() =>
             json.asBoolean match
-              case Some(b) => Result.Succeeded(Value.Lenient.bool(b))
-              case None => schemaViolation(s"Expected JSON boolean, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+              case Some(b) => Succeeded(Value.Lenient.bool(b))
+              case None => SchemaViolation(s"Expected JSON boolean, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case Enumeration(base, cases) =>
             decodeLenientAt(Schema.Proper(base), jsonLoc, json)
@@ -151,11 +174,11 @@ object ValueCodecJson {
                   val Value.Lenient.Proper(v) = p
                   decodeEnumValueLenient(cases, v) match
                     case Some(v) =>
-                      Result.Succeeded(Value.Lenient.Proper(v))
+                      Succeeded(Value.Lenient.Proper(v))
                     case None =>
                       val expected = cases.toList([a] => a => a.show).mkString(", ")
                       val actual = Value.Lenient.Proper(v).show
-                      schemaViolation(s"Expected one of ${expected}, got ${actual}. At ${jsonLoc.printLoc}")
+                      SchemaViolation(s"Expected one of ${expected}, got ${actual}. At ${jsonLoc.printLoc}")
                 case _: Value.Lenient.Oopsy[s] =>
                   base.isNotOops[s]
               }
@@ -163,15 +186,15 @@ object ValueCodecJson {
           case Array(elemSchema) =>
             json.asArray match
               case Some(jsonElems) => decodeArrayLenient(elemSchema, jsonLoc, jsonElems)
-              case None => schemaViolation(s"Expected JSON array, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+              case None => SchemaViolation(s"Expected JSON array, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
           case o: Object[schema, props] =>
             json.asObject match
               case Some(obj) => decodeObjectLenient(o, jsonLoc, obj)
-              case None => schemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+              case None => SchemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
       case Schema.Unsupported(message) =>
-        Result.Succeeded(Value.Lenient.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
+        Succeeded(Value.Lenient.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
     }
 
   private def decodeEnumValueLenient[F[_], Base, Cases](
@@ -201,19 +224,19 @@ object ValueCodecJson {
     schema: SchemaMotif[Schema, Obj[Props]],
     jsonLoc: Stack[String],
     json: JsonObject,
-  ): Result[Value.Lenient[Obj[Props]]] =
+  ): DecodeResult[Value.Lenient[Obj[Props]]] =
     schema match
       case Object.Empty() =>
-        Result.Succeeded(Value.Lenient.obj)
+        Succeeded(Value.Lenient.obj)
       case Object.Snoc(init, pname, ptype) =>
-        Result.map2(
+        DecodeResult.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropLenient(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
           init.extend(pname, last)
         }
       case Object.SnocOpt(init, pname, ptype) =>
-        Result.map2(
+        DecodeResult.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropOptLenient(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
@@ -225,7 +248,7 @@ object ValueCodecJson {
     propSchema: Schema[V],
     jsonLoc: Stack[String],
     jsonObject: JsonObject,
-  ): Result[Value.Lenient[V]] =
+  ): DecodeResult[Value.Lenient[V]] =
     jsonObject(propName.value) match
       case Some(json) =>
         val n = jsonLoc.size
@@ -236,14 +259,14 @@ object ValueCodecJson {
           jsonLoc.dropInPlace(2)
         }
       case None =>
-        schemaViolation(s"Missing property ${propName.value}. At ${jsonLoc.printLoc}")
+        SchemaViolation(s"Missing property ${propName.value}. At ${jsonLoc.printLoc}")
 
   private def decodePropOptLenient[K <: String, V](
     propName: SingletonType[K],
     propSchema: Schema[V],
     jsonLoc: Stack[String],
     jsonObject: JsonObject,
-  ): Result[Option[Value.Lenient[V]]] =
+  ): DecodeResult[Option[Value.Lenient[V]]] =
     jsonObject(propName.value) match
       case Some(json) =>
         val n = jsonLoc.size
@@ -255,13 +278,13 @@ object ValueCodecJson {
           jsonLoc.dropInPlace(2)
         }
       case None =>
-        Result.Succeeded(None)
+        Succeeded(None)
 
   private def decodeArrayLenient[T](
     elemSchema: Schema[T],
     jsonLoc: Stack[String],
     jsonElems: Vector[Json],
-  ): Result[Value.Lenient[Arr[T]]] = {
+  ): DecodeResult[Value.Lenient[Arr[T]]] = {
     val builder = IArray.newBuilder[Value.Lenient[T]]
     builder.sizeHint(jsonElems.size)
     boundary {
@@ -270,14 +293,14 @@ object ValueCodecJson {
         jsonLoc.push(s"[$i]")
         try {
           decodeLenientAt(elemSchema, jsonLoc, json) match
-            case Result.Succeeded(t) => builder += t
-            case Result.Failed(e) => boundary.break(Result.Failed(e))
+            case Succeeded(t) => builder += t
+            case SchemaViolation(e) => boundary.break(SchemaViolation(e))
         } finally {
           jsonLoc.pop()
           i += 1
         }
       }
-      Result.Succeeded(Value.Lenient.arr(builder.result))
+      Succeeded(Value.Lenient.arr(builder.result))
     }
   }
 

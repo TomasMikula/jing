@@ -1,14 +1,14 @@
 package jing.openapi.server.http4s
 
 import cats.Monad
-import cats.data.{NonEmptyList, OptionT}
+import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.{Chunk, RaiseThrowable, Stream}
-import jing.openapi.model.RequestSchema.{ConstantPath, Parameterized, WithBody}
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
-import jing.openapi.model.{::, BodySchema, HttpEndpoint, Obj, RequestSchema, Value, ||}
+import jing.openapi.model.{::, :?, BodySchema, DiscriminatedUnion, HttpEndpoint, Obj, RequestSchema, ResponseSchema, Value, ValueCodecJson, ||}
+import libretto.lambda.Items1Named
 import org.http4s
 import org.http4s.{Headers, HttpRoutes, MediaType, Request, Status, Uri}
 
@@ -80,7 +80,9 @@ object Http4sServerBuilder {
     req: Request[F],
   )(using
     RaiseThrowable[F],
-  ): Option[Either[ParseError, Value[Obj[I]]]] = // TODO: consider EitherT[Option, ...]
+  ): Option[Either[ParseError, Value[Obj[I]]]] = { // TODO: consider EitherT[Option, ...]
+    import RequestSchema.{ConstantPath, Parameterized, WithBody}
+
     if (ep.method.nameUpperCase != req.method.name)
       None
     else
@@ -96,11 +98,11 @@ object Http4sServerBuilder {
             .map(_.map(ps => Value.obj.set("params", ps)))
         case WithBody(params, body) =>
           def parseBody =
-                    req.contentType match
-                      case Some(ct) if !ct.mediaType.satisfies(MediaType("application", "json")) =>
-                        Left(UnsupportedContentType(ct.mediaType))
-                      case Some(_) | None =>
-                        parseAsJson(body, req.bodyText)
+            req.contentType match
+              case Some(ct) if !ct.mediaType.satisfies(MediaType("application", "json")) =>
+                Left(UnsupportedContentType(ct.mediaType))
+              case Some(_) | None =>
+                parseAsJson(body, req.bodyText)
           params match
             case ConstantPath(path) =>
               if (path != req.uri.path.renderString)
@@ -117,11 +119,113 @@ object Http4sServerBuilder {
                       .map { b => Value.obj.set("params", ps).set("body", b) }
                   }
                 }
+  }
 
   private def route[Ps](
     paramSchema: RequestSchema.Params.Proper[Ps],
     uri: Uri,
-  ): Option[Either[Nothing, Value[Obj[Ps]]]] =
+  ): Option[Either[Nothing, Value[Obj[Ps]]]] = {
+    val Uri(_, _, path, query, _) = uri
+    route(paramSchema, path.renderString, query.multiParams).value match
+      case None =>
+        None
+      case Some(Left(e)) =>
+        Some(Left(e))
+      case Some(Right((result = res, leftovers = remaining))) =>
+        remaining match
+          case (Some(path), _) =>
+            // treat unconsumed path as a non-match
+            None
+          case (None, query) =>
+            if (query.isEmpty)
+              Some(Right(res))
+            else
+              // treat extraneous query params as bad request
+              ???
+  }
+
+  private def route[Ps](
+    paramSchema: RequestSchema.Params[Ps],
+    path: String,
+    query: Map[String, Seq[String]],
+  ): EitherT[
+    Option,
+    Nothing,
+    ( result: Value[Obj[Ps]]
+    , leftovers: (path: Option[String], query: Map[String, Seq[String]])
+    ),
+  ] = {
+    import RequestSchema.Params.*
+
+    paramSchema match
+      case ConstantPath(p) =>
+        summon[Ps =:= Void]
+        if (path.startsWith(p))
+          val leftoverPath = if path.length == p.length then None else Some(path.drop(p.length))
+          EitherT.pure((result = Value.obj, leftovers = (leftoverPath, query)))
+        else
+          EitherT.liftF(None)
+      case ParameterizedPath(p) =>
+        route(p, path)
+          .map { case (res, leftoverPath) => (res, (leftoverPath, query)) }
+      case WithQueryParam(init, pName, pSchema) =>
+        ???
+      case ps: WithQueryParamOpt[init, k, v] =>
+        route(ps.init, path, query).flatMap { case (result = initRes, leftovers = remaining) =>
+          val ev = summon[Ps =:= (init || k :? v)]
+          remaining match
+            case (None, q) =>
+              q.get(ps.pName.value) match
+                case None =>
+                  val res: Value[Obj[Ps]] =
+                    ev.substituteContra[[x] =>> Value[Obj[x]]]:
+                      initRes.extendOpt(ps.pName, None)
+                  EitherT.pure((result = res, leftovers = (None, q)))
+                case Some(values) =>
+                  ???
+            case (Some(p), _) =>
+              // leftover path when there's no more path to match => return no match
+              EitherT.liftF(None)
+        }
+  }
+
+  private def route[Ps](
+    pathSchema: RequestSchema.Path[Ps],
+    path: String,
+  ): EitherT[
+    Option,
+    Nothing,
+    ( result: Value[Obj[Ps]]
+    , leftoverPath: Option[String]
+    ),
+  ] = {
+    import RequestSchema.Path.{Constant, WithParam}
+
+    pathSchema match
+      case Constant(p) =>
+        if (path.startsWith(p))
+          val leftoverPath = if path.length == p.length then None else Some(path.drop(p.length))
+          EitherT.pure((result = Value.obj, leftoverPath = leftoverPath))
+        else
+          EitherT.liftF(None)
+      case WithParam(prefix, pName, pSchema, suffix) =>
+        route(prefix, path).flatMap { case (prefixRes, leftoverOpt) =>
+          leftoverOpt match
+            case None =>
+              EitherT.liftF(None)
+            case Some(leftover) =>
+              EitherT
+                .fromEither(parseParam(pSchema, leftover))
+                .flatMap { case (pValue, leftoverOpt) =>
+                  ???
+                }
+        }
+  }
+
+  private def parseParam[T](
+    pSchema: RequestSchema.Path.ParamSchema[T],
+    path: String,
+  ): Either[Nothing, (result: Value[T], leftoverPath: Option[String])] =
     ???
 
   private def parseAsJson[B, F[_]](
@@ -133,6 +237,18 @@ object Http4sServerBuilder {
   private def encodeResponse[O, F[_]](
     ep: HttpEndpoint[?, O],
     resp: Response[F, O],
+  ): http4s.Response[F] =
+    resp match
+      case Response.Protocolary(value) =>
+        ep.responseSchema match
+          case ResponseSchema.ByStatusCode(schemasByStatusCode) =>
+            encodeResponse(schemasByStatusCode, value)
+      case Response.Custom(r) =>
+        r.covary
+
+  private def encodeResponse[Cases, F[_]](
+    schemasByStatusCode: Items1Named.Product[||, ::, BodySchema, Cases],
+    value: Value[DiscriminatedUnion[Cases]],
   ): http4s.Response[F] =
     ???
 }

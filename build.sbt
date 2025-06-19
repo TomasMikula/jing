@@ -39,7 +39,8 @@ lazy val jingOpenApiModel = project
     scalacOptions ++= scalacOptionsCommon,
     libraryDependencies ++= Seq(
       "dev.continuously.libretto" %% "libretto-lambda" % LibrettoVersion,
-    )
+      "io.circe" %% "circe-parser" % "0.14.12",
+    ),
   )
 
 lazy val jingOpenApi = project
@@ -67,9 +68,6 @@ lazy val jingOpenApiClientDefault = project
   .settings(
     scalacOptions ++=
       scalacOptionsCommon,
-    libraryDependencies ++= Seq(
-      "io.circe" %% "circe-parser" % "0.14.12",
-    ),
   )
 
 lazy val jingOpenApiServerHttp4s = project

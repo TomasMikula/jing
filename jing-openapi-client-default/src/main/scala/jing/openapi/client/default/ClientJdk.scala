@@ -1,17 +1,17 @@
 package jing.openapi.client.default
 
+import io.circe.{Json, ParsingFailure}
+import jing.openapi.model.RequestSchema.Params.QueryParamSchema
+import jing.openapi.model.ValueCodecJson.DecodeResult
+import jing.openapi.model.client.{Client, HttpThunk}
+import jing.openapi.model.{::, :?, Arr, Body, BodySchema, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueMotif, ||}
+import libretto.lambda.util.Exists.Indeed
+
 import java.io.IOException
-import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.http.HttpRequest.{BodyPublisher, BodyPublishers}
 import java.net.http.HttpResponse.BodyHandlers
-
+import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import scala.jdk.OptionConverters.*
-
-import io.circe.{Json, ParsingFailure}
-import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueMotif}
-import jing.openapi.model.RequestSchema.Params.QueryParamSchema
-import jing.openapi.model.client.{Client, HttpThunk}
-import libretto.lambda.util.Exists.Indeed
 
 class ClientJdk extends Client {
 
@@ -189,7 +189,9 @@ class ClientJdk extends Client {
     Result.parseError(code, s"JSON parsing failure: ${e.message}", e.underlying)
 
   private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
-    ValueCodecJson.decodeLenient(schema, body)
+    ValueCodecJson.decodeLenient(schema, body) match
+      case DecodeResult.Succeeded(value) => Result.Succeeded(value)
+      case DecodeResult.SchemaViolation(details) => Result.schemaViolation(details)
 
   private def urlEncode(s: String): String =
     s // TODO
