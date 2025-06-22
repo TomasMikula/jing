@@ -8,5 +8,5 @@ sealed trait ResponseSchema[A]
 object ResponseSchema {
   case class ByStatusCode[As](
     items: Items1Named.Product[||, ::, BodySchema, As],
-  ) extends ResponseSchema[DiscriminatedUnion[As]]
+  ) extends ResponseSchema[As]
 }

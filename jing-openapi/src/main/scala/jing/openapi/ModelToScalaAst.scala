@@ -190,7 +190,7 @@ object ModelToScalaAst {
             [A] => bs => quotedBodySchema(bs),
           )
         given Type[as] = t
-        (Type.of[DiscriminatedUnion[as]], '{ ResponseSchema.ByStatusCode($e) })
+        (Type.of[as], '{ ResponseSchema.ByStatusCode($e) })
 
   def quotedBodySchema[T](
     s: BodySchema[T],

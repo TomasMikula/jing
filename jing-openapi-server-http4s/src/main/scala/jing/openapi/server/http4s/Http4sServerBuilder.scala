@@ -5,14 +5,16 @@ import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.{Chunk, RaiseThrowable, Stream}
+import jing.openapi.model.BodySchema.{AnythingAsPlainText, Variants}
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
-import jing.openapi.model.{::, :?, BodySchema, DiscriminatedUnion, HttpEndpoint, Obj, RequestSchema, ResponseSchema, Value, ValueCodecJson, ||}
+import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, Value, ValueCodecJson, ||}
 import libretto.lambda.Items1Named
 import org.http4s
 import org.http4s.{Headers, HttpRoutes, MediaType, Request, Status, Uri}
 
 import java.nio.charset.StandardCharsets.UTF_8
+import scala.util.{Failure, Success, Try}
 
 class Http4sServerBuilder[F[_]](using
   Monad[F],
@@ -22,7 +24,7 @@ class Http4sServerBuilder[F[_]](using
 
   override type RequestHandler[I, O] =
     // TODO: introduce dedicated ADT for RequestHandler, to support multiple forms of handlers
-    Value[Obj[I]] => F[Response[F, O]]
+    Value[Obj[I]] => F[Response[SupportedMimeType, F, O]]
 
   override type ServerDefinition =
     Routes[F]
@@ -65,6 +67,8 @@ class Http4sServerBuilder[F[_]](using
 }
 
 object Http4sServerBuilder {
+  type SupportedMimeType = "application/json"
+
   def forIO: Http4sServerBuilder[IO] =
     forF[IO]
 
@@ -236,19 +240,49 @@ object Http4sServerBuilder {
 
   private def encodeResponse[O, F[_]](
     ep: HttpEndpoint[?, O],
-    resp: Response[F, O],
+    resp: Response[SupportedMimeType, F, O],
   ): http4s.Response[F] =
     resp match
-      case Response.Protocolary(value) =>
+      case Response.Protocolary(body) =>
         ep.responseSchema match
           case ResponseSchema.ByStatusCode(schemasByStatusCode) =>
-            encodeResponse(schemasByStatusCode, value)
+            encodeResponse1(schemasByStatusCode, body).covary
       case Response.Custom(r) =>
         r.covary
 
-  private def encodeResponse[Cases, F[_]](
+  private def encodeResponse1[Cases, F[_]](
     schemasByStatusCode: Items1Named.Product[||, ::, BodySchema, Cases],
-    value: Value[DiscriminatedUnion[Cases]],
-  ): http4s.Response[F] =
-    ???
+    statusAndBody: Items1Named.Sum[||, ::, Body[SupportedMimeType, _], Cases],
+  ): http4s.Response[fs2.Pure] =
+    // TODO: provide witness of validity of status code as part of the endpoint
+    val codeStr = statusAndBody.label
+    Try { Integer.parseInt(codeStr) } match
+      case Failure(e) =>
+        Response
+          .plainText(Status.InternalServerError, s"Server attempted to return non-integral status code '${codeStr}'")
+          .value
+      case Success(statusCode) =>
+        http4s.Status.fromInt(statusCode) match
+          case Left(e) =>
+            Response
+              .plainText(Status.InternalServerError, s"Server attempted to return invalid status code '${statusCode}'")
+              .value
+          case Right(status) =>
+            val schema = schemasByStatusCode.get(statusAndBody.tag)
+            // TODO: use schema above, not the one bundled with body
+            val body = statusAndBody.value
+            encodeResponse(status, body)
+
+  private def encodeResponse[B](
+    status: http4s.Status,
+    body: Body[SupportedMimeType, B]
+  ): http4s.Response[fs2.Pure] =
+    body match
+      case Body.MimeVariant(schemaVariants, variantSelector, value) =>
+        schemaVariants match
+          case BodySchema.Variants(byMediaType) =>
+            val schema = byMediaType.get(IsCaseOf.toMember(variantSelector))
+            val _: "application/json" = variantSelector.label
+            val jsonStr = ValueCodecJson.encode(schema, value)
+            Response.json(status, jsonStr).value
 }

@@ -891,7 +891,7 @@ private[openapi] object SwaggerToScalaAst {
       case x @ Indeed((tp, bs)) =>
         given Type[x.T] = tp
         Indeed((
-          Type.of[DiscriminatedUnion[x.T]],
+          Type.of[x.T],
           bs.map { bs => '{ResponseSchema.ByStatusCode($bs) } }
         ))
     }

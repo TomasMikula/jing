@@ -53,11 +53,9 @@ object PetstoreServerHttp4s extends IOApp {
           .createPet(pet)
           .map: pet =>
             Response:
-              discriminatedUnion:
-                _.`200`:
-                  discriminatedUnion:
-                    _.`application/json`:
-                      pet
+              _
+                .status("200")
+                .body["application/json"](pet)
       }
       .handleNext["/pet_PUT"](_ => IO(Response.plainText(Status.NotImplemented)))
       .handleNext["/pet/findByStatus_GET"](_ => IO(Response.plainText(Status.NotImplemented)))

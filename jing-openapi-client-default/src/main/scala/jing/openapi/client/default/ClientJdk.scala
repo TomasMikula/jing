@@ -12,10 +12,11 @@ import java.net.http.HttpRequest.{BodyPublisher, BodyPublishers}
 import java.net.http.HttpResponse.BodyHandlers
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import scala.jdk.OptionConverters.*
+import jing.openapi.model.DiscriminatedUnion
 
 class ClientJdk extends Client {
 
-  override type Response[T] = Result[Value.Lenient[T]]
+  override type Response[T] = Result[Value.Lenient[DiscriminatedUnion[T]]]
 
   override type SupportedMimeType = "application/json"
 
@@ -135,7 +136,7 @@ class ClientJdk extends Client {
   private def parseResponse[T](
     schema: ResponseSchema[T],
     response: HttpResponse[String],
-  ): Result[Value.Lenient[T]] = {
+  ): Result[Value.Lenient[DiscriminatedUnion[T]]] = {
     val code = response.statusCode()
     schema.match
       case ResponseSchema.ByStatusCode(items) =>
