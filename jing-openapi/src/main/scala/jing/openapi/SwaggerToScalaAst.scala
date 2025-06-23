@@ -905,7 +905,7 @@ private[openapi] object SwaggerToScalaAst {
   ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
     bodySchema(schemas, apiResponse.getContent()) match
       case Some(Indeed((tp, exp))) => Indeed((tp, exp.widen))
-      case None => Indeed((Type.of[Str], F.pure('{ BodySchema.AnythingAsPlainText })))
+      case None => Indeed((Type.of[Unit], F.pure('{ BodySchema.Empty })))
 
   private def requestSchema[F[_]](
     paramsSchema: Exists[[Ps] =>> (Type[Ps], F[Expr[RequestSchema.ParamsOpt[Ps]]])],

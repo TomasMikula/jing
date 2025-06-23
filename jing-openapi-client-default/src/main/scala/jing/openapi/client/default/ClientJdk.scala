@@ -170,8 +170,6 @@ class ClientJdk extends Client {
                 Result.unexpectedContentType(statusCode, contentType, response.body())
           case None =>
             Result.missingContentTypeHeader(statusCode, response.body())
-      case BodySchema.AnythingAsPlainText =>
-        Result.Succeeded(Value.Lenient.str(response.body()))
 
   private def parseBody[T](
     statusCode: Int,

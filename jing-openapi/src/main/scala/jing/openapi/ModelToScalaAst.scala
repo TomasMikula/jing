@@ -220,9 +220,6 @@ object ModelToScalaAst {
           Type.of[DiscriminatedUnion[cases]],
           '{ BodySchema.Variants($e) },
         )
-      case BodySchema.AnythingAsPlainText =>
-        (Type.of[Str], '{ BodySchema.AnythingAsPlainText })
-
 
   def quotedSchema[T](s: Schema[T])(using Quotes): (Type[T], Expr[Schema[T]]) =
     s match

@@ -12,6 +12,4 @@ object BodySchema {
   case class Variants[Cases](
     byMediaType: Items1Named.Product[||, ::, Schema, Cases],
   ) extends BodySchema.NonEmpty[DiscriminatedUnion[Cases]]
-
-  case object AnythingAsPlainText extends NonEmpty[Str]
 }

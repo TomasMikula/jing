@@ -5,7 +5,6 @@ import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.{Chunk, RaiseThrowable, Stream}
-import jing.openapi.model.BodySchema.{AnythingAsPlainText, Variants}
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
 import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, Value, ValueCodecJson, ||}
@@ -287,6 +286,4 @@ object Http4sServerBuilder {
             Response.json(status, jsonStr).value
           case BodySchema.Empty =>
             throw AssertionError("Impossible: Unit =:= DiscriminatedUnion[...]")
-          case BodySchema.AnythingAsPlainText =>
-            throw AssertionError("Impossible: Str =:= DiscriminatedUnion[...]")
 }
