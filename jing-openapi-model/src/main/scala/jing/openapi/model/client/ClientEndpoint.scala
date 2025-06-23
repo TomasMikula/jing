@@ -41,7 +41,7 @@ object ClientEndpoint {
         method,
         paramsSchema = RequestSchema.Params.ConstantPath(path),
         params = Value.obj,
-        body = Some(Body(bodySchema, i, body)),
+        body = Some((bodySchema, Body(i, body))),
         responseSchema,
       )
 

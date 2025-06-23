@@ -4,7 +4,7 @@ import io.circe.{Json, ParsingFailure}
 import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.client.{Client, HttpThunk}
-import jing.openapi.model.{::, :?, Arr, Body, BodySchema, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueMotif, ||}
+import jing.openapi.model.{::, :?, Arr, Body, BodySchema, DiscriminatedUnion, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueMotif, ||}
 import libretto.lambda.util.Exists.Indeed
 
 import java.io.IOException
@@ -12,7 +12,6 @@ import java.net.http.HttpRequest.{BodyPublisher, BodyPublishers}
 import java.net.http.HttpResponse.BodyHandlers
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import scala.jdk.OptionConverters.*
-import jing.openapi.model.DiscriminatedUnion
 
 class ClientJdk extends Client {
 
@@ -34,8 +33,9 @@ class ClientJdk extends Client {
         val uri = new java.net.URI(baseUrl + relativeUrl)
 
         val (mimeTypeOpt, bodyPublisher) =
-          body.map(encodeBody) match
-            case Some((mimeType, bodyStr)) =>
+          body match
+            case Some((schema, body)) =>
+              val (mimeType, bodyStr) = encodeBody(schema, body)
               (Some(mimeType), BodyPublishers.ofString(bodyStr))
             case None =>
               (None, BodyPublishers.noBody())
@@ -120,9 +120,12 @@ class ClientJdk extends Client {
           + urlEncode(suffix)
   }
 
-  private def encodeBody[T](body: Body[SupportedMimeType, T]): (SupportedMimeType, String) =
+  private def encodeBody[T](
+    schemaVariants: BodySchema.NonEmpty[T],
+    body: Body[SupportedMimeType, T],
+  ): (SupportedMimeType, String) =
     body match
-      case Body.MimeVariant(schemaVariants, i, v) =>
+      case Body.MimeVariant(i, v) =>
         schemaVariants match
           case schemaVariants: BodySchema.Variants[cases] =>
             val schema = schemaVariants.byMediaType.get(IsCaseOf.toMember(i))

@@ -269,20 +269,24 @@ object Http4sServerBuilder {
               .value
           case Right(status) =>
             val schema = schemasByStatusCode.get(statusAndBody.tag)
-            // TODO: use schema above, not the one bundled with body
             val body = statusAndBody.value
-            encodeResponse(status, body)
+            encodeResponse(status, schema, body)
 
   private def encodeResponse[B](
     status: http4s.Status,
+    bodySchema: BodySchema[B],
     body: Body[SupportedMimeType, B]
   ): http4s.Response[fs2.Pure] =
     body match
-      case Body.MimeVariant(schemaVariants, variantSelector, value) =>
-        schemaVariants match
+      case Body.MimeVariant(variantSelector, value) =>
+        bodySchema match
           case BodySchema.Variants(byMediaType) =>
             val schema = byMediaType.get(IsCaseOf.toMember(variantSelector))
             val _: "application/json" = variantSelector.label
             val jsonStr = ValueCodecJson.encode(schema, value)
             Response.json(status, jsonStr).value
+          case BodySchema.Empty =>
+            throw AssertionError("Impossible: Unit =:= DiscriminatedUnion[...]")
+          case BodySchema.AnythingAsPlainText =>
+            throw AssertionError("Impossible: Str =:= DiscriminatedUnion[...]")
 }

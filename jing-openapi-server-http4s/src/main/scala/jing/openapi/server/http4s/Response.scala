@@ -55,7 +55,7 @@ object Response {
         Response.Protocolary(
           Items1Named.Sum.Value[||, ::, Body[MT, _], S, i.Type, ResponseType](
             tag = IsCaseOf.toMember(i),
-            value = Body.MimeVariant[MT, j.Type, BodyTypesByMimeType](???, j, body)
+            value = Body.MimeVariant[MT, j.Type, BodyTypesByMimeType](j, body)
           )
         )
     }

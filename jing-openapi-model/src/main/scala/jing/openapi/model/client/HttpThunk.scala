@@ -13,7 +13,10 @@ sealed trait HttpThunk[+MimeType, O] {
   /** includes path and query */
   def params: Value[Obj[Params]]
 
-  def body: Option[Body[MimeType, BodyType]]
+  def body: Option[(
+    schema: BodySchema.NonEmpty[BodyType],
+    body: Body[MimeType, BodyType],
+  )]
 
   def runAgainst(apiBaseUrl: String)(using
     client: Client,
@@ -27,7 +30,10 @@ object HttpThunk {
     method: HttpMethod,
     paramsSchema: RequestSchema.Params[Ps],
     params: Value[Obj[Ps]],
-    body: Option[Body[MimeType, Bdy]],
+    body: Option[(
+      schema: BodySchema.NonEmpty[Bdy],
+      body: Body[MimeType, Bdy],
+    )],
     responseSchema: ResponseSchema[O],
   ) extends HttpThunk[MimeType, O] {
     override type Params = Ps
@@ -38,7 +44,10 @@ object HttpThunk {
     method: HttpMethod,
     paramsSchema: RequestSchema.Params[Ps],
     params: Value[Obj[Ps]],
-    body: Option[Body[MimeType, Bdy]],
+    body: Option[(
+      schema: BodySchema.NonEmpty[Bdy],
+      body: Body[MimeType, Bdy],
+    )],
     responseSchema: ResponseSchema[O],
   ): HttpThunk[MimeType, O] =
     Impl(method, paramsSchema, params, body, responseSchema)
