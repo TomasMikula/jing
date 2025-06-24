@@ -5,6 +5,7 @@ import libretto.lambda.Items1Named.Member
 import libretto.lambda.util.{BiInjective, TypeEqK, TypeEq}
 import libretto.lambda.util.TypeEq.Refl
 import scala.annotation.targetName
+import libretto.lambda.util.Applicative
 
 /** Structure of values, parameterized by nested values `F`. */
 sealed trait ValueMotif[+F[_], T] {
@@ -93,6 +94,31 @@ sealed trait ValueMotif[+F[_], T] {
         f(underlying.value, b)
         b.append(")")
   }
+
+  def traverse[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[ValueMotif[G, T]] =
+    this match
+      case Uno => M.pure(Uno)
+      case s: StringValue => M.pure(s)
+      case i: Int32Value => M.pure(i)
+      case i: Int64Value => M.pure(i)
+      case b: BoolValue => M.pure(b)
+      case e @ EnumValue(_) => M.pure(e)
+      case Array(elems) =>
+        Applicative
+          .traverseList(elems.toList) { a => f(a) }
+          .map(bs => Array(IArray.from(bs)))
+      case o: Object[f, ps] =>
+        o.asInstanceOf[Object[F, ps]] // https://github.com/scala/scala3/issues/22993
+          .traverseObj(f)
+          .widen
+      case DiscUnion(underlying) =>
+        underlying match
+          case Items1Named.Sum.Value(tag, value) =>
+            f(value)
+              .map { v => DiscUnion(Items1Named.Sum.Value(tag, v)) }
+
+
+
 }
 
 object ValueMotif {
@@ -105,7 +131,11 @@ object ValueMotif {
   case class Array[F[_], T](elems: IArray[F[T]]) extends ValueMotif[F, Arr[T]]
 
   sealed trait Object[+F[_], Ps] extends ValueMotif[F, Obj[Ps]] {
+    import Object.*
+
     def get[K](using i: IsPropertyOf[K, Ps]): i.Modality[F[i.Type]]
+
+    def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[ValueMotif.Object[G, Ps]]
 
     def foreachProperty(
       f: [K <: String, V] => (k: K, v: F[V]) => Unit,
@@ -116,6 +146,9 @@ object ValueMotif {
     case object ObjEmpty extends ValueMotif.Object[Nothing, Void] {
       override def get[K](using i: IsPropertyOf[K, Void]): i.Modality[Nothing] =
         i.propertiesNotVoid
+
+      override def traverseObj[M[_], G[_]](f: [A] => Nothing => M[G[A]])(using M: Applicative[M]): M[Object[G, Void]] =
+        M.pure(ObjEmpty)
 
       override def foreachProperty(f: [K <: String, V] => (k: K, v: Nothing) => Unit): Unit =
         () // do nothing
@@ -155,6 +188,10 @@ object ValueMotif {
                   init.get[K](using j)
             },
         )
+
+      override def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[Object[G, Init || PropName :: PropType]] =
+        M.map2(init.traverseObj(f), f(lastValue)):
+          (gInit, gLast) => ObjExt(gInit, lastName, gLast)
 
       override def foreachProperty(f: [K <: String, V] => (k: K, v: F[V]) => Unit): Unit =
         init.foreachProperty(f)
@@ -196,6 +233,12 @@ object ValueMotif {
                   init.get[K](using j)
             },
         )
+
+      override def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[Object[G, Init || PropName :? PropType]] =
+        val mgLast: M[Option[G[PropType]]] =
+          lastValue.fold(M.pure(None))(f(_).map(Some(_)))
+        M.map2(init.traverseObj(f), mgLast):
+          (gInit, gLast) => ObjExtOpt(gInit, lastName, gLast)
 
       override def foreachProperty(f: [K <: String, V] => (k: K, v: F[V]) => Unit): Unit =
         init.foreachProperty(f)

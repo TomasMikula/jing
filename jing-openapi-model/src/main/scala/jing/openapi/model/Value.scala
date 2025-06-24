@@ -1,6 +1,7 @@
 package jing.openapi.model
 
 import libretto.lambda.util.SingletonType
+import libretto.lambda.util.Validated
 
 case class Value[T](underlying: ValueMotif[Value, T]) {
   def isNotOops[S](using T =:= Oops[S]): Nothing =
@@ -40,6 +41,15 @@ object Value extends ValueModule[Value] {
               // do nothing
           b.append(")")
     }
+
+    def toValue: Validated[Oopsy[? <: String], Value[T]] =
+      this match
+        case Proper(underlying) =>
+          underlying
+            .traverse[Validated[Oopsy[? <: String], _], Value]([A] => lva => lva.toValue)
+            .map(Value(_))
+        case o @ Oopsy(_, _) =>
+          Validated.invalid(o)
   }
 
   object Lenient extends ValueModule[Lenient] {

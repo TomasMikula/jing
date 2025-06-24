@@ -1,14 +1,17 @@
 package jing.openapi.server.http4s
 
-import cats.Monad
 import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.effect.IO
 import cats.syntax.all.*
+import cats.{Applicative, Functor, Monad}
 import fs2.{Chunk, RaiseThrowable, Stream}
+import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
-import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, Value, ValueCodecJson, ||}
+import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, Schema, Value, ValueCodecJson, ||}
 import libretto.lambda.Items1Named
+import libretto.lambda.util.Exists.Indeed
+import libretto.lambda.util.Validated
 import org.http4s
 import org.http4s.{Headers, HttpRoutes, MediaType, Request, Status, Uri}
 
@@ -18,6 +21,7 @@ import scala.util.{Failure, Success, Try}
 class Http4sServerBuilder[F[_]](using
   Monad[F],
   RaiseThrowable[F],
+  fs2.Compiler[F, F],
 ) extends ServerBuilder {
   import Http4sServerBuilder.*
 
@@ -37,10 +41,8 @@ class Http4sServerBuilder[F[_]](using
 
   private def endpointRoute(h: EndpointHandler[RequestHandler]): HttpRoutes[F] =
     HttpRoutes { req =>
-      parseRequest(h.endpoint, req) match
-        case None =>
-          OptionT.none
-        case Some(Left(error)) =>
+      OptionT(parseRequest(h.endpoint, req)).flatMap:
+        case Left(error) =>
           // TODO: best effort to respect Accept request header
           error match
             case BadRequest(detail) =>
@@ -57,7 +59,7 @@ class Http4sServerBuilder[F[_]](using
                 body = Stream.chunk(Chunk.byteBuffer(UTF_8.encode(s"Unsupported Content-Type ${mediaType.toString}. Expected application/json"))),
               ))
 
-        case Some(Right(inValue)) =>
+        case Right(inValue) =>
           OptionT.liftF(
             h.requestHandler(inValue)
               .map(encodeResponse(h.endpoint, _))
@@ -71,7 +73,7 @@ object Http4sServerBuilder {
   def forIO: Http4sServerBuilder[IO] =
     forF[IO]
 
-  def forF[F[_]: Monad: RaiseThrowable]: Http4sServerBuilder[F] =
+  def forF[F[_]](using Monad[F], RaiseThrowable[F], fs2.Compiler[F, F]): Http4sServerBuilder[F] =
     Http4sServerBuilder[F]
 
   private sealed trait ParseError
@@ -82,46 +84,58 @@ object Http4sServerBuilder {
     ep: HttpEndpoint[I, ?],
     req: Request[F],
   )(using
+    Applicative[F],
     RaiseThrowable[F],
-  ): Option[Either[ParseError, Value[Obj[I]]]] = { // TODO: consider EitherT[Option, ...]
+    fs2.Compiler[F, F],
+  ): F[Option[Either[ParseError, Value[Obj[I]]]]] = { // TODO: consider EitherT[OptionT[F, ...], ...]
     import RequestSchema.{ConstantPath, Parameterized, WithBody}
 
     if (ep.method.nameUpperCase != req.method.name)
-      None
+      None.pure[F]
     else
       ep.requestSchema match
         case ConstantPath(path) =>
           summon[I =:= Void]
           if (path != req.uri.path.renderString)
-            None
+            None.pure[F]
           else
-            Some(Right(Value.obj))
+            Some(Right(Value.obj)).pure[F]
         case Parameterized(params) =>
           route(params, req.uri)
             .map(_.map(ps => Value.obj.set("params", ps)))
-        case WithBody(params, body) =>
-          def parseBody =
+            .pure[F]
+        case WithBody(params, bodySchema) =>
+          def parseBody[B](bodySchema: BodySchema.NonEmpty[B]): F[Either[ParseError, Value[B]]] =
             req.contentType match
+              case None =>
+                Left(BadRequest("Content-Type header not specified")).pure[F]
               case Some(ct) if !ct.mediaType.satisfies(MediaType("application", "json")) =>
-                Left(UnsupportedContentType(ct.mediaType))
-              case Some(_) | None =>
-                parseAsJson(body, req.bodyText)
+                Left(UnsupportedContentType(ct.mediaType)).pure[F]
+              case Some(ctJson) =>
+                bodySchema match
+                  case BodySchema.Variants(byMediaType) =>
+                    byMediaType.getOption("application/json") match
+                      case None =>
+                        Left(BadRequest(s"${ctJson.mediaType} not permitted by the spec")).pure[F]
+                      case Some(Indeed((i, payloadSchema))) =>
+                        parseAsJson(payloadSchema, req.bodyText)
+                          .map(_.map(Value.discriminatedUnion(IsCaseOf.fromMember(i), _)))
           params match
             case ConstantPath(path) =>
               if (path != req.uri.path.renderString)
-                None
+                None.pure[F]
               else
-                parseBody
-                  .map { b => Value.obj.set("body", b) }
-                  .some
+                parseBody(bodySchema).map:
+                  _.map { b => Value.obj.set("body", b) }
+                    .some
             case Parameterized(params) =>
-              route(params, req.uri)
-                .map {
-                  _.flatMap { ps =>
-                    parseBody
-                      .map { b => Value.obj.set("params", ps).set("body", b) }
-                  }
-                }
+              route(params, req.uri) match
+                case None => None.pure[F]
+                case Some(Left(e)) => Some(Left(e)).pure[F]
+                case Some(Right(ps)) =>
+                  parseBody(bodySchema).map:
+                    _.map { b => Value.obj.set("params", ps).set("body", b) }
+                      .some
   }
 
   private def route[Ps](
@@ -232,10 +246,29 @@ object Http4sServerBuilder {
     ???
 
   private def parseAsJson[B, F[_]](
-    schema: BodySchema.NonEmpty[B],
-    req: Stream[F, String],
-  ): Either[BadRequest, Value[B]] =
-    ???
+    schema: Schema[B],
+    reqBody: Stream[F, String],
+  )(using
+    Functor[F],
+    fs2.Compiler[F, F],
+  ): F[Either[BadRequest, Value[B]]] =
+    for {
+      bodyBuilder <- reqBody.compile.fold(StringBuilder()) { _ append _ }
+      bodyStr = bodyBuilder.toString
+    } yield
+      io.circe.parser.parse(bodyStr) match
+        case Left(parseError) =>
+          Left(BadRequest(s"Request body is not valid JSON: ${parseError.message}"))
+        case Right(json) =>
+          ValueCodecJson.decodeLenient(schema, json) match
+            case DecodeResult.SchemaViolation(details) =>
+              Left(BadRequest(s"Schema violation: $details"))
+            case DecodeResult.Succeeded(lenientValue) =>
+              lenientValue.toValue match
+                case Validated.Valid(value) =>
+                  Right(value)
+                case Validated.Invalid(errors) =>
+                  ??? // TODO: report as unsupported
 
   private def encodeResponse[O, F[_]](
     ep: HttpEndpoint[?, O],
