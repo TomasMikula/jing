@@ -7,6 +7,8 @@ import scala.annotation.targetName
 import scala.reflect.ClassTag
 
 trait ValueModule[Value[_]] {
+  given classTag[T]: ClassTag[Value[T]]
+
   def fromMotif[T](v: ValueMotif[Value, T]): Value[T]
 
   def toMotifStr(v: Value[Str]): ValueMotif[Value, Str]
@@ -29,7 +31,7 @@ trait ValueModule[Value[_]] {
   def bool(b: Boolean): Value[Bool] = fromMotif(ValueMotif.BoolValue(b))
   def obj: Value[Obj[Void]] = fromMotif(ValueMotif.Object.ObjEmpty)
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
-  def arr[T](elems: Value[T]*)(using ClassTag[Value[T]]): Value[Arr[T]] = arr(IArray(elems*))
+  def arr[T](elems: Value[T]*): Value[Arr[T]] = arr(IArray(elems*))
 
   def enm[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
     fromMotif(ValueMotif.EnumValue[Base, Cases, T](value))

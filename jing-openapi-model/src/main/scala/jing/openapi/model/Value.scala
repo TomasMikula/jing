@@ -1,7 +1,8 @@
 package jing.openapi.model
 
-import libretto.lambda.util.SingletonType
-import libretto.lambda.util.Validated
+import libretto.lambda.util.{SingletonType, Validated}
+
+import scala.reflect.ClassTag
 
 case class Value[T](underlying: ValueMotif[Value, T]) {
   def isNotOops[S](using T =:= Oops[S]): Nothing =
@@ -53,6 +54,8 @@ object Value extends ValueModule[Value] {
   }
 
   object Lenient extends ValueModule[Lenient] {
+    override def classTag[T]: ClassTag[Lenient[T]] = summon[ClassTag[Lenient[T]]]
+
     override def fromMotif[T](v: ValueMotif[Lenient, T]): Lenient[T] = Proper(v)
 
     override def toMotifArr[T](v: Lenient[Arr[T]]): ValueMotif[Lenient, Arr[T]]    = v match { case Proper(m) => m }
@@ -76,6 +79,8 @@ object Value extends ValueModule[Value] {
     def oops(message: String, details: Option[String] = None): Lenient[Oops[message.type]] =
       oops(SingletonType(message), details)
   }
+
+  override def classTag[T]: ClassTag[Value[T]] = summon[ClassTag[Value[T]]]
 
   override def fromMotif[T](v: ValueMotif[Value, T]): Value[T] = Value(v)
 

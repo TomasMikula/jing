@@ -18,7 +18,7 @@ case class Pet(
           .set("id", id)
           .set("name", name)
           .setOpt("category", category.map(Category.toApi))
-          .set("photoUrls", Value.arr(photoUrls.map(Value.str)))
+          .set("photoUrls", Value.arr(photoUrls*))
           .setOpt("tags", tags.map(ts => Value.arr(ts.map(Tag.toApi))))
           .set("status", status.singletonStringValue)
     )
