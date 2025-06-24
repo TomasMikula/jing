@@ -5,8 +5,8 @@ import com.comcast.ip4s.*
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value.discriminatedUnion
 import jing.openapi.server.http4s.{Http4sServerBuilder, Response, Routes}
-import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.Status
+import org.http4s.ember.server.EmberServerBuilder
 
 object PetstoreServerHttp4s extends IOApp {
 
@@ -44,18 +44,25 @@ object PetstoreServerHttp4s extends IOApp {
   def routes(store: InMemoryPetstore): Routes[IO] =
     serverBuilder
       .handleNext["/pet_POST"] { in =>
-        val body = in.props.body
+        // val body = in.props.body // causes ClassCastException: https://github.com/scala/scala3/issues/23415
+        val body = in.props["body"]
         val pet = body.discriminator match
           case "application/json"                  => body.assertCase["application/json"]
           case "application/xml"                   => body.assertCase["application/xml"]
           case "application/x-www-form-urlencoded" => body.assertCase["application/x-www-form-urlencoded"]
         store
           .createPet(pet)
-          .map: pet =>
-            Response:
-              _
-                .status("200")
-                .body["application/json"](pet)
+          .map:
+            case Left(errMsg) =>
+              Response:
+                _
+                  .status("400")
+                  .emptyBody
+            case Right(pet) =>
+              Response:
+                _
+                  .status("200")
+                  .body["application/json"](pet)
       }
       .handleNext["/pet_PUT"](_ => IO(Response.plainText(Status.NotImplemented)))
       .handleNext["/pet/findByStatus_GET"](_ => IO(Response.plainText(Status.NotImplemented)))

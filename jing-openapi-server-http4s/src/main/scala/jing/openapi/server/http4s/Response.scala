@@ -11,9 +11,13 @@ import org.http4s.{Charset, Headers, MediaType}
 sealed trait Response[+MimeType, +F[_], O]
 
 object Response {
-  case class Protocolary[MimeType, ByStatusCode](
+  case class ProtocolaryBody[MimeType, ByStatusCode](
     statusAndBody: Items1Named.Sum[||, ::, Body[MimeType, _], ByStatusCode],
   ) extends Response[MimeType, Nothing, ByStatusCode]
+
+  case class ProtocolaryEmpty[ByStatusCode](
+    status: Items1Named.Sum[||, ::, [b] =>> b =:= Unit, ByStatusCode],
+  ) extends Response[Nothing, Nothing, ByStatusCode]
 
   case class Custom[F[_], O](value: http4s.Response[F]) extends Response[Nothing, F, O]
 
@@ -36,6 +40,17 @@ object Response {
         PendingMimeType(builder.i)
     }
 
+    extension [S <: String, ResponseType, SupportedMimeType](
+      builder: WithStatus[S, Unit, ResponseType, SupportedMimeType]
+    ) {
+      def emptyBody: Response.ProtocolaryEmpty[ResponseType] =
+        ProtocolaryEmpty:
+          Items1Named.Sum.Value[||, ::, [b] =>> b =:= Unit, S, Unit, ResponseType](
+            IsCaseOf.toMember(builder.i),
+            summon,
+          )
+    }
+
     class PendingMimeType[S <: String, BodyTypesByMimeType, ResponseType, SupportedMimeType](
       i: (S IsCaseOf ResponseType) { type Type = DiscriminatedUnion[BodyTypesByMimeType] }
     ) {
@@ -51,8 +66,8 @@ object Response {
     ) {
       def apply(
         body: Value[BodyType],
-      ): Response.Protocolary[MT, ResponseType] =
-        Response.Protocolary(
+      ): Response.ProtocolaryBody[MT, ResponseType] =
+        Response.ProtocolaryBody(
           Items1Named.Sum.Value[||, ::, Body[MT, _], S, i.Type, ResponseType](
             tag = IsCaseOf.toMember(i),
             value = Body.MimeVariant[MT, j.Type, BodyTypesByMimeType](j, body)
@@ -62,7 +77,7 @@ object Response {
   }
 
   def apply[SupportedMimeType, O](
-    f: Builder[O, DiscriminatorOf[O], SupportedMimeType] => Response.Protocolary[SupportedMimeType, O],
+    f: Builder[O, DiscriminatorOf[O], SupportedMimeType] => Response[SupportedMimeType, Nothing, O],
   ): Response[SupportedMimeType, Nothing, O] =
     f(new Builder)
 

@@ -97,6 +97,9 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :? A, Tail] =
       ValueMotif.Object.ObjExtOpt(b, propName, Some(value))
 
+    def setOpt(propName: Label, value: Option[Value[A]]): ObjectBuilder[Acc || Label :? A, Tail] =
+      ValueMotif.Object.ObjExtOpt(b, propName, value)
+
     @targetName("setOpt")
     def set(propName: Label, value: String)(using A =:= Str): ObjectBuilder[Acc || Label :? Str, Tail] =
       ValueMotif.Object.ObjExtOpt(b, propName, Some(str(value)))

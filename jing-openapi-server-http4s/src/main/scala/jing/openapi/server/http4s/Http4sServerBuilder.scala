@@ -275,7 +275,7 @@ object Http4sServerBuilder {
     resp: Response[SupportedMimeType, F, O],
   ): http4s.Response[F] =
     resp match
-      case Response.Protocolary(body) =>
+      case Response.ProtocolaryBody(body) =>
         ep.responseSchema match
           case ResponseSchema.ByStatusCode(schemasByStatusCode) =>
             encodeResponse1(schemasByStatusCode, body).covary
