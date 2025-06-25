@@ -321,7 +321,7 @@ object Http4sServerBuilder {
           case BodySchema.Empty =>
             throw AssertionError("Impossible: Unit =:= DiscriminatedUnion[...]")
 
-  private def parseStatusOrServerError(codeStr: String): Either[http4s.Response[fs2.Pure], http4s.Status] =
+  private[http4s] def parseStatusOrServerError(codeStr: String): Either[http4s.Response[fs2.Pure], http4s.Status] =
     Try { Integer.parseInt(codeStr) } match
       case Failure(e) =>
         Left:

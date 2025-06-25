@@ -57,7 +57,7 @@ object PetstoreServerHttp4s extends IOApp {
               Response:
                 _
                   .status("400")
-                  .emptyBody
+                  .bodyDespiteSpecPlainText(errMsg)
             case Right(pet) =>
               Response:
                 _

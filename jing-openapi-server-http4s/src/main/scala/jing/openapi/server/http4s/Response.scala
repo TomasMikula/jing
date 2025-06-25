@@ -49,6 +49,24 @@ object Response {
             IsCaseOf.toMember(builder.i),
             summon,
           )
+
+      def bodyDespiteSpecUtf8(contentType: `Content-Type`)(body: String): Response.Custom[Nothing, ResponseType] =
+        Response.Custom:
+          Http4sServerBuilder // XXX cyclic reference between Http4sServerBuilder and this file
+            .parseStatusOrServerError(builder.i.label)
+            .map: status =>
+              http4s.Response(
+                status,
+                headers = Headers(contentType),
+                body = fs2.Stream(body).through(utf8.encode)
+              )
+            .merge
+
+      def bodyDespiteSpecPlainText(body: String): Response.Custom[Nothing, ResponseType] =
+        bodyDespiteSpecUtf8(`Content-Type`(MediaType.text.plain, Charset.`UTF-8`))(body)
+
+      def bodyDespiteSpecJson(jsonBody: String): Response.Custom[Nothing, ResponseType] =
+        bodyDespiteSpecUtf8(`Content-Type`(MediaType.application.json, Charset.`UTF-8`))(jsonBody)
     }
 
     class PendingMimeType[S <: String, BodyTypesByMimeType, ResponseType, SupportedMimeType](
