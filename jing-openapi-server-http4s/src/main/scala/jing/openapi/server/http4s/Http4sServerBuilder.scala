@@ -274,35 +274,36 @@ object Http4sServerBuilder {
     ep: HttpEndpoint[?, O],
     resp: Response[SupportedMimeType, F, O],
   ): http4s.Response[F] =
-    resp match
-      case Response.ProtocolaryBody(body) =>
-        ep.responseSchema match
-          case ResponseSchema.ByStatusCode(schemasByStatusCode) =>
-            encodeResponse1(schemasByStatusCode, body).covary
-      case Response.Custom(r) =>
-        r.covary
+    ep.responseSchema match
+      case ResponseSchema.ByStatusCode(schemasByStatusCode) =>
+        resp match
+          case Response.ProtocolaryBody(body) =>
+            encodeResponseNonEmpty(schemasByStatusCode, body).covary
+          case Response.ProtocolaryEmpty(status) =>
+            encodeResponseEmpty(schemasByStatusCode, status).covary
+          case Response.Custom(r) =>
+            r.covary
 
-  private def encodeResponse1[Cases, F[_]](
+  private def encodeResponseEmpty[Cases](
+    schemasByStatusCode: Items1Named.Product[||, ::, BodySchema, Cases],
+    status: Items1Named.Sum[||, ::, [b] =>> b =:= Unit, Cases],
+  ): http4s.Response[fs2.Pure] =
+    // TODO: provide witness of validity of status code as part of the endpoint
+    parseStatusOrServerError(status.label)
+      .map(http4s.Response(_))
+      .merge
+
+  private def encodeResponseNonEmpty[Cases](
     schemasByStatusCode: Items1Named.Product[||, ::, BodySchema, Cases],
     statusAndBody: Items1Named.Sum[||, ::, Body[SupportedMimeType, _], Cases],
   ): http4s.Response[fs2.Pure] =
     // TODO: provide witness of validity of status code as part of the endpoint
-    val codeStr = statusAndBody.label
-    Try { Integer.parseInt(codeStr) } match
-      case Failure(e) =>
-        Response
-          .plainText(Status.InternalServerError, s"Server attempted to return non-integral status code '${codeStr}'")
-          .value
-      case Success(statusCode) =>
-        http4s.Status.fromInt(statusCode) match
-          case Left(e) =>
-            Response
-              .plainText(Status.InternalServerError, s"Server attempted to return invalid status code '${statusCode}'")
-              .value
-          case Right(status) =>
-            val schema = schemasByStatusCode.get(statusAndBody.tag)
-            val body = statusAndBody.value
-            encodeResponse(status, schema, body)
+    parseStatusOrServerError(statusAndBody.label)
+      .map: status =>
+        val schema = schemasByStatusCode.get(statusAndBody.tag)
+        val body = statusAndBody.value
+        encodeResponse(status, schema, body)
+      .merge
 
   private def encodeResponse[B](
     status: http4s.Status,
@@ -319,4 +320,19 @@ object Http4sServerBuilder {
             Response.json(status, jsonStr).value
           case BodySchema.Empty =>
             throw AssertionError("Impossible: Unit =:= DiscriminatedUnion[...]")
+
+  private def parseStatusOrServerError(codeStr: String): Either[http4s.Response[fs2.Pure], http4s.Status] =
+    Try { Integer.parseInt(codeStr) } match
+      case Failure(e) =>
+        Left:
+          Response
+            .plainText(Status.InternalServerError, s"Server attempted to return non-integral status code '${codeStr}'")
+            .value
+      case Success(statusCode) =>
+        http4s.Status
+          .fromInt(statusCode)
+          .leftMap: _ =>
+            Response
+              .plainText(Status.InternalServerError, s"Server attempted to return invalid status code '${statusCode}'")
+              .value
 }
