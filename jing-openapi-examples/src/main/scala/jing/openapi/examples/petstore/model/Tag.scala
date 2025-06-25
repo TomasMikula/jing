@@ -9,8 +9,9 @@ final case class Tag(
 )
 
 object Tag {
-  def fromApi(tag: Value[api.schemas.Tag]): Tag =
-    ???
+  def idFromApi(tag: Value[api.schemas.Tag]): Option[Long] =
+    val api.schemas.Tag(obj) = tag
+    obj.props["id"].map(_.longValue)
 
   def toApi(tag: Tag): Value[api.schemas.Tag] =
     ???

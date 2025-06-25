@@ -28,11 +28,13 @@ object InMemoryPetstore {
   case class PetstoreState(
     nextId: Long,
     pets: Map[Long, model.Pet],
+    categories: Map[Long, model.Category],
+    tags: Map[Long, model.Tag],
   )
 
   object PetstoreState {
     def empty: PetstoreState =
-      PetstoreState(1L, Map.empty)
+      PetstoreState(1L, Map.empty, Map.empty, Map.empty)
   }
 
   val nextId: State[PetstoreState, Long] =
@@ -45,18 +47,28 @@ object InMemoryPetstore {
     ???
 
   def getCategory(categoryId: Long): StateT[Either[String, _], PetstoreState, model.Category] =
-    ???
+    StateT.inspectF:
+      _.categories
+        .get(categoryId)
+        .toRight(left = s"Category id=$categoryId does not exist.")
+
+  def getTag(tagId: Long): StateT[Either[String, _], PetstoreState, model.Tag] =
+    StateT.inspectF:
+      _.tags
+        .get(tagId)
+        .toRight(left = s"Tag id=$tagId does not exist.")
 
   def createPet(petIn: model.PetIn): StateT[Either[String, _], PetstoreState, model.Pet] =
     for {
       categoryOpt <- petIn.categoryId.traverse(getCategory)
+      tags <- petIn.tagIds.traverse(getTag)
       id <- nextIdT
       pet = model.Pet(
         id = id,
         name = petIn.name,
         category = categoryOpt,
         photoUrls = petIn.photoUrls,
-        tags = petIn.tags,
+        tags = tags,
         status = petIn.status.getOrElse(model.PetStatus.Available),
       )
       _ <- setPetT(pet)

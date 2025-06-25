@@ -8,7 +8,7 @@ final case class PetIn(
   name: String,
   categoryId: Option[Long],
   photoUrls: IArray[String],
-  tags: Option[IArray[Tag]],
+  tagIds: List[Long],
   status: Option[PetStatus],
 )
 
@@ -17,13 +17,19 @@ object PetIn {
     val api.schemas.Pet(obj) = p
     for
       categoryIdOpt <- obj.props["category"].traverse:
-        Category.idFromApi(_).toRight("missing category id")
+        Category.idFromApi(_).toRight("missing category.id")
+      tagIds <- obj.props["tags"]
+        .map(_.asArray.toList)
+        .getOrElse(Nil)
+        .zipWithIndex
+        .traverse: (tag, i) =>
+          Tag.idFromApi(tag).toRight(s"missing tags[$i].id")
     yield
       PetIn(
         name       = obj.props["name"].stringValue,
         categoryId = categoryIdOpt,
         photoUrls  = obj.props["photoUrls"].asArray.map(_.stringValue),
-        tags       = obj.props["tags"].map(_.asArray.map(Tag.fromApi)),
+        tagIds     = tagIds,
         status     = obj.props["status"].map(PetStatus.fromApi),
       )
 }

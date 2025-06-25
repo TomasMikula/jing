@@ -8,7 +8,7 @@ case class Pet(
   name: String,
   category: Option[Category],
   photoUrls: IArray[String],
-  tags: Option[IArray[Tag]],
+  tags: List[Tag],
   status: PetStatus,
 ) {
   def toApi: Value[api.schemas.Pet] =
@@ -19,7 +19,7 @@ case class Pet(
           .set("name", name)
           .setOpt("category", category.map(Category.toApi))
           .set("photoUrls", Value.arr(photoUrls*))
-          .setOpt("tags", tags.map(ts => Value.arr(ts.map(Tag.toApi))))
+          .set("tags", Value.arr(tags.map(Tag.toApi)*))
           .set("status", status.singletonStringValue)
     )
 }
