@@ -183,14 +183,14 @@ object ModelToScalaAst {
     Quotes,
   ): (Type[T], Expr[ResponseSchema[T]]) =
     x match
-      case rs: ResponseSchema.ByStatusCode[as] =>
+      case rs: ResponseSchema[as] =>
         val (t, e) =
           quotedNamedProduct(
-            rs.items,
+            rs.schemasByStatusCode,
             [A] => bs => quotedBodySchema(bs),
           )
         given Type[as] = t
-        (Type.of[as], '{ ResponseSchema.ByStatusCode($e) })
+        (Type.of[as], '{ ResponseSchema($e) })
 
   def quotedBodySchema[T](
     s: BodySchema[T],

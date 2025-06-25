@@ -892,7 +892,7 @@ private[openapi] object SwaggerToScalaAst {
         given Type[x.T] = tp
         Indeed((
           Type.of[x.T],
-          bs.map { bs => '{ResponseSchema.ByStatusCode($bs) } }
+          bs.map { bs => '{ResponseSchema($bs) } }
         ))
     }
 

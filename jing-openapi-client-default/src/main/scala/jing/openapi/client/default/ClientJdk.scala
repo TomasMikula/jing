@@ -142,7 +142,7 @@ class ClientJdk extends Client {
   ): Result[Value.Lenient[DiscriminatedUnion[T]]] = {
     val code = response.statusCode()
     schema.match
-      case ResponseSchema.ByStatusCode(items) =>
+      case ResponseSchema(items) =>
         items.getOption(code.toString) match
           case Some(Indeed((i, s))) =>
             parseBody(code, s, response)
