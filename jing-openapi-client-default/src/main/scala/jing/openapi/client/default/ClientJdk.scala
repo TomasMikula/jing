@@ -1,11 +1,14 @@
 package jing.openapi.client.default
 
 import io.circe.{Json, ParsingFailure}
+import jing.openapi.client.default.Response as Resp
 import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.client.{Client, HttpThunk}
 import jing.openapi.model.{::, :?, Arr, Body, BodySchema, DiscriminatedUnion, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueMotif, ||}
 import libretto.lambda.util.Exists.Indeed
+import libretto.lambda.util.TypeEq
+import libretto.lambda.util.TypeEq.Refl
 
 import java.io.IOException
 import java.net.http.HttpRequest.{BodyPublisher, BodyPublishers}
@@ -15,7 +18,7 @@ import scala.jdk.OptionConverters.*
 
 class ClientJdk extends Client {
 
-  override type Response[T] = Result[Value.Lenient[DiscriminatedUnion[T]]]
+  override type Response[T] = Result[Resp[T]]
 
   override type SupportedMimeType = "application/json"
 
@@ -139,14 +142,19 @@ class ClientJdk extends Client {
   private def parseResponse[T](
     schema: ResponseSchema[T],
     response: HttpResponse[String],
-  ): Result[Value.Lenient[DiscriminatedUnion[T]]] = {
+  ): Result[Resp[T]] = {
     val code = response.statusCode()
     schema.match
       case ResponseSchema(items) =>
         items.getOption(code.toString) match
           case Some(Indeed((i, s))) =>
             parseBody(code, s, response)
-              .map(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), _))
+              .map:
+                case Right(value) =>
+                  Resp.Accurate:
+                    Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), value)
+                case Left((TypeEq(Refl()), extraneousBody)) =>
+                  Resp.WithExtraneousBody(IsCaseOf.fromMember(i), extraneousBody)
           case None =>
             Result.unexpectedStatusCode(code, response.body())
   }
@@ -155,17 +163,23 @@ class ClientJdk extends Client {
     statusCode: Int,
     schema: BodySchema[T],
     response: HttpResponse[String],
-  ): Result[Value.Lenient[T]] =
+  ): Result[Either[(T =:= Unit, Resp.StringBody), Value.Lenient[T]]] =
     schema match
       case BodySchema.Empty =>
-        Result.Succeeded(Value.Lenient.unit)
+        Result.Succeeded:
+          response.body() match
+            case body if body.isEmpty =>
+              Right(Value.Lenient.unit)
+            case body =>
+              val ct = response.headers().firstValue("Content-Type").toScala
+              Left((summon, Resp.StringBody(ct, body)))
       case BodySchema.Variants(byMediaType) =>
         response.headers().firstValue("Content-Type").toScala match
           case Some(contentType) =>
             byMediaType.getOption(contentType) match
               case Some(Indeed((i, s))) =>
                 parseBody(statusCode, s, contentType, response.body())
-                  .map(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), _))
+                  .map(b => Right(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), b)))
               case None =>
                 Result.unexpectedContentType(statusCode, contentType, response.body())
           case None =>

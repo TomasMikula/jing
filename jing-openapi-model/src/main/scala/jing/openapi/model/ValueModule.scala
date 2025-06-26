@@ -305,7 +305,7 @@ trait ValueModule[Value[_]] {
       val v = asDiscriminatedUnion
       h[v.Label, v.ValueType](v.discriminator, v.value)
 
-    def discriminator: DiscriminatorOf[Cases] =
+    def discriminator: DiscriminatorOf[Cases] & String =
       asDiscriminatedUnion.discriminatorValue
 
     def assertCase: AssertCase[Cases, DiscriminatorOf[Cases]] =
