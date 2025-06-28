@@ -196,6 +196,9 @@ trait ValueModule[Value[_]] {
 
     def extendEnum[A]: Value[Enum[Base, Cases || A]] =
       fromMotif(toMotifEnum(value).extendEnum)
+
+    def scalaValue: ScalaUnionOf[Cases] =
+      toMotifEnum(value).scalaValue
   }
 
   extension [T](value: Value[Arr[T]]) {

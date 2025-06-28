@@ -43,7 +43,7 @@ private[openapi] object ProtoSchema {
     enm(SchemaMotif.B(), ScalaValueOf.bool, value, values*)
 
   private def enm[X, Base](
-    s: SchemaMotif.Primitive[[t] =>> ProtoSchema, Base],
+    s: SchemaMotif.BasicPrimitive[[t] =>> ProtoSchema, Base],
     f: (x: X) => ScalaValueOf[x.type, Base],
     x0: X,
     xs: X*

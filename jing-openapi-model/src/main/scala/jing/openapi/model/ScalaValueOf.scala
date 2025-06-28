@@ -5,6 +5,32 @@ import libretto.lambda.util.SingletonType
 sealed trait ScalaValueOf[V, T] {
   import ScalaValueOf.*
 
+  def get: V & ScalaReprOf[T] =
+    this match
+      case I32(value) => value.value
+      case I64(value) => value.value
+      case S(value) => value.value
+      case B(value) => value.value
+
+  def contains(that: ScalaReprOf[T]): Option[ScalaValueOf[that.type & V, T]] =
+    this match
+      case I32(value) =>
+        value.value match
+          case x: that.type => Some(I32(SingletonType(x)))
+          case _ => None
+      case I64(value) =>
+        value.value match
+          case x: that.type => Some(I64(SingletonType(x)))
+          case _ => None
+      case S(value) =>
+        value.value match
+          case x: that.type => Some(S(SingletonType(x)))
+          case _ => None
+      case B(value) =>
+        value.value match
+          case x: that.type => Some(B(SingletonType(x)))
+          case _ => None
+
   def show: String =
     this match
       case I32(value) => (value.value: Int).toString

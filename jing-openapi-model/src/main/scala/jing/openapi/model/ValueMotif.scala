@@ -341,6 +341,11 @@ object ValueMotif {
       value match { case BoolValue(b) => b }
 
   extension [F[_], Base, Cases](value: ValueMotif[F, Enum[Base, Cases]]) {
+    def scalaValue: ScalaUnionOf[Cases] =
+      value match
+        case EnumValue(value) =>
+          value.get
+
     def widenEnum: ValueMotif[F, Base] =
       value match
         case ValueMotif.EnumValue(value) =>

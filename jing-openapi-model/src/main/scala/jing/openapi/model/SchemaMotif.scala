@@ -39,15 +39,57 @@ object SchemaMotif {
   sealed trait Primitive[F[_], T] extends SchemaMotif[F, T] {
     def recast[G[_]]: Primitive[G, T] = this.asInstanceOf
   }
-  case class I32[F[_]]() extends Primitive[F, Int32]
-  case class I64[F[_]]() extends Primitive[F, Int64]
-  case class S[F[_]]() extends Primitive[F, Str]
-  case class B[F[_]]() extends Primitive[F, Bool]
+
+  sealed trait BasicPrimitive[F[_], T] extends Primitive[F, T] {
+    def makeValue(v: ScalaReprOf[T]): Value[T] =
+      this match
+        case I32() => Value.int32(v)
+        case I64() => Value.int64(v)
+        case S() => Value.str(v)
+        case B() => Value.bool(v)
+  }
+
+  case class I32[F[_]]() extends BasicPrimitive[F, Int32]
+  case class I64[F[_]]() extends BasicPrimitive[F, Int64]
+  case class S[F[_]]() extends BasicPrimitive[F, Str]
+  case class B[F[_]]() extends BasicPrimitive[F, Bool]
 
   case class Enumeration[F[_], T, Cases](
-    baseType: Primitive[F, T],
+    baseType: BasicPrimitive[F, T],
     cases: Items1.Product[||, Void, ScalaValueOf[_, T], Cases],
-  ) extends Primitive[F, Enum[T, Cases]]
+  ) extends Primitive[F, Enum[T, Cases]] {
+
+    def find(a: ScalaReprOf[T]): Option[ScalaValueOf[? <: a.type & ScalaUnionOf[Cases], T]] = {
+
+      def go[Cases](
+        cases: Items1.Product[||, Void, ScalaValueOf[_, T], Cases],
+      ): Option[ScalaValueOf[? <: a.type & ScalaUnionOf[Cases], T]] =
+        import libretto.lambda.Items1.Product.{Single, Snoc}
+
+        cases match
+          case s: Single[sep, nil, f, c] =>
+            val ev: c =:= ScalaUnionOf[Cases] =
+              summon[(Void || c) =:= Cases].liftCo[ScalaUnionOf]
+            ev.substituteCo[[x] =>> Option[ScalaValueOf[a.type & x, T]]]:
+              s.value.contains(a)
+          case s: Snoc[sep, nil, f, init, last] =>
+            val ev: last <:< ScalaUnionOf[Cases] =
+              summon[(init || last) =:= Cases].liftCo[ScalaUnionOf]
+
+            ev.substituteCo[[x] =>> Option[ScalaValueOf[? <: a.type & x, T]]]:
+              s.last.contains(a)
+            .orElse:
+              val ev2: ScalaUnionOf[init] <:< ScalaUnionOf[Cases] =
+                summon[(init || last) =:= Cases].liftCo[ScalaUnionOf]
+              ev2.substituteCo[[x] =>> Option[ScalaValueOf[? <: a.type & x, T]]]:
+                go[init](s.init)
+
+      go(cases)
+    }
+
+    def scalaValues: List[ScalaReprOf[T]] =
+      cases.toList([a] => (va: ScalaValueOf[a, T]) => va.get)
+  }
 
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 

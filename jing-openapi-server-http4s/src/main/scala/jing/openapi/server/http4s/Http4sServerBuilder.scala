@@ -5,10 +5,11 @@ import cats.effect.IO
 import cats.syntax.all.*
 import cats.{Applicative, Functor, Monad}
 import fs2.{Chunk, RaiseThrowable, Stream}
+import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
-import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, Schema, Value, ValueCodecJson, ||}
+import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, ScalaReprOf, Schema, SchemaMotif, Value, ValueCodecJson, ||}
 import libretto.lambda.Items1Named
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.Validated
@@ -78,6 +79,7 @@ object Http4sServerBuilder {
 
   private sealed trait ParseError
   private case class BadRequest(detail: String) extends ParseError
+  private case class NotFound(detail: String) extends ParseError
   private case class UnsupportedContentType(contentType: MediaType) extends ParseError
 
   private def parseRequest[I, F[_]](
@@ -141,7 +143,7 @@ object Http4sServerBuilder {
   private def route[Ps](
     paramSchema: RequestSchema.Params.Proper[Ps],
     uri: Uri,
-  ): Option[Either[Nothing, Value[Obj[Ps]]]] = {
+  ): Option[Either[ParseError, Value[Obj[Ps]]]] = {
     val Uri(_, _, path, query, _) = uri
     route(paramSchema, path.renderString, query.multiParams).value match
       case None =>
@@ -167,7 +169,7 @@ object Http4sServerBuilder {
     query: Map[String, Seq[String]],
   ): EitherT[
     Option,
-    Nothing,
+    ParseError,
     ( result: Value[Obj[Ps]]
     , leftovers: (path: Option[String], query: Map[String, Seq[String]])
     ),
@@ -199,7 +201,14 @@ object Http4sServerBuilder {
                       initRes.extendOpt(ps.pName, None)
                   EitherT.pure((result = res, leftovers = (None, q)))
                 case Some(values) =>
-                  ???
+                  EitherT.fromEither(
+                    parseQueryParam(ps.pName.value, ps.pSchema, values.toList)
+                      .map: v =>
+                        (
+                          result = initRes.extendOpt(ps.pName, Some(v)),
+                          leftovers = (None, q.removed(ps.pName.value))
+                        )
+                  )
             case (Some(p), _) =>
               // leftover path when there's no more path to match => return no match
               EitherT.liftF(None)
@@ -211,7 +220,7 @@ object Http4sServerBuilder {
     path: String,
   ): EitherT[
     Option,
-    Nothing,
+    ParseError,
     ( result: Value[Obj[Ps]]
     , leftoverPath: Option[String]
     ),
@@ -232,18 +241,109 @@ object Http4sServerBuilder {
               EitherT.liftF(None)
             case Some(leftover) =>
               EitherT
-                .fromEither(parseParam(pSchema, leftover))
-                .flatMap { case (pValue, leftoverOpt) =>
-                  ???
+                .fromEither(parsePathParam(pSchema, leftover))
+                .semiflatMap { case (pValue, leftover) =>
+                  if (leftover.startsWith(suffix))
+                    val leftoverOpt = if leftover.length == suffix.length then None else Some(leftover.drop(suffix.length))
+                    Some((prefixRes.extend(pName, pValue), leftoverOpt))
+                  else
+                    None
                 }
         }
   }
 
-  private def parseParam[T](
+  private def parsePathParam[T](
     pSchema: RequestSchema.Path.ParamSchema[T],
     path: String,
-  ): Either[Nothing, (result: Value[T], leftoverPath: Option[String])] =
-    ???
+  ): Either[ParseError, (result: Value[T], leftoverPath: String)] =
+    import RequestSchema.Path.ParamSchema.{Explode, Format, Primitive, Style, Unsupported}
+
+    println(s"path = $path")
+
+    // we require parameters to be terminated by '/' or be at the end of the path
+    val (paramStr, leftover) =
+      path.indexOf('/') match
+        case -1 => (path, "")
+        case i  => path.splitAt(i)
+
+    println(s"param = $paramStr, leftover = $leftover")
+
+    pSchema match
+      case Primitive(valueSchema, format) =>
+        format match
+          case Format(Style.Simple, Explode.False) =>
+            parsePrimitive(valueSchema, paramStr)
+              .map((_, leftover))
+      case Unsupported(msg) =>
+        ??? // TODO: report as unsupported by JING
+
+  private def parseQueryParam[T](
+    name: String,
+    schema: QueryParamSchema[T],
+    values: List[String],
+  ): Either[ParseError, Value[T]] = {
+    import QueryParamSchema.{Explode, Format, Style}
+
+    schema match
+      case QueryParamSchema.Primitive(valueSchema, format) =>
+        values match
+          case Nil =>
+            Left(BadRequest(s"Query parameter '$name' must have a value, but none was given."))
+          case List(head) =>
+            format match
+              case Format(Style.Form, Explode.True) =>
+                parsePrimitive(valueSchema, head)
+          case many =>
+            Left(BadRequest(s"Expected a single query parameter '$name', got ${values.size}."))
+      case QueryParamSchema.PrimitiveArray(elemSchema, format) =>
+        format match
+          case Format(Style.Form, Explode.True) =>
+            values
+              .traverse(parsePrimitive(elemSchema, _))
+              .map(Value.arr(_*))
+      case QueryParamSchema.Unsupported(msg) =>
+        ???
+  }
+
+  private def parsePrimitive[T](
+    schema: SchemaMotif.Primitive[Nothing, T],
+    str: String,
+  ): Either[ParseError, Value[T]] =
+    import jing.openapi.model.SchemaMotif.{BasicPrimitive, Enumeration}
+
+    schema match
+      case schema: BasicPrimitive[Nothing, T] =>
+        parseBasicPrimitive(schema, str)
+          .map(schema.makeValue(_))
+      case enm @ Enumeration(baseType, cases) =>
+        parseBasicPrimitive(baseType, str)
+          .flatMap { v =>
+            enm.find(v) match
+              case Some(w) => Right(Value.enm(w))
+              case None => Left(NotFound(s"'$str' is not one of ${enm.scalaValues.mkString(", ")}"))
+          }
+
+  private def parseBasicPrimitive[T](
+    schema: SchemaMotif.BasicPrimitive[Nothing, T],
+    str: String,
+  ): Either[ParseError, ScalaReprOf[T]] =
+    import jing.openapi.model.SchemaMotif.{B, Enumeration, I32, I64, S}
+    schema match
+      case I32() =>
+        Try { java.lang.Integer.parseInt(str) } match
+          case Success(value) => Right(value)
+          case Failure(e)     => Left(NotFound(s"'$str' is not a valid 32-bit integer"))
+      case I64() =>
+        Try { java.lang.Long.parseLong(str) } match
+          case Success(value) => Right(value)
+          case Failure(e)     => Left(NotFound(s"'$str' is not a valid 64-bit integer"))
+      case S() =>
+        // TODO: url-decode
+        Right(str)
+      case B() =>
+        Try { java.lang.Boolean.parseBoolean(str) } match
+          case Success(value) => Right(value)
+          case Failure(e)     => Left(NotFound(s"'$str' is not a valid boolean value"))
 
   private def parseAsJson[B, F[_]](
     schema: Schema[B],

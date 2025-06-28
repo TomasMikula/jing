@@ -334,12 +334,12 @@ object ModelToScalaAst {
         (tp, '{ B($exp) })
   }
 
-  def quotedSchemaMotifPrimitive[F[_], T, G[_]](
-    s: SchemaMotif.Primitive[F, T],
+  def quotedSchemaMotifBasicPrimitive[F[_], T, G[_]](
+    s: SchemaMotif.BasicPrimitive[F, T],
   )(using
     Quotes,
     Type[G],
-  ): (Type[T], Expr[SchemaMotif.Primitive[G, T]]) = {
+  ): (Type[T], Expr[SchemaMotif.BasicPrimitive[G, T]]) = {
     import jing.openapi.model.SchemaMotif.*
 
     s match
@@ -347,8 +347,21 @@ object ModelToScalaAst {
       case I64() => (Type.of[Int64], '{ I64() })
       case S()   => (Type.of[Str], '{ S() })
       case B()   => (Type.of[Bool], '{ B() })
+  }
+
+  def quotedSchemaMotifPrimitive[F[_], T, G[_]](
+    s: SchemaMotif.Primitive[F, T],
+  )(using
+    Quotes,
+    Type[G],
+  ): (Type[T], Expr[SchemaMotif.Primitive[G, T]]) = {
+    import jing.openapi.model.SchemaMotif.{BasicPrimitive, Enumeration}
+
+    s match
+      case b: BasicPrimitive[F, T] =>
+        quotedSchemaMotifBasicPrimitive(b)
       case e: Enumeration[F, base, cases] =>
-        quotedSchemaMotifPrimitive(e.baseType) match
+        quotedSchemaMotifBasicPrimitive(e.baseType) match
           case (tb, b) =>
             given Type[base] = tb
             quotedProduct(

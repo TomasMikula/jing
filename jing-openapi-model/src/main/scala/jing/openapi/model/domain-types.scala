@@ -16,6 +16,13 @@ sealed trait DiscriminatedUnion[Variants]
 sealed trait Enum[Base, Cases]
 sealed trait Oops[Reason]
 
+type ScalaReprOf[T] =
+  T match
+    case Int32 => Int
+    case Int64 => Long
+    case Str => String
+    case Bool => Boolean
+
 // workaround of https://github.com/scala/scala3/issues/22943
 type LabelOf[KV] = KV match
   case k :: v => k
