@@ -43,7 +43,7 @@ object PetstoreServerHttp4s extends IOApp {
 
   def routes(store: InMemoryPetstore): Routes[IO] =
     serverBuilder
-      .handleNext["/pet_POST"] { in =>
+      .handle("/pet_POST"): in =>
         // val body = in.props.body // causes ClassCastException: https://github.com/scala/scala3/issues/23415
         val body = in.props["body"]
         val pet = body.discriminator match
@@ -63,7 +63,34 @@ object PetstoreServerHttp4s extends IOApp {
                 _
                   .status("200")
                   .body["application/json"](pet)
-      }
+      .handle("/pet_PUT")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/findByStatus_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/findByTags_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/{petId}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/{petId}_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/{petId}_DELETE")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/{petId}/uploadImage_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/store/inventory_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/store/order_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/store/order/{orderId}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/store/order/{orderId}_DELETE")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user/createWithList_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user/login_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user/logout_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user/{username}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user/{username}_PUT")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/user/{username}_DELETE")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .end
+
+
+  /* Keeping alternative ways to define request handlers around,
+   * waiting to see whichever becomes more ergonomic first,
+   * when the linked Scala/Metals issues are resolved. */
+
+  def routes_alternative_endpointNamesAsTypes: Routes[IO] =
+    serverBuilder
+      .handleNext["/pet_POST"](_ => IO(Response.plainText(Status.NotImplemented)))
       .handleNext["/pet_PUT"](_ => IO(Response.plainText(Status.NotImplemented)))
       .handleNext["/pet/findByStatus_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
       .handleNext["/pet/findByTags_GET"](_ => IO(Response.plainText(Status.NotImplemented)))
@@ -84,29 +111,11 @@ object PetstoreServerHttp4s extends IOApp {
       .handleNext["/user/{username}_DELETE"](_ => IO(Response.plainText(Status.NotImplemented)))
       .end
 
-  def routes_alternative_endpointNamesAsValues: Routes[IO] =
-    serverBuilder
-      .handle("/pet_POST")(???)
-      .handle("/pet_PUT")(???)
-      .handle("/pet/findByStatus_GET")(???)
-      .handle("/pet/findByTags_GET")(???)
-      .handle("/pet/{petId}_GET")(???)
-      .handle("/pet/{petId}_POST")(???)
-      .handle("/pet/{petId}_DELETE")(???)
-      .handle("/pet/{petId}/uploadImage_POST")(???)
-      .handle("/store/inventory_GET")(???)
-      .handle("/store/order_POST")(???)
-      .handle("/store/order/{orderId}_GET")(???)
-      .handle("/store/order/{orderId}_DELETE")(???)
-      .handle("/user_POST")(???)
-      .handle("/user/createWithList_POST")(???)
-      .handle("/user/login_GET")(???)
-      .handle("/user/logout_GET")(???)
-      .handle("/user/{username}_GET")(???)
-      .handle("/user/{username}_PUT")(???)
-      .handle("/user/{username}_DELETE")(???)
-      .end
-
+  /** Less indirection (i.e. instantiates fewer intermediate classes) than `handleNext` in [[routes_alternative_endpointNamesAsTypes]],
+   * but additionally suffers from
+   *
+   *  - https://github.com/scalameta/metals/issues/7556
+   */
   def routes_alternative_direct: Routes[IO] =
     serverBuilder
       .next["/pet_POST"](???)
@@ -130,7 +139,12 @@ object PetstoreServerHttp4s extends IOApp {
       .next["/user/{username}_DELETE"](???)
       .end
 
-
+  /** Less indirection (i.e. instantiates fewer intermediate classes) than `handle` in [[routes]],
+   * but additionally suffers from
+   * https://github.com/scalameta/metals/issues/7556
+   * and equally suffers from
+   * https://github.com/scalameta/metals/issues/7564
+   */
   def routes_alternative_directEndpointNamesAsValues: Routes[IO] =
     serverBuilder
       .on("/pet_POST")(???)
@@ -154,6 +168,10 @@ object PetstoreServerHttp4s extends IOApp {
       .on("/user/{username}_DELETE")(???)
       .end
 
+  /** Accepts request handlers as a single named tuple.
+   *
+   * There are no IDE hints provided by Metals for _individual_ tuple elements.
+   */
   def routes_alternative_namedTuple: Routes[IO] =
     serverBuilder.withRequestHandlersTuple((
       `/pet_POST` = ???,
@@ -177,6 +195,13 @@ object PetstoreServerHttp4s extends IOApp {
       `/user/{username}_DELETE` = ???,
     ))
 
+  /** Accepts request handlers as individual, accordingly named _function_ arguments.
+   *
+   * - Not yet working for more than 22 endpoints, due to https://github.com/scala/scala3/issues/23313.
+   * - Not getting IDE hints for individual parameters, due to https://github.com/scalameta/metals/issues/7532.
+   * - Relies on internal compiler APIs to synthesize the function type of arbitrary arity.
+   *   (https://github.com/scala/scala3/discussions/23326)
+   */
   def routes_alternative_nAryFunction: Routes[IO] =
     serverBuilder.withRequestHandlers(
       `/pet_POST` = ???,
@@ -200,6 +225,12 @@ object PetstoreServerHttp4s extends IOApp {
       `/user/{username}_DELETE` = ???,
     )
 
+
+  /** Accepts request handlers as individual, accordingly named _method_ arguments.
+   *
+    * - Not yet working for more than 22 endpoints, due to https://github.com/scala/scala3/issues/23313.
+    * - Not getting IDE hints for individual parameters, due to https://github.com/scalameta/metals/issues/7537.
+    */
   def routes_alternative_nAryMethod: Routes[IO] =
     serverBuilder.implementRequestHandlers(
       `/pet_POST` = ???,

@@ -127,6 +127,9 @@ object ServerBuilder {
 
       /** Handle the first endpoint using the given request handler.
        *
+       * The IDE experience suffers from
+       *  - https://github.com/scalameta/metals/issues/7556
+       *
        * @tparam EndpointName allows to optionally spell out the endpoint name.
        */
       def next[EndpointName <: Name](
@@ -137,7 +140,12 @@ object ServerBuilder {
             EndpointHandler(e, handler)
           HandlerAccumulator(ph.build, h :: Nil, es)
 
-      /** Handle the first endpoint using the given request handler. */
+      /** Handle the first endpoint using the given request handler.
+       *
+       * The IDE experience suffers from
+       *  - https://github.com/scalameta/metals/issues/7556
+       *  - https://github.com/scalameta/metals/issues/7564
+       */
       def on(endpointName: Name)(
         handler: ReqHandler[In, Out],
       ): HandlerAccumulator[ReqHandler, ServerDefn, Tail] =
