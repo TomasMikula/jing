@@ -12,7 +12,7 @@ import jing.openapi.model.server.ServerBuilder.EndpointHandler
 import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, ScalaReprOf, Schema, SchemaMotif, Value, ValueCodecJson, ||}
 import libretto.lambda.Items1Named
 import libretto.lambda.util.Exists.Indeed
-import libretto.lambda.util.Validated
+import libretto.lambda.util.{SingletonType, Validated}
 import org.http4s
 import org.http4s.{Headers, HttpRoutes, MediaType, Request, Status, Uri}
 
@@ -45,20 +45,23 @@ class Http4sServerBuilder[F[_]](using
       OptionT(parseRequest(h.endpoint, req)).flatMap:
         case Left(error) =>
           // TODO: best effort to respect Accept request header
-          error match
-            case BadRequest(detail) =>
-              OptionT.some(http4s.Response(
-                Status.BadRequest,
-                headers = Headers("Content-Type" -> "text/plain"),
-                body = Stream.chunk(Chunk.byteBuffer(UTF_8.encode(detail))),
-              ))
-            case UnsupportedContentType(mediaType) =>
-              // TODO: return BadRequest if the given media type is not permitted by the spec
-              OptionT.some(http4s.Response(
-                Status.NotImplemented,
-                headers = Headers("Content-Type" -> "text/plain"),
-                body = Stream.chunk(Chunk.byteBuffer(UTF_8.encode(s"Unsupported Content-Type ${mediaType.toString}. Expected application/json"))),
-              ))
+          val (status, bodyStr) =
+            error match
+              case BadRequest(detail) =>
+                Status.BadRequest -> detail
+              case UnsupportedContentType(mediaType) =>
+                // TODO: return BadRequest if the given media type is not permitted by the spec
+                Status.NotImplemented -> s"Unsupported Content-Type ${mediaType.toString}. Expected application/json"
+              case NotFound(detail) =>
+                Status.NotFound -> detail
+              case UnsupportedByJing(detail) =>
+                Status.NotImplemented -> detail
+
+          OptionT.some(http4s.Response(
+            status,
+            headers = Headers("Content-Type" -> "text/plain"),
+            body = Stream.chunk(Chunk.byteBuffer(UTF_8.encode(bodyStr))),
+          ))
 
         case Right(inValue) =>
           OptionT.liftF(
@@ -81,6 +84,7 @@ object Http4sServerBuilder {
   private case class BadRequest(detail: String) extends ParseError
   private case class NotFound(detail: String) extends ParseError
   private case class UnsupportedContentType(contentType: MediaType) extends ParseError
+  private case class UnsupportedByJing(detail: String) extends ParseError
 
   private def parseRequest[I, F[_]](
     ep: HttpEndpoint[I, ?],
@@ -160,7 +164,7 @@ object Http4sServerBuilder {
               Some(Right(res))
             else
               // treat extraneous query params as bad request
-              ???
+              Some(Left(BadRequest(s"Unknown query parameter(s) ${query.keys.mkString("'", "', '", "'.")}")))
   }
 
   private def route[Ps](
@@ -188,32 +192,56 @@ object Http4sServerBuilder {
         route(p, path)
           .map { case (res, leftoverPath) => (res, (leftoverPath, query)) }
       case WithQueryParam(init, pName, pSchema) =>
-        ???
-      case ps: WithQueryParamOpt[init, k, v] =>
-        route(ps.init, path, query).flatMap { case (result = initRes, leftovers = remaining) =>
-          val ev = summon[Ps =:= (init || k :? v)]
-          remaining match
-            case (None, q) =>
-              q.get(ps.pName.value) match
-                case None =>
-                  val res: Value[Obj[Ps]] =
-                    ev.substituteContra[[x] =>> Value[Obj[x]]]:
-                      initRes.extendOpt(ps.pName, None)
-                  EitherT.pure((result = res, leftovers = (None, q)))
-                case Some(values) =>
-                  EitherT.fromEither(
-                    parseQueryParam(ps.pName.value, ps.pSchema, values.toList)
-                      .map: v =>
-                        (
-                          result = initRes.extendOpt(ps.pName, Some(v)),
-                          leftovers = (None, q.removed(ps.pName.value))
-                        )
-                  )
-            case (Some(p), _) =>
-              // leftover path when there's no more path to match => return no match
-              EitherT.liftF(None)
-        }
+        routeWithQueryParam(init, pName, pSchema, path, query)
+          .subflatMap { case (resInit = resInit, resLast = resParam, leftovers = remaining) =>
+            resParam match
+              case None => Left(BadRequest(s"Missing required query parameter '${pName.value}'"))
+              case Some(v) => Right((result = resInit.extend(pName, v), leftovers = remaining))
+          }
+      case WithQueryParamOpt(init, pName, pSchema) =>
+        routeWithQueryParam(init, pName, pSchema, path, query)
+          .map { case (resInit = resInit, resLast = resParam, leftovers = remaining) =>
+            (result = resInit.extendOpt(pName, resParam), leftovers = remaining)
+          }
   }
+
+  private def routeWithQueryParam[Init, K <: String, V](
+    initSchema: RequestSchema.Params[Init],
+    paramName: SingletonType[K],
+    paramSchema: RequestSchema.Params.QueryParamSchema[V],
+    path: String,
+    query: Map[String, Seq[String]],
+  ): EitherT[
+    Option,
+    ParseError,
+    ( resInit: Value[Obj[Init]]
+    , resLast: Option[Value[V]]
+    , leftovers: (path: Option[String], query: Map[String, Seq[String]])
+    )
+  ] =
+    route(initSchema, path, query)
+      .flatMap { case (result = initRes, leftovers = remaining) =>
+        remaining match
+          case (None, q) =>
+            q.get(paramName.value) match
+              case None =>
+                EitherT.pure:
+                  ( resInit = initRes
+                  , resLast = None
+                  , leftovers = (None, q)
+                  )
+              case Some(values) =>
+                EitherT.fromEither:
+                  parseQueryParam(paramName.value, paramSchema, values.toList)
+                    .map: v =>
+                      ( resInit = initRes
+                      , resLast = Some(v)
+                      , leftovers = (None, q.removed(paramName.value))
+                      )
+          case (Some(p), _) =>
+            // leftover path when there's no more path to match => return no match
+            EitherT.liftF(None)
+      }
 
   private def route[Ps](
     pathSchema: RequestSchema.Path[Ps],
@@ -275,7 +303,7 @@ object Http4sServerBuilder {
             parsePrimitive(valueSchema, paramStr)
               .map((_, leftover))
       case Unsupported(msg) =>
-        ??? // TODO: report as unsupported by JING
+        Left(UnsupportedByJing(msg.value))
 
   private def parseQueryParam[T](
     name: String,
@@ -302,7 +330,7 @@ object Http4sServerBuilder {
               .traverse(parsePrimitive(elemSchema, _))
               .map(Value.arr(_*))
       case QueryParamSchema.Unsupported(msg) =>
-        ???
+        Left(UnsupportedByJing(msg.value))
   }
 
   private def parsePrimitive[T](
@@ -351,7 +379,7 @@ object Http4sServerBuilder {
   )(using
     Functor[F],
     fs2.Compiler[F, F],
-  ): F[Either[BadRequest, Value[B]]] =
+  ): F[Either[ParseError, Value[B]]] =
     for {
       bodyBuilder <- reqBody.compile.fold(StringBuilder()) { _ append _ }
       bodyStr = bodyBuilder.toString
@@ -368,7 +396,15 @@ object Http4sServerBuilder {
                 case Validated.Valid(value) =>
                   Right(value)
                 case Validated.Invalid(errors) =>
-                  ??? // TODO: report as unsupported
+                  Left:
+                    UnsupportedByJing:
+                      errors
+                        .map: e =>
+                          e.details match
+                            case None => e.message.value
+                            case Some(detail) => s"${e.message.value}: $detail"
+                        .toList
+                        .mkString("\n")
 
   private def encodeResponse[O, F[_]](
     ep: HttpEndpoint[?, O],
