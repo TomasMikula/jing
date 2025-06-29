@@ -23,3 +23,8 @@ case class Pet(
           .set("status", status.singletonStringValue)
     )
 }
+
+object Pet {
+  def idFromApi(pet: Value[api.schemas.Pet]): Option[Long] =
+    ???
+}

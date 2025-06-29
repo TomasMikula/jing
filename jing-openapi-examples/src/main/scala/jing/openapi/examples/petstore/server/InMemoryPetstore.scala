@@ -17,6 +17,18 @@ class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
         state
           .modifyState(InMemoryPetstore.createPet(petIn).toState)
           .map(_.map(pet => pet.toApi))
+
+  def updatePet(pet: Value[Pet]): IO[Either[String, Value[Pet]]] =
+    (
+      model.Pet.idFromApi(pet).toRight("Missing pet.id"),
+      model.PetIn.fromApi(pet),
+    ).parTupled match
+      case Left(errMsg) =>
+        Left(errMsg).pure[IO]
+      case Right((petId, petIn)) =>
+        state
+          .modifyState(InMemoryPetstore.updatePet(petId, petIn).toState)
+          .map(_.map(pet => pet.toApi))
 }
 
 object InMemoryPetstore {
@@ -43,8 +55,11 @@ object InMemoryPetstore {
   val nextIdT: StateT[Either[String, _], PetstoreState, Long] =
     StateT.fromState(nextId.map(Right(_)))
 
-  def getCategoryOpt(categoryId: Long): State[PetstoreState, Option[model.Category]] =
-    ???
+  def getPet(petId: Long): StateT[Either[String, _], PetstoreState, model.Pet] =
+    StateT.inspectF:
+      _.pets
+        .get(petId)
+        .toRight(left = s"Pet id=$petId does not exist.")
 
   def getCategory(categoryId: Long): StateT[Either[String, _], PetstoreState, model.Category] =
     StateT.inspectF:
@@ -59,20 +74,36 @@ object InMemoryPetstore {
         .toRight(left = s"Tag id=$tagId does not exist.")
 
   def createPet(petIn: model.PetIn): StateT[Either[String, _], PetstoreState, model.Pet] =
-    for {
+    for
       categoryOpt <- petIn.categoryId.traverse(getCategory)
-      tags <- petIn.tagIds.traverse(getTag)
+      tagsOpt <- petIn.tagIds.traverse(_.traverse(getTag))
       id <- nextIdT
       pet = model.Pet(
         id = id,
         name = petIn.name,
         category = categoryOpt,
         photoUrls = petIn.photoUrls,
-        tags = tags,
+        tags = tagsOpt.getOrElse(Nil),
         status = petIn.status.getOrElse(model.PetStatus.Available),
       )
       _ <- setPetT(pet)
-    } yield pet
+    yield
+      pet
+
+  def updatePet(petId: Long, petIn: model.PetIn): StateT[Either[String, _], PetstoreState, model.Pet] =
+    val model.PetIn(name, categoryIdOpt, photoUrls, tagIds, statusOpt) = petIn
+    for
+      pet0 <- getPet(petId)
+      categoryOpt <- categoryIdOpt.traverse(getCategory)
+      tagsOpt <- tagIds.traverse(_.traverse(getTag))
+    yield
+      pet0.copy(
+        name = petIn.name,
+        category = categoryOpt.orElse(pet0.category),
+        photoUrls = petIn.photoUrls,
+        tags = tagsOpt.getOrElse(pet0.tags),
+        status = statusOpt.getOrElse(pet0.status),
+      )
 
   private def setPet(pet: model.Pet): State[PetstoreState, Unit] =
     State.modify { s => s.copy(pets = s.pets.updated(pet.id, pet)) }

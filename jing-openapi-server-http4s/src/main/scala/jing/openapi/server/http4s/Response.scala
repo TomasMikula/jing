@@ -50,7 +50,7 @@ object Response {
             summon,
           )
 
-      def bodyDespiteSpecUtf8(contentType: `Content-Type`)(body: String): Response.Custom[Nothing, ResponseType] =
+      def bodyDespiteSpec_utf8(contentType: `Content-Type`)(body: String): Response.Custom[Nothing, ResponseType] =
         Response.Custom:
           Http4sServerBuilder // XXX cyclic reference between Http4sServerBuilder and this file
             .parseStatusOrServerError(builder.i.label)
@@ -62,11 +62,11 @@ object Response {
               )
             .merge
 
-      def bodyDespiteSpecPlainText(body: String): Response.Custom[Nothing, ResponseType] =
-        bodyDespiteSpecUtf8(`Content-Type`(MediaType.text.plain, Charset.`UTF-8`))(body)
+      def bodyDespiteSpec_plainText(body: String): Response.Custom[Nothing, ResponseType] =
+        bodyDespiteSpec_utf8(`Content-Type`(MediaType.text.plain, Charset.`UTF-8`))(body)
 
-      def bodyDespiteSpecJson(jsonBody: String): Response.Custom[Nothing, ResponseType] =
-        bodyDespiteSpecUtf8(`Content-Type`(MediaType.application.json, Charset.`UTF-8`))(jsonBody)
+      def bodyDespiteSpec_json(jsonBody: String): Response.Custom[Nothing, ResponseType] =
+        bodyDespiteSpec_utf8(`Content-Type`(MediaType.application.json, Charset.`UTF-8`))(jsonBody)
     }
 
     class PendingMimeType[S <: String, BodyTypesByMimeType, ResponseType, SupportedMimeType](

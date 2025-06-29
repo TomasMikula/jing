@@ -58,7 +58,7 @@ object PetstoreServerHttp4s extends IOApp {
               Response:
                 _
                   .status("400")
-                  .bodyDespiteSpecPlainText(errMsg)
+                  .bodyDespiteSpec_plainText(errMsg)
             case Right(pet) =>
               Response:
                 _
@@ -72,8 +72,19 @@ object PetstoreServerHttp4s extends IOApp {
           .is("application/xml")(identity)
           .is("application/x-www-form-urlencoded")(identity)
           .end
-
-        IO(Response.plainText(Status.NotImplemented))
+        store
+          .updatePet(pet)
+          .map:
+            case Left(errMsg) =>
+              Response:
+                _
+                  .status("400")
+                  .bodyDespiteSpec_plainText(errMsg)
+            case Right(pet) =>
+              Response:
+                _
+                  .status("200")
+                  .body["application/json"](pet)
 
       .handle("/pet/findByStatus_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/findByTags_GET")(_ => IO(Response.plainText(Status.NotImplemented)))

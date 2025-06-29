@@ -8,7 +8,7 @@ final case class PetIn(
   name: String,
   categoryId: Option[Long],
   photoUrls: IArray[String],
-  tagIds: List[Long],
+  tagIds: Option[List[Long]],
   status: Option[PetStatus],
 )
 
@@ -19,11 +19,13 @@ object PetIn {
       categoryIdOpt <- obj.props["category"].traverse:
         Category.idFromApi(_).toRight("missing category.id")
       tagIds <- obj.props["tags"]
-        .map(_.asArray.toList)
-        .getOrElse(Nil)
-        .zipWithIndex
-        .traverse: (tag, i) =>
-          Tag.idFromApi(tag).toRight(s"missing tags[$i].id")
+        .traverse: tags =>
+          tags
+            .asArray
+            .toList
+            .zipWithIndex
+            .traverse: (tag, i) =>
+              Tag.idFromApi(tag).toRight(s"missing tags[$i].id")
     yield
       PetIn(
         name       = obj.props["name"].stringValue,

@@ -43,8 +43,8 @@ object TestApp extends App {
 
   println(postResult.map(_.show))
 
-  // Update the pet's status
-  // -----------------------
+  // Update the pet's name and status
+  // --------------------------------
   // POST request with path and query parameters.
   // Notice uniform treatment of path and query parameters.
   val updateResult =
