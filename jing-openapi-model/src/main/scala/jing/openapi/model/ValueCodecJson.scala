@@ -64,28 +64,30 @@ object ValueCodecJson {
             builder += ']'
           case o: Object[schema, props] =>
             builder += '{'
-            encodeObjectProps(o, value, builder)
+            encodeObjectProps(o.value, value, builder)
             builder += '}'
 
       case u: Schema.Unsupported[s] =>
         value.isNotOops[s]
     }
 
+  import ObjectMotif.Mod
+
   private def encodeObjectProps[Props](
-    schema: SchemaMotif.Object[Schema, Props],
+    schema: ObjectMotif[[_ <: Mod, A] =>> Schema[A], Props],
     value: Value[Obj[Props]],
     builder: StringBuilder,
   ): Boolean =
     schema match
-      case Object.Empty() =>
+      case ObjectMotif.Empty() =>
         false
-      case s: Object.Snoc[schema, init, pname, ptype] =>
+      case s: ObjectMotif.Snoc[schema, init, pname, ptype] =>
         summon[Props =:= (init || pname :: ptype)]
         val (vInit, vLast) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
-        appendProp(s.ptype, s.pname.value, vLast, propsWritten, builder)
+        appendProp(s.pval, s.pname.value, vLast, propsWritten, builder)
         true
-      case s: Object.SnocOpt[schema, init, pname, ptype] =>
+      case s: ObjectMotif.SnocOpt[schema, init, pname, ptype] =>
         summon[Props =:= (init || pname :? ptype)]
         val (vInit, vLastOpt) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
@@ -93,7 +95,7 @@ object ValueCodecJson {
           case None =>
             propsWritten
           case Some(vLast) =>
-            appendProp(s.ptype, s.pname.value, vLast, propsWritten, builder)
+            appendProp(s.pval, s.pname.value, vLast, propsWritten, builder)
             true
 
   private def appendProp[T](
@@ -190,7 +192,7 @@ object ValueCodecJson {
 
           case o: Object[schema, props] =>
             json.asObject match
-              case Some(obj) => decodeObjectLenient(o, jsonLoc, obj)
+              case Some(obj) => decodeObjectLenient(o.asObject.value, jsonLoc, obj)
               case None => SchemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
       case Schema.Unsupported(message) =>
@@ -221,21 +223,21 @@ object ValueCodecJson {
 
   // Note: Ignores any superfluous fields, for better or worse.
   private def decodeObjectLenient[Props](
-    schema: SchemaMotif[Schema, Obj[Props]],
+    schema: ObjectMotif[[_ <: Mod, A] =>> Schema[A], Props],
     jsonLoc: Stack[String],
     json: JsonObject,
   ): DecodeResult[Value.Lenient[Obj[Props]]] =
     schema match
-      case Object.Empty() =>
+      case ObjectMotif.Empty() =>
         Succeeded(Value.Lenient.obj)
-      case Object.Snoc(init, pname, ptype) =>
+      case ObjectMotif.Snoc(init, pname, ptype) =>
         DecodeResult.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropLenient(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
           init.extend(pname, last)
         }
-      case Object.SnocOpt(init, pname, ptype) =>
+      case ObjectMotif.SnocOpt(init, pname, ptype) =>
         DecodeResult.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropOptLenient(pname, ptype, jsonLoc, json),

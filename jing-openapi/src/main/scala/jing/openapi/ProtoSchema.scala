@@ -75,7 +75,7 @@ private[openapi] object ProtoSchema {
           then go(motif.Object.snoc(acc, n, s), ps)
           else go(motif.Object.snocOpt(acc, n, s), ps)
 
-    Proper(go(motif.Object.Empty(), props))
+    Proper(go(motif.Object.empty, props))
   }
 
   /** Schema with unresolved references categorized as backward or forward,

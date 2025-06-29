@@ -18,14 +18,14 @@ object Schema {
     Proper(motif.Array(sa))
 
   def objectEmpty: Schema[Obj[Void]] =
-    Proper(motif.Object.Empty())
+    Proper(motif.Object.empty)
 
   def objectSnoc[Init, PropName <: String, PropType](
     init: Schema[Obj[Init]],
     pname: SingletonType[PropName],
     ptype: Schema[PropType],
   ): Schema[Obj[Init || PropName :: PropType]] =
-    Proper(motif.Object.Snoc(asObject(init), pname, ptype))
+    Proper(motif.Object.snoc(asObject(init), pname, ptype))
 
   def unsupported[S <: String](message: SingletonType[S]): Schema[Oops[S]] =
     Unsupported(message)
@@ -37,20 +37,4 @@ object Schema {
     s match
       case Proper(value) =>
         SchemaMotif.asObject(value)
-      case u: Unsupported[msg] =>
-        throw AssertionError(s"Impossible for Obj[X] =:= Oops[Y], as `Obj` and `Oops` are distinct class types")
-
-  object Object {
-    opaque type NonEmpty[Props] =
-      SchemaMotif.Object.NonEmpty[Schema, Props]
-
-    object NonEmpty {
-      def fromMotif[Props](motif: SchemaMotif.Object.NonEmpty[Schema, Props]): NonEmpty[Props] =
-        motif
-
-      extension [Props](o: Object.NonEmpty[Props])
-        def toMotif: SchemaMotif.Object.NonEmpty[Schema, Props] =
-          o
-    }
-  }
 }

@@ -10,26 +10,27 @@ import libretto.lambda.util.{Applicative, Exists, SingletonType}
  */
 sealed trait SchemaMotif[F[_], A] {
   import SchemaMotif.*
+  import ObjectMotif.Mod
 
   def translate[G[_]](h: [X] => F[X] => G[X]): SchemaMotif[G, A] =
     this match
       case p: Primitive[G, A] => p.recast[G]
       case Array(elem) => Array(h(elem))
-      case Object.Empty() => Object.Empty()
-      case Object.Snoc(init, pname, ptype) => Object.Snoc(asObject(init.translate(h)), pname, h(ptype))
-      case Object.SnocOpt(init, pname, ptype) => Object.SnocOpt(asObject(init.translate(h)), pname, h(ptype))
+      case Object(value) => Object(value.translate[Object.Payload[G]]([M <: Mod, A] => fa => h(fa)))
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
       case p: Primitive[F, A] => p.recast[G]
       case Array(elem) => Array(h(elem).value)
-      case o: Object[f, ps] => o.wipeTranslateObj(h).value
+      case Object(value) => Object(value.wipeTranslate[Object.Payload[G]]([M <: Mod, A] => fa => h(fa)).value)
 
   def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[SchemaMotif[H, ?]] =
     this match
       case p: Primitive[F, A] => G.pure(p.recast[H])
       case Array(elem) => h(elem).map(el => Array(el.value))
-      case o: Object[f, ps] => o.wipeTranslateObjA(h).map(_.value)
+      case Object(value) =>
+        value.wipeTranslateA[G, Object.Payload[H]]([M <: Mod, A] => fa => h(fa))
+          .map(o => Object(o.value))
 
   def isNotOops[S](using A =:= Oops[S]): Nothing =
     throw AssertionError("Impossible: Schemas for type Oops[S] are not representable by SchemaMotif")
@@ -93,75 +94,47 @@ object SchemaMotif {
 
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 
-  sealed trait Object[F[_], Ps] extends SchemaMotif[F, Obj[Ps]] {
-    private[SchemaMotif] def wipeTranslateObj[G[_]](h: [X] => F[X] => Exists[G]): Exists[[X] =>> SchemaMotif[G, Obj[X]]] =
-      this match
-        case Object.Empty() =>
-          Exists(Object.Empty())
-        case Object.Snoc(init, pname, ptype) =>
-          Exists(Object.Snoc(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
-        case Object.SnocOpt(init, pname, ptype) =>
-          Exists(Object.SnocOpt(asObject(init.wipeTranslateObj(h).value), pname, h(ptype).value))
+  case class Object[F[_], Ps](
+    value: ObjectMotif[Object.Payload[F], Ps],
+  ) extends SchemaMotif[F, Obj[Ps]]
 
-    private[SchemaMotif] def wipeTranslateObjA[G[_], H[_]](
-      h: [X] => F[X] => G[Exists[H]],
-    )(using
-      G: Applicative[G],
-    ): G[Exists[[X] =>> SchemaMotif[H, Obj[X]]]] =
-      this match
-        case Object.Empty() =>
-          G.pure(Exists(Object.Empty()))
-        case Object.Snoc(init, pname, ptype) =>
-          G.map2(
-            init.wipeTranslateObjA(h),
-            h(ptype),
-          ) { (init, ptype) =>
-            Exists(Object.Snoc(asObject(init.value), pname, ptype.value))
-          }
-        case Object.SnocOpt(init, pname, ptype) =>
-          G.map2(
-            init.wipeTranslateObjA(h),
-            h(ptype),
-          ) { (init, ptype) =>
-            Exists(Object.SnocOpt(asObject(init.value), pname, ptype.value))
-          }
-  }
   object Object {
-    case class Empty[F[_]]() extends Object[F, Void]
-
-    sealed trait NonEmpty[F[_], Ps] extends Object[F, Ps]
-
-    case class Snoc[F[_], Init, PropName <: String, PropType](
-      init: Object[F, Init],
-      pname: SingletonType[PropName],
-      ptype: F[PropType],
-    ) extends Object.NonEmpty[F, Init || PropName :: PropType]
-
-    case class SnocOpt[F[_], Init, PropName <: String, PropType](
-      init: Object[F, Init],
-      pname: SingletonType[PropName],
-      ptype: F[PropType],
-    ) extends Object.NonEmpty[F, Init || PropName :? PropType]
+    type Payload[F[_]] = [M <: ObjectMotif.Mod, A] =>> F[A]
 
     def empty[F[_]]: Object[F, Void] =
-      Empty()
+      Object(ObjectMotif.Empty())
+
+    def snoc[F[_], Init, K <: String, V](
+      init: SchemaMotif[F, Obj[Init]],
+      pname: SingletonType[K],
+      ptype: F[V],
+    ): Object[F, Init || K :: V] =
+      Object(ObjectMotif.Snoc(asObject(init).value, pname, ptype))
 
     def snoc[F[_], Init, PropType](
       init: SchemaMotif[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
-    ): Object.NonEmpty[F, Init || pname.type :: PropType] =
-      Snoc(asObject(init), SingletonType(pname), ptype)
+    ): Object[F, Init || pname.type :: PropType] =
+      snoc(init, SingletonType(pname), ptype)
+
+    def snocOpt[F[_], Init, K <: String, V](
+      init: SchemaMotif[F, Obj[Init]],
+      pname: SingletonType[K],
+      ptype: F[V],
+    ): Object[F, Init || K :? V] =
+      Object(ObjectMotif.SnocOpt(asObject(init).value, pname, ptype))
 
     def snocOpt[F[_], Init, PropType](
       init: SchemaMotif[F, Obj[Init]],
       pname: String,
       ptype: F[PropType],
-    ): Object.NonEmpty[F, Init || pname.type :? PropType] =
-      SnocOpt(asObject(init), SingletonType(pname), ptype)
+    ): Object[F, Init || pname.type :? PropType] =
+      snocOpt(init, SingletonType(pname), ptype)
   }
 
-  def asObject[F[_], Ps](s: SchemaMotif[F, Obj[Ps]]): SchemaMotif.Object[F, Ps] =
-    s match
-      case o: Object[F, Ps] => o
+  extension [F[_], Ps](s: SchemaMotif[F, Obj[Ps]])
+    def asObject: SchemaMotif.Object[F, Ps] =
+      s match
+        case o: Object[F, Ps] => o
 }
