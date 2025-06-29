@@ -66,6 +66,14 @@ type ToRightAssocAcc[Props, Acc] = Props match
   case init || last => ToRightAssocAcc[init, last || Acc]
   case Void => Acc
 
+type NamedCasesToRightAssoc[Cases] = Cases match
+  case key :: value => key :: value
+  case init || last => NamedCasesToRightAssocAcc[init, last]
+
+type NamedCasesToRightAssocAcc[Cases, Acc] = Cases match
+  case init || last => NamedCasesToRightAssocAcc[init, last || Acc]
+  case key :: value => (key :: value) || Acc
+
 type ScalaUnionOf[Cases] = Cases match
   case init || last => ScalaUnionOf[init] | last
   case Void => Nothing

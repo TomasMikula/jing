@@ -46,10 +46,11 @@ object PetstoreServerHttp4s extends IOApp {
       .handle("/pet_POST"): in =>
         // val body = in.props.body // causes ClassCastException: https://github.com/scala/scala3/issues/23415
         val body = in.props["body"]
-        val pet = body.discriminator match
-          case "application/json"                  => body.assertCase["application/json"]
-          case "application/xml"                   => body.assertCase["application/xml"]
-          case "application/x-www-form-urlencoded" => body.assertCase["application/x-www-form-urlencoded"]
+        val pet = body.switch
+          .is("application/json")(identity)
+          .is("application/xml")(identity)
+          .is("application/x-www-form-urlencoded")(identity)
+          .end
         store
           .createPet(pet)
           .map:
@@ -63,7 +64,17 @@ object PetstoreServerHttp4s extends IOApp {
                 _
                   .status("200")
                   .body["application/json"](pet)
-      .handle("/pet_PUT")(_ => IO(Response.plainText(Status.NotImplemented)))
+
+      .handle("/pet_PUT"): in =>
+        val body = in.props["body"]
+        val pet = body.switch
+          .is("application/json")(identity)
+          .is("application/xml")(identity)
+          .is("application/x-www-form-urlencoded")(identity)
+          .end
+
+        IO(Response.plainText(Status.NotImplemented))
+
       .handle("/pet/findByStatus_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/findByTags_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/{petId}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))

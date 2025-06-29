@@ -1,8 +1,10 @@
 package jing.openapi.model
 
+import libretto.lambda.Items1Named
 import libretto.lambda.Items1Named.Member
-import libretto.lambda.util.{SingletonType, TypeEq}
 import libretto.lambda.util.TypeEq.Refl
+import libretto.lambda.util.{SingletonType, TypeEq}
+
 import scala.annotation.targetName
 import scala.reflect.ClassTag
 
@@ -313,6 +315,14 @@ trait ValueModule[Value[_]] {
 
     def assertCase: AssertCase[Cases, DiscriminatorOf[Cases]] =
       AssertCase(value.asDiscriminatedUnion)
+
+    def switch: SwitchBuilderInit[Cases, NamedCasesToRightAssoc[Cases]] =
+      SwitchBuilderInit(value)
+  }
+
+  extension [K, V](value: Value[DiscriminatedUnion[K :: V]]) {
+    def getUniqueCase: Value[V] =
+      value.asDiscriminatedUnion.underlying.getSingle
   }
 
   class AssertCase[Cases, DiscriminatorSet <: DiscriminatorOf[Cases]](value: ValueMotif.DiscUnion[? <: Value, Cases]) {
@@ -334,4 +344,42 @@ trait ValueModule[Value[_]] {
           throw IllegalStateException("Seems like you have used the same case label multiple times")
         else
           throw IllegalStateException(s"Expected case: \"${expected.label.value}\", actual case: \"${actual.label.value}\".")
+
+  case class SwitchBuilderInit[Cases, CasesRA](value: Value[DiscriminatedUnion[Cases]])
+
+  extension [K, V](b: SwitchBuilderInit[K :: V, K :: V]) {
+    def is(k: K)[R](f: Value[V] => R): R =
+      f(b.value.getUniqueCase)
+  }
+
+  extension [Cases, K <: String, V, Tail](b: SwitchBuilderInit[Cases, K :: V || Tail]) {
+    def is(k: K)(using SingletonType[K])[R](f: Value[V] => R): SwitchBuilder[Cases, K :: V, Tail, R] =
+      SwitchBuilder(b.value, Items1Named.Product.Single(summon[SingletonType[K]], f))
+  }
+
+  case class SwitchBuilder[Cases, Acc, Tail, R](
+    value: Value[DiscriminatedUnion[Cases]],
+    handlerAcc: Items1Named.Product[||, ::, [v] =>> Value[v] => R, Acc],
+  )
+
+  extension [Cases, Acc, K <: String, V, Tail, R](b: SwitchBuilder[Cases, Acc, K :: V || Tail, R]) {
+    def is(k: K)(using SingletonType[K])(f: Value[V] => R): SwitchBuilder[Cases, Acc || K :: V, Tail, R] =
+      SwitchBuilder(b.value, Items1Named.Product.Snoc(b.handlerAcc, summon[SingletonType[K]], f))
+  }
+
+  extension [Cases, Acc, K <: String, V, R](b: SwitchBuilder[Cases, Acc, K :: V, R]) {
+    def is(k: K)(using SingletonType[K])(f: Value[V] => R): SwitchBuilderDone[Cases, Acc || K :: V, R] =
+      SwitchBuilderDone(b.value, Items1Named.Product.Snoc(b.handlerAcc, summon[SingletonType[K]], f))
+  }
+
+  case class SwitchBuilderDone[Cases, Acc, R](
+    value: Value[DiscriminatedUnion[Cases]],
+    handlerAcc: Items1Named.Product[||, ::, [v] =>> Value[v] => R, Acc],
+  ) {
+    def end(using ev: Acc =:= Cases): R =
+      val x = ev.substituteContra(value.asDiscriminatedUnion.underlying)
+      handlerAcc
+        .get(x.tag)
+        .apply(x.value)
+  }
 }
