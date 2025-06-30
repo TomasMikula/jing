@@ -6,6 +6,7 @@ import libretto.lambda.util.{BiInjective, TypeEqK, TypeEq}
 import libretto.lambda.util.TypeEq.Refl
 import scala.annotation.targetName
 import libretto.lambda.util.Applicative
+import libretto.lambda.util.SingletonType
 
 /** Structure of values, parameterized by nested values `F`. */
 sealed trait ValueMotif[+F[_], T] {
@@ -66,27 +67,27 @@ sealed trait ValueMotif[+F[_], T] {
         b.append("]")
       case obj: Object[f, ps] =>
         b.append("{")
-        def go[Ps](o: Object[F, Ps]): Unit = {
+        def go[Ps](o: ObjectMotif[Object.Payload[F], Ps]): Unit = {
           o match
-            case Object.ObjEmpty => // do nothing
-            case Object.ObjExt(init, lastName, lastValue) =>
+            case ObjectMotif.Empty => // do nothing
+            case ObjectMotif.Snoc(init, lastName, lastValue) =>
               go(init)
-              b.append(lastName: String)
+              b.append(lastName.value: String)
               b.append(": ")
               f(lastValue, b)
               b.append(",")
-            case Object.ObjExtOpt(init, lastName, lastValue) =>
-              go(init)
-              lastValue match
+            case so: ObjectMotif.SnocOpt[pf, init, k, v] =>
+              go(so.init)
+              (so.pval: Option[F[v]]) match
                 case None =>
                   // do nothing
                 case Some(v) =>
-                  b.append(lastName: String)
+                  b.append(so.pname.value: String)
                   b.append(": ")
                   f(v, b)
                   b.append(",")
         }
-        go((obj: Object[f, ps]).asInstanceOf[Object[F, ps]]) // TODO: remove unsafe cast when https://github.com/scala/scala3/issues/22993 is fixed
+        go((obj: Object[f, ps]).asInstanceOf[Object[F, ps]].value) // TODO: remove unsafe cast when https://github.com/scala/scala3/issues/22993 is fixed
         b.append("}")
       case DiscUnion(underlying) =>
         b.append(underlying.label)
@@ -130,139 +131,66 @@ object ValueMotif {
   case class EnumValue[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]) extends ValueMotif[Nothing, Enum[Base, Cases]]
   case class Array[F[_], T](elems: IArray[F[T]]) extends ValueMotif[F, Arr[T]]
 
-  sealed trait Object[+F[_], Ps] extends ValueMotif[F, Obj[Ps]] {
-    import Object.*
+  case class Object[F[_], Ps](
+    value: ObjectMotif[Object.Payload[F], Ps],
+  ) extends ValueMotif[F, Obj[Ps]] {
 
-    def get[K](using i: IsPropertyOf[K, Ps]): i.Modality[F[i.Type]]
+    def getPayload[K](using i: IsPropertyOf[K, Ps]): Object.Payload[F][i.Mod, i.Type] =
+      value.get[K]
 
-    def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[ValueMotif.Object[G, Ps]]
+    def get[K](using i: IsPropertyOf[K, Ps]): i.Modality[F[i.Type]] =
+      Object.Payload.toModality(i):
+        getPayload[K]
 
-    def foreachProperty(
-      f: [K <: String, V] => (k: K, v: F[V]) => Unit,
-    ): Unit
+    def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[ValueMotif.Object[G, Ps]] =
+      value.traverse[M, Object.Payload[G]](
+        f,
+        [a] => (ofa: Option[F[a]]) => ofa.fold(M.pure(None))(fa => f(fa).map(Some(_))),
+      ).map(Object(_))
+
   }
 
   object Object {
-    case object ObjEmpty extends ValueMotif.Object[Nothing, Void] {
-      override def get[K](using i: IsPropertyOf[K, Void]): i.Modality[Nothing] =
-        i.propertiesNotVoid
+    type Payload[+F[_]] =
+      [M <: ObjectMotif.Mod, A] =>>
+        M match
+          case ObjectMotif.Mod.Required.type => F[A]
+          case ObjectMotif.Mod.Optional.type => Option[F[A]]
 
-      override def traverseObj[M[_], G[_]](f: [A] => Nothing => M[G[A]])(using M: Applicative[M]): M[Object[G, Void]] =
-        M.pure(ObjEmpty)
-
-      override def foreachProperty(f: [K <: String, V] => (k: K, v: Nothing) => Unit): Unit =
-        () // do nothing
+    object Payload {
+      def toModality[K, Ps, F[_]](i: K IsPropertyOf Ps)(value: Payload[F][i.Mod, i.Type]): i.Modality[F[i.Type]] =
+        i.modAndModalityInterlocked match {
+          case Left((ev1, ev2)) =>
+            val v: F[i.Type] =
+              TypeEq(ev1).substUpperBounded[ObjectMotif.Mod, [m <: ObjectMotif.Mod] =>> Payload[F][m, i.Type]]:
+                value
+            ev2.flip.at[F[i.Type]]:
+              v
+          case Right((ev1, ev2)) =>
+            val v: Option[F[i.Type]] =
+              TypeEq(ev1).substUpperBounded[ObjectMotif.Mod, [m <: ObjectMotif.Mod] =>> Payload[F][m, i.Type]]:
+                value
+            ev2.flip.at[F[i.Type]]:
+              v
+        }
     }
 
-    case class ObjExt[F[_], Init, PropName <: String, PropType](
-      init: Object[F, Init],
-      lastName: PropName,
-      lastValue: F[PropType],
-    ) extends ValueMotif.Object[F, Init || PropName :: PropType] {
-      override def get[K](using i: IsPropertyOf[K, Init || PropName :: PropType]): i.Modality[F[i.Type]] =
-        i.switch[i.Modality[F[i.Type]]](
-          caseLastProp =
-            [init] => (
-              ev1: (Init || PropName :: PropType) =:= (init || K :: i.Type),
-              ev2: TypeEqK[i.Modality, [A] =>> A],
-            ) => {
-              ev1 match
-                case BiInjective[||](_, BiInjective[::](_, TypeEq(Refl()))) =>
-                  ev2.flip.at[F[i.Type]](lastValue)
-            },
-          caseOptLastProp =
-            [init] => (
-              ev1: (Init || PropName :: PropType) =:= (init || K :? i.Type),
-              ev2: TypeEqK[i.Modality, Option],
-            ) => {
-              ev1 match
-                case BiInjective[||](_, ev) => :?.isNot_::[K, i.Type, PropName, PropType](using ev.flip)
-            },
-          caseInitProp =
-            [init, last] => (
-              ev1: (Init || PropName :: PropType) =:= (init || last),
-              j:   IsPropertyOf.Aux[K, init, i.Type, i.Modality],
-            ) => {
-              ev1 match
-                case BiInjective[||](TypeEq(Refl()), _) =>
-                  init.get[K](using j)
-            },
-        )
-
-      override def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[Object[G, Init || PropName :: PropType]] =
-        M.map2(init.traverseObj(f), f(lastValue)):
-          (gInit, gLast) => ObjExt(gInit, lastName, gLast)
-
-      override def foreachProperty(f: [K <: String, V] => (k: K, v: F[V]) => Unit): Unit =
-        init.foreachProperty(f)
-        f(lastName, lastValue)
-    }
-
-    case class ObjExtOpt[F[_], Init, PropName <: String, PropType](
-      init: Object[F, Init],
-      lastName: PropName,
-      lastValue: Option[F[PropType]],
-    ) extends ValueMotif.Object[F, Init || PropName :? PropType] {
-      override def get[K](using i: IsPropertyOf[K, Init || PropName :? PropType]): i.Modality[F[i.Type]] =
-        i.switch[i.Modality[F[i.Type]]](
-          caseLastProp =
-            [init] => (
-              ev1: (Init || PropName :? PropType) =:= (init || K :: i.Type),
-              ev2: TypeEqK[i.Modality, [A] =>> A],
-            ) => {
-              ev1 match
-                case BiInjective[||](_, ev) =>
-                  :?.isNot_::(using ev)
-            },
-          caseOptLastProp =
-            [init] => (
-              ev1: (Init || PropName :? PropType) =:= (init || K :? i.Type),
-              ev2: TypeEqK[i.Modality, Option],
-            ) => {
-              ev1 match
-                case BiInjective[||](_, BiInjective[:?](_, TypeEq(Refl()))) =>
-                  ev2.flip.at[F[i.Type]](lastValue)
-            },
-          caseInitProp =
-            [init, last] => (
-              ev1: (Init || PropName :? PropType) =:= (init || last),
-              j:   IsPropertyOf.Aux[K, init, i.Type, i.Modality],
-            ) => {
-              ev1 match
-                case BiInjective[||](TypeEq(Refl()), _) =>
-                  init.get[K](using j)
-            },
-        )
-
-      override def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[Object[G, Init || PropName :? PropType]] =
-        val mgLast: M[Option[G[PropType]]] =
-          lastValue.fold(M.pure(None))(f(_).map(Some(_)))
-        M.map2(init.traverseObj(f), mgLast):
-          (gInit, gLast) => ObjExtOpt(gInit, lastName, gLast)
-
-      override def foreachProperty(f: [K <: String, V] => (k: K, v: F[V]) => Unit): Unit =
-        init.foreachProperty(f)
-        lastValue match
-          case None => // do nothing
-          case Some(value) => f(lastName, value)
-    }
-
-    def empty: ValueMotif[Nothing, Obj[Void]] =
-      ObjEmpty
+    def empty[F[_]]: ValueMotif.Object[F, Void] =
+      Object(ObjectMotif.Empty())
 
     def extend[F[_], Base, K <: String, V](
       base: ValueMotif[F, Obj[Base]],
-      k: K,
+      k: SingletonType[K],
       v: F[V],
-    ): ValueMotif[F, Obj[Base || K :: V]] =
-      ObjExt(asObject(base), k, v)
+    ): ValueMotif.Object[F, Base || K :: V] =
+      Object(ObjectMotif.Snoc(asObject(base).value, k, v))
 
     def extendOpt[F[_], Base, K <: String, V](
       base: ValueMotif[F, Obj[Base]],
-      k: K,
+      k: SingletonType[K],
       v: Option[F[V]],
-    ): ValueMotif[F, Obj[Base || K :? V]] =
-      ObjExtOpt(asObject(base), k, v)
+    ): ValueMotif.Object[F, Base || K :? V] =
+      Object(ObjectMotif.SnocOpt(asObject(base).value, k, v))
 
     extension [F[_], Ps](value: ValueMotif[F, Obj[Ps]]) {
       private def asObject: ValueMotif.Object[F, Ps] =
@@ -272,14 +200,14 @@ object ValueMotif {
 
     extension [F[_], Init, K <: String, V](value: Object[F, Init || K :: V])
       def unsnoc: (Object[F, Init], F[V]) =
-        value match
-          case Object.ObjExt(init, lastName, lastValue) => (init, lastValue)
+        value.value match
+          case ObjectMotif.Snoc(init, lastName, lastValue) => (Object(init), lastValue)
 
     extension [F[_], Init, K <: String, V](value: Object[F, Init || K :? V])
       @targetName("unsnocOpt")
       def unsnoc: (Object[F, Init], Option[F[V]]) =
-        value match
-          case Object.ObjExtOpt(init, lastName, lastValue) => (init, lastValue)
+        value.value match
+          case ObjectMotif.SnocOpt(init, lastName, lastValue) => (Object(init), lastValue)
   }
 
   case class DiscUnion[F[_], As](

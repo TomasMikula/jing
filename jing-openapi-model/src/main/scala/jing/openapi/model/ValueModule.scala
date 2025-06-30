@@ -31,7 +31,7 @@ trait ValueModule[Value[_]] {
   def int32(i: Int): Value[Int32] = fromMotif(ValueMotif.Int32Value(i))
   def int64(i: Long): Value[Int64] = fromMotif(ValueMotif.Int64Value(i))
   def bool(b: Boolean): Value[Bool] = fromMotif(ValueMotif.BoolValue(b))
-  def obj: Value[Obj[Void]] = fromMotif(ValueMotif.Object.ObjEmpty)
+  def obj: Value[Obj[Void]] = fromMotif(ValueMotif.Object.empty)
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*): Value[Arr[T]] = arr(IArray(elems*))
 
@@ -52,74 +52,74 @@ trait ValueModule[Value[_]] {
 
   extension [Ps](value: Value[Obj[Ps]]) {
     def set[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :: T]] =
-      fromMotif(ValueMotif.Object.extend(toMotifObject(value), k, v))
+      extend(SingletonType(k), v)
 
     def set(k: String, v: String): Value[Obj[Ps || k.type :: Str]] =
       set(k, str(v))
 
     def setOpt[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :? T]] =
-      fromMotif(ValueMotif.Object.extendOpt(toMotifObject(value), k, Some(v)))
+      extendOpt(SingletonType(k), Some(v))
 
     def setOpt(k: String, v: String): Value[Obj[Ps || k.type :? Str]] =
       setOpt(k, str(v))
 
     def extend[K <: String, V](k: SingletonType[K], v: Value[V]): Value[Obj[Ps || K :: V]] =
-      fromMotif(ValueMotif.Object.extend(toMotifObject(value), k.value, v))
+      fromMotif(ValueMotif.Object.extend(toMotifObject(value), k, v))
 
     def extendOpt[K <: String, V](k: SingletonType[K], v: Option[Value[V]]): Value[Obj[Ps || K :? V]] =
-      fromMotif(ValueMotif.Object.extendOpt(toMotifObject(value), k.value, v))
+      fromMotif(ValueMotif.Object.extendOpt(toMotifObject(value), k, v))
   }
 
   opaque type ObjectBuilder[Acc, Remaining] = ValueMotif.Object[Value, Acc]
   object ObjectBuilder {
     def apply[Ps]: ObjectBuilder[Void, ToRightAssoc[Ps]] =
-      ValueMotif.Object.ObjEmpty
+      ValueMotif.Object.empty
   }
 
   extension [Acc](b: ObjectBuilder[Acc, Void])
     def result: Value[Obj[Acc]] = fromMotif(b)
 
   extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :: A || Tail])
-    def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :: A, Tail] =
-      ValueMotif.Object.ObjExt(b, propName, value)
+    def set(propName: Label, value: Value[A])(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: A, Tail] =
+      ValueMotif.Object.extend(b, l, value)
 
   extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Str || Tail])
-    def set(propName: Label, value: String): ObjectBuilder[Acc || Label :: Str, Tail] =
-      ValueMotif.Object.ObjExt(b, propName, str(value))
+    def set(propName: Label, value: String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Str, Tail] =
+      ValueMotif.Object.extend(b, l, str(value))
 
   extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Int64 || Tail])
-    def set(propName: Label, value: Long): ObjectBuilder[Acc || Label :: Int64, Tail] =
-      ValueMotif.Object.ObjExt(b, propName, int64(value))
+    def set(propName: Label, value: Long)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Int64, Tail] =
+      ValueMotif.Object.extend(b, l, int64(value))
 
   extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :: Enum[Str, Cases] || Tail])
     @targetName("setEnum")
-    def set(propName: Label, value: ScalaUnionOf[Cases] & String): ObjectBuilder[Acc || Label :: Enum[Str, Cases], Tail] =
-      ValueMotif.Object.ObjExt(b, propName, enm(ScalaValueOf.str(value)))
+    def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Enum[Str, Cases], Tail] =
+      ValueMotif.Object.extend(b, l, enm(ScalaValueOf.str(value)))
 
   extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :? A || Tail]) {
     @targetName("setOpt")
-    def set(propName: Label, value: Value[A]): ObjectBuilder[Acc || Label :? A, Tail] =
-      ValueMotif.Object.ObjExtOpt(b, propName, Some(value))
+    def set(propName: Label, value: Value[A])(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? A, Tail] =
+      ValueMotif.Object.extendOpt(b, l, Some(value))
 
-    def setOpt(propName: Label, value: Option[Value[A]]): ObjectBuilder[Acc || Label :? A, Tail] =
-      ValueMotif.Object.ObjExtOpt(b, propName, value)
-
-    @targetName("setOpt")
-    def set(propName: Label, value: String)(using A =:= Str): ObjectBuilder[Acc || Label :? Str, Tail] =
-      ValueMotif.Object.ObjExtOpt(b, propName, Some(str(value)))
+    def setOpt(propName: Label, value: Option[Value[A]])(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? A, Tail] =
+      ValueMotif.Object.extendOpt(b, l, value)
 
     @targetName("setOpt")
-    def set(propName: Label, value: Long)(using A =:= Int64): ObjectBuilder[Acc || Label :? Int64, Tail] =
-      ValueMotif.Object.ObjExtOpt(b, propName, Some(int64(value)))
+    def set(propName: Label, value: String)(using ev: A =:= Str, l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Str, Tail] =
+      ValueMotif.Object.extendOpt(b, l, Some(str(value)))
 
-    def skip(propName: Label): ObjectBuilder[Acc || Label :? A, Tail] =
-      ValueMotif.Object.ObjExtOpt(b, propName, None)
+    @targetName("setOpt")
+    def set(propName: Label, value: Long)(using ev: A =:= Int64, l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Int64, Tail] =
+      ValueMotif.Object.extendOpt(b, l, Some(int64(value)))
+
+    def skip(propName: Label)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? A, Tail] =
+      ValueMotif.Object.extendOpt(b, l, None)
   }
 
   extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :? Enum[Str, Cases] || Tail])
     @targetName("setEnumOpt")
-    def set(propName: Label, value: ScalaUnionOf[Cases] & String): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
-      ValueMotif.Object.ObjExtOpt(b, propName, Some(enm(ScalaValueOf.str(value))))
+    def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
+      ValueMotif.Object.extendOpt(b, l, Some(enm(ScalaValueOf.str(value))))
 
   def obj[Props](
     f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],

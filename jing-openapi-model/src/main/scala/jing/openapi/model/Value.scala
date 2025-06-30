@@ -104,19 +104,5 @@ object Value extends ValueModule[Value] {
       value.underlying match
         case o: ValueMotif.Object[Value, ps] =>
           o
-
-    def toMap: Map[String, Value[?]] =
-      toMapImpl(value.asObject)
   }
-
-  private def toMapImpl[Ps](obj: ValueMotif.Object[Value, Ps]): Map[String, Value[?]] =
-    obj match
-      case ValueMotif.Object.ObjEmpty => Map.empty
-      case ValueMotif.Object.ObjExt(init, k, v) => toMapImpl(init).updated(k, v)
-      case ValueMotif.Object.ObjExtOpt(init, k, vOpt) =>
-        val m0 = toMapImpl(init)
-        vOpt match
-          case Some(v) => m0.updated(k, v)
-          case None    => m0
-
 }
