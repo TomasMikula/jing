@@ -56,4 +56,16 @@ object ScalaValueOf {
 
   def bool(b: Boolean): ScalaValueOf[b.type, Bool] =
     B(SingletonType(b))
+
+  given [I <: Int] => (ev: SingletonType[I]) => ScalaValueOf[I, Int32] =
+    I32(ev)
+
+  given [I <: Long] => (ev: SingletonType[I]) => ScalaValueOf[I, Int64] =
+    I64(ev)
+
+  given [B <: Boolean] => (ev: SingletonType[B]) => ScalaValueOf[B, Bool] =
+    B(ev)
+
+  given [S <: String] => (ev: SingletonType[S]) => ScalaValueOf[S, Str] =
+    S(ev)
 }

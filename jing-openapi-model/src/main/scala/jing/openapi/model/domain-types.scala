@@ -3,6 +3,8 @@ package jing.openapi.model
 import libretto.lambda.util.{BiInjective, TypeEq}
 import libretto.lambda.util.TypeEq.Refl
 
+import scala.NamedTuple.AnyNamedTuple
+
 sealed trait Int32
 sealed trait Int64
 sealed trait Str
@@ -85,3 +87,15 @@ type NamesOf[NamedCases] = NamedCases match
       case k :? _ => NamesOf[init] | k
   case Void =>
     Nothing
+
+type PropsToNamedTuple[F[_], Props] =
+  PropsToNamedTupleAcc[F, Props, NamedTuple.Empty]
+
+type PropsToNamedTupleAcc[F[_], Props, Acc <: AnyNamedTuple] <: AnyNamedTuple =
+  Props match
+    case Void =>
+      Acc
+    case init || kv =>
+      kv match
+        case k :: v => PropsToNamedTupleAcc[F, init, NamedTuples.Cons[k, F[v], Acc]]
+        case k :? v => PropsToNamedTupleAcc[F, init, NamedTuples.Cons[k, Option[F[v]], Acc]]

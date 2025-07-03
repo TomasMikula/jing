@@ -35,8 +35,11 @@ trait ValueModule[Value[_]] {
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*): Value[Arr[T]] = arr(IArray(elems*))
 
-  def enm[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
+  def mkEnum[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
     fromMotif(ValueMotif.EnumValue[Base, Cases, T](value))
+
+  def enm[Base, Cases](value: ScalaUnionOf[Cases])(using ev: ScalaValueOf[value.type, Base]): Value[Enum[Base, Cases]] =
+    fromMotif(ValueMotif.EnumValue[Base, Cases, value.type](ev))
 
   @targetName("arrStr")
   def arr(elems: String*): Value[Arr[Str]] =
@@ -94,7 +97,7 @@ trait ValueModule[Value[_]] {
   extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :: Enum[Str, Cases] || Tail])
     @targetName("setEnum")
     def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Enum[Str, Cases], Tail] =
-      ValueMotif.Object.extend(b, l, enm(ScalaValueOf.str(value)))
+      ValueMotif.Object.extend(b, l, mkEnum(ScalaValueOf.str(value)))
 
   extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :? A || Tail]) {
     @targetName("setOpt")
@@ -119,12 +122,32 @@ trait ValueModule[Value[_]] {
   extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :? Enum[Str, Cases] || Tail])
     @targetName("setEnumOpt")
     def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
-      ValueMotif.Object.extendOpt(b, l, Some(enm(ScalaValueOf.str(value))))
+      ValueMotif.Object.extendOpt(b, l, Some(mkEnum(ScalaValueOf.str(value))))
 
   def obj[Props](
     f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
   ): Value[Obj[Props]] =
     f(ObjectBuilder[Props]).result
+
+  class ObjectBuilderFromNamedTuple[Props, T <: PropsToNamedTuple[Value, Props]](
+    ps: PropertyList[Props],
+  ) {
+    // XXX: at call site, T does not fully reduce to a nice named tuple like
+    // (x: X, y: Y, ...)
+    // but only to
+    // Cons["x", X, Cons["y", Y, <...>]]
+    def apply(t: T): Value[Obj[Props]] =
+      fromMotif:
+        ValueMotif.Object[Value, Props]:
+          ps.readNamedTuple[Value](t)
+  }
+
+  def objFromTuple[Props](
+    f: ObjectBuilderFromNamedTuple[Props, PropsToNamedTuple[Value, Props]] => Value[Obj[Props]],
+  )(using
+    ps: PropertyList[Props],
+  ): Value[Obj[Props]] =
+    f(ObjectBuilderFromNamedTuple[Props, PropsToNamedTuple[Value, Props]](ps))
 
   def discriminatedUnion[Label <: String, A, As](
     discriminator: (Label IsCaseOf As) { type Type = A },

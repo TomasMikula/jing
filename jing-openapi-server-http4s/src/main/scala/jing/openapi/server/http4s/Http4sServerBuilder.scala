@@ -347,7 +347,7 @@ object Http4sServerBuilder {
         parseBasicPrimitive(baseType, str)
           .flatMap { v =>
             enm.find(v) match
-              case Some(w) => Right(Value.enm(w))
+              case Some(w) => Right(Value.mkEnum(w))
               case None => Left(NotFound(s"'$str' is not one of ${enm.scalaValues.mkString(", ")}"))
           }
 

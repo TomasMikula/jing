@@ -4,9 +4,10 @@ import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
 import libretto.lambda.util.{Applicative, BiInjective, Exists, SingletonType, TypeEq, TypeEqK}
 
-import ObjectMotif.Mod
+import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
 
-sealed trait ObjectMotif[F[_ <: Mod, _], Props] {
+sealed trait ObjectMotif[F[_ <: ObjectMotif.Mod, _], Props] {
+  import ObjectMotif.*
 
   def get[K](using i: IsPropertyOf[K, Props]): F[i.Mod, i.Type]
 
@@ -31,12 +32,27 @@ sealed trait ObjectMotif[F[_ <: Mod, _], Props] {
     Applicative[G],
   ): G[Exists[[X] =>> ObjectMotif[H, X]]]
 
+  def zipWithNamedTuple[G[_], H[_ <: Mod, _]](t: PropsToNamedTuple[G, Props])(
+    fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+  ): ObjectMotif[H, Props] =
+    zipWithNamedTupleAcc[G, NamedTuple.Empty, H](t)(fReq, fOpt)._1
+
+  protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod, _]](
+    t: PropsToNamedTupleAcc[G, Props, Acc],
+  )(
+    fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+  ): (ObjectMotif[H, Props], Acc)
+
 }
 
 object ObjectMotif {
   enum Mod:
     case Required
     case Optional
+
+  import Mod.*
 
   case class Empty[F[_ <: Mod, _]]() extends ObjectMotif[F, Void] {
 
@@ -67,6 +83,14 @@ object ObjectMotif {
       G: Applicative[G],
     ): G[Exists[[X] =>> ObjectMotif[H, X]]] =
       G.pure(Indeed(Empty()))
+
+    override protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod,_]](
+      t: PropsToNamedTupleAcc[G, Void, Acc],
+    )(
+      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
+      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+    ): (ObjectMotif[H, Void], Acc) =
+      (Empty(), t: Acc)
 
   }
 
@@ -143,6 +167,28 @@ object ObjectMotif {
       ): (init, pval) =>
         Indeed(Snoc(init.value, pname, pval.value))
 
+    override protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod,_]](
+      t: PropsToNamedTupleAcc[G, Init || PropName :: PropType, Acc],
+    )(
+      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
+      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+    ): (ObjectMotif[H, Init || PropName :: PropType], Acc) = {
+      type Acc1 =
+        NamedTuples.Cons[PropName, G[PropType], Acc]
+      val (initH, acc1) =
+        init.zipWithNamedTupleAcc(
+          t: PropsToNamedTupleAcc[G, Init, Acc1],
+        )(fReq, fOpt)
+      val g: G[PropType] =
+        acc1.head
+      val h: H[Required.type, PropType] =
+        fReq(pval, g)
+      val acc: Acc =
+        (acc1.tail : NamedTuple[Names[Acc], DropNames[Acc]]) // clearly Acc, but does not reduce to Acc
+          .asInstanceOf[Acc] // TODO: get rid of by changing method signature
+      (Snoc(initH, pname, h), acc)
+    }
+
   }
 
   case class SnocOpt[F[_ <: Mod, _], Init, PropName <: String, PropType](
@@ -216,6 +262,28 @@ object ObjectMotif {
         f(pval),
       ): (init, pval) =>
         Indeed(SnocOpt(init.value, pname, pval.value))
+
+    override protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod,_]](
+      t: PropsToNamedTupleAcc[G, Init || PropName :? PropType, Acc],
+    )(
+      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
+      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+    ): (ObjectMotif[H, Init || PropName :? PropType], Acc) ={
+      type Acc1 =
+        NamedTuples.Cons[PropName, Option[G[PropType]], Acc]
+      val (initH, acc1) =
+        init.zipWithNamedTupleAcc(
+          t: PropsToNamedTupleAcc[G, Init, Acc1],
+        )(fReq, fOpt)
+      val g: Option[G[PropType]] =
+        acc1.head
+      val h: H[Optional.type, PropType] =
+        fOpt(pval, g)
+      val acc: Acc =
+        (acc1.tail : NamedTuple[Names[Acc], DropNames[Acc]]) // clearly Acc, but does not reduce to Acc
+          .asInstanceOf[Acc] // TODO: get rid of by changing method signature
+      (SnocOpt(initH, pname, h), acc)
+    }
 
   }
 }
