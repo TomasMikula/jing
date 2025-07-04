@@ -45,6 +45,19 @@ sealed trait ObjectMotif[F[_ <: ObjectMotif.Mod, _], Props] {
     fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
   ): (ObjectMotif[H, Props], Acc)
 
+  def zipWithNamedTuple2[G[_], H[_ <: Mod, _]](t: NamedTuple[PropNamesTuple[Props], PropTypesTuple[G, Props]])(
+    fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+  ): ObjectMotif[H, Props] =
+    zipWithNamedTuple2Acc[G, EmptyTuple, EmptyTuple, H](t)(fReq, fOpt)._1
+
+  def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod, _]](
+    t: NamedTuple[PropNamesTupleAcc[Props, NAcc], PropTypesTupleAcc[G, Props, TAcc]],
+  )(
+    fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+  ): (ObjectMotif[H, Props], TAcc)
+
 }
 
 object ObjectMotif {
@@ -91,6 +104,14 @@ object ObjectMotif {
       fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
     ): (ObjectMotif[H, Void], Acc) =
       (Empty(), t: Acc)
+
+    override def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
+      t: NamedTuple[PropNamesTupleAcc[Void, NAcc], PropTypesTupleAcc[G, Void, TAcc]],
+    )(
+      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
+      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+    ): (ObjectMotif[H, Void], TAcc) =
+      (Empty(), t: TAcc)
 
   }
 
@@ -185,7 +206,28 @@ object ObjectMotif {
         fReq(pval, g)
       val acc: Acc =
         (acc1.tail : NamedTuple[Names[Acc], DropNames[Acc]]) // clearly Acc, but does not reduce to Acc
-          .asInstanceOf[Acc] // TODO: get rid of by changing method signature
+          .asInstanceOf[Acc]
+      (Snoc(initH, pname, h), acc)
+    }
+
+    override def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
+      t: NamedTuple[PropNamesTupleAcc[Init || PropName :: PropType, NAcc], PropTypesTupleAcc[G, Init || PropName :: PropType, TAcc]],
+    )(
+      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
+      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+    ): (ObjectMotif[H, Init || PropName :: PropType], TAcc) = {
+      type NAcc1 =   PropName  *: NAcc
+      type TAcc1 = G[PropType] *: TAcc
+      val (initH, acc1) =
+        init.zipWithNamedTuple2Acc[G, NAcc1, TAcc1, H](
+          t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleAcc[G, Init, TAcc1]]
+        )(fReq, fOpt)
+      val g: G[PropType] =
+        acc1.head
+      val h: H[Required.type, PropType] =
+        fReq(pval, g)
+      val acc: TAcc =
+        acc1.tail
       (Snoc(initH, pname, h), acc)
     }
 
@@ -281,7 +323,28 @@ object ObjectMotif {
         fOpt(pval, g)
       val acc: Acc =
         (acc1.tail : NamedTuple[Names[Acc], DropNames[Acc]]) // clearly Acc, but does not reduce to Acc
-          .asInstanceOf[Acc] // TODO: get rid of by changing method signature
+          .asInstanceOf[Acc]
+      (SnocOpt(initH, pname, h), acc)
+    }
+
+    override def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
+      t: NamedTuple[PropNamesTupleAcc[Init || PropName :? PropType, NAcc], PropTypesTupleAcc[G, Init || PropName :? PropType, TAcc]],
+    )(
+      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
+      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+    ): (ObjectMotif[H, Init || PropName :? PropType], TAcc) = {
+      type NAcc1 =   PropName  *: NAcc
+      type TAcc1 = Option[G[PropType]] *: TAcc
+      val (initH, acc1) =
+        init.zipWithNamedTuple2Acc[G, NAcc1, TAcc1, H](
+          t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleAcc[G, Init, TAcc1]]
+        )(fReq, fOpt)
+      val g: Option[G[PropType]] =
+        acc1.head
+      val h: H[Optional.type, PropType] =
+        fOpt(pval, g)
+      val acc: TAcc =
+        acc1.tail
       (SnocOpt(initH, pname, h), acc)
     }
 

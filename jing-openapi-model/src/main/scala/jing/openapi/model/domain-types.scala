@@ -88,6 +88,30 @@ type NamesOf[NamedCases] = NamedCases match
   case Void =>
     Nothing
 
+type PropNamesTuple[Props] =
+  PropNamesTupleAcc[Props, EmptyTuple]
+
+type PropNamesTupleAcc[Props, Acc <: Tuple] <: Tuple =
+  Props match
+    case Void =>
+      Acc
+    case init || kv =>
+      kv match
+        case k :: _ => PropNamesTupleAcc[init, k *: Acc]
+        case k :? _ => PropNamesTupleAcc[init, k *: Acc]
+
+type PropTypesTuple[F[_], Props] =
+  PropTypesTupleAcc[F, Props, EmptyTuple]
+
+type PropTypesTupleAcc[F[_], Props, Acc <: Tuple] <: Tuple =
+  Props match
+    case Void =>
+      Acc
+    case init || kv =>
+      kv match
+        case _ :: v => PropTypesTupleAcc[F, init, F[v] *: Acc]
+        case _ :? v => PropTypesTupleAcc[F, init, Option[F[v]] *: Acc]
+
 type PropsToNamedTuple[F[_], Props] =
   PropsToNamedTupleAcc[F, Props, NamedTuple.Empty]
 

@@ -163,6 +163,22 @@ trait ValueModule[Value[_]] {
   ): Value[Obj[Props]] =
     f(ObjectBuilderFromNamedTuple[Props, PropsToNamedTuple[Value, Props]](ps))
 
+  class ObjectBuilderFromNamedTuple2[Props, N <: PropNamesTuple[Props], T <: PropTypesTuple[Value, Props]](
+    ps: PropertyList[Props],
+  ) {
+    def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
+      fromMotif:
+        ValueMotif.Object[Value, Props]:
+          ps.readNamedTuple2[Value](t.toTuple)
+  }
+
+  def objFromTuple2[Props](
+    f: ObjectBuilderFromNamedTuple2[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]] => Value[Obj[Props]],
+  )(using
+    ps: PropertyList[Props],
+  ): Value[Obj[Props]] =
+    f(ObjectBuilderFromNamedTuple2[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]](ps))
+
   def discriminatedUnion[Label <: String, A, As](
     discriminator: (Label IsCaseOf As) { type Type = A },
     value: Value[A],
