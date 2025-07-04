@@ -80,8 +80,6 @@ object ServerBuilder {
      *
      * **Caveats:**
      *
-     * - Not yet working for more than 22 endpoints, due to https://github.com/scala/scala3/issues/23313.
-     *
      * - Not getting IDE hints for individual parameters, due to https://github.com/scalameta/metals/issues/7532.
      *
      * - Relies on internal compiler APIs to synthesize the function type of arbitrary arity.
@@ -93,8 +91,6 @@ object ServerBuilder {
     /** A structurally typed object with an apply method accepting request handlers.
      *
      * **Caveats:**
-     *
-     * - Not yet working for more than 22 endpoints, due to https://github.com/scala/scala3/issues/23313.
      *
      * - Not getting IDE hints for individual parameters, due to https://github.com/scalameta/metals/issues/7537.
      */

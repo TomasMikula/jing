@@ -219,7 +219,6 @@ object PetstoreServerHttp4s extends IOApp {
 
   /** Accepts request handlers as individual, accordingly named _function_ arguments.
    *
-   * - Not yet working for more than 22 endpoints, due to https://github.com/scala/scala3/issues/23313.
    * - Not getting IDE hints for individual parameters, due to https://github.com/scalameta/metals/issues/7532.
    * - Relies on internal compiler APIs to synthesize the function type of arbitrary arity.
    *   (https://github.com/scala/scala3/discussions/23326)
@@ -249,8 +248,7 @@ object PetstoreServerHttp4s extends IOApp {
 
 
   /** Accepts request handlers as individual, accordingly named _method_ arguments.
-   *
-    * - Not yet working for more than 22 endpoints, due to https://github.com/scala/scala3/issues/23313.
+    *
     * - Not getting IDE hints for individual parameters, due to https://github.com/scalameta/metals/issues/7537.
     */
   def routes_alternative_nAryMethod: Routes[IO] =
