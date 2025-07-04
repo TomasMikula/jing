@@ -129,41 +129,7 @@ trait ValueModule[Value[_]] {
   ): Value[Obj[Props]] =
     f(ObjectBuilder[Props]).result
 
-  class ObjectBuilderFromNamedTuple[Props, T](
-    ps: PropertyList[Props],
-  )(using
-   ev: T <:< PropsToNamedTuple[Value, Props],
-  ) {
-    // XXX: at call site, T does not fully reduce to a nice named tuple like
-    // (x: X, y: Y, ...)
-    // but only to
-    // Cons["x", X, Cons["y", Y, <...>]]
-    def apply(t: T): Value[Obj[Props]] =
-      fromMotif:
-        ValueMotif.Object[Value, Props]:
-          ps.readNamedTuple[Value](t)
-
-    def narrow[S <: T]: ObjectBuilderFromNamedTuple[Props, S] =
-      ObjectBuilderFromNamedTuple[Props, S](ps)
-  }
-
-  extension [Props, ns <: Tuple, ts <: Tuple, T >: NamedTuple.NamedTuple[ns, ts] <: PropsToNamedTuple[Value, Props]](
-    b: ObjectBuilderFromNamedTuple[Props, T]
-  ) {
-    // Helps reduce the named tuple for IDE hints.
-    // Inspired by https://users.scala-lang.org/t/merging-named-tuples-to-create-new-named-tuples/10750/4
-    transparent inline def fromNamedTuple: ObjectBuilderFromNamedTuple[Props, NamedTuple.NamedTuple[ns, ts]] =
-      b.narrow[NamedTuple.NamedTuple[ns, ts]]
-  }
-
-  def objFromTuple[Props](
-    f: ObjectBuilderFromNamedTuple[Props, PropsToNamedTuple[Value, Props]] => Value[Obj[Props]],
-  )(using
-    ps: PropertyList[Props],
-  ): Value[Obj[Props]] =
-    f(ObjectBuilderFromNamedTuple[Props, PropsToNamedTuple[Value, Props]](ps))
-
-  class ObjectBuilderFromNamedTuple2[Props, N <: PropNamesTuple[Props], T <: PropTypesTuple[Value, Props]](
+  class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTuple[Value, Props]](
     ps: PropertyList[Props],
   ) {
     def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
@@ -172,12 +138,12 @@ trait ValueModule[Value[_]] {
           ps.readNamedTuple2[Value](t.toTuple)
   }
 
-  def objFromTuple2[Props](
-    f: ObjectBuilderFromNamedTuple2[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]] => Value[Obj[Props]],
+  def objFromTuple[Props](
+    f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]] => Value[Obj[Props]],
   )(using
     ps: PropertyList[Props],
   ): Value[Obj[Props]] =
-    f(ObjectBuilderFromNamedTuple2[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]](ps))
+    f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]](ps))
 
   def discriminatedUnion[Label <: String, A, As](
     discriminator: (Label IsCaseOf As) { type Type = A },
