@@ -129,8 +129,10 @@ trait ValueModule[Value[_]] {
   ): Value[Obj[Props]] =
     f(ObjectBuilder[Props]).result
 
-  class ObjectBuilderFromNamedTuple[Props, T <: PropsToNamedTuple[Value, Props]](
+  class ObjectBuilderFromNamedTuple[Props, T](
     ps: PropertyList[Props],
+  )(using
+   ev: T <:< PropsToNamedTuple[Value, Props],
   ) {
     // XXX: at call site, T does not fully reduce to a nice named tuple like
     // (x: X, y: Y, ...)
@@ -140,6 +142,18 @@ trait ValueModule[Value[_]] {
       fromMotif:
         ValueMotif.Object[Value, Props]:
           ps.readNamedTuple[Value](t)
+
+    def narrow[S <: T]: ObjectBuilderFromNamedTuple[Props, S] =
+      ObjectBuilderFromNamedTuple[Props, S](ps)
+  }
+
+  extension [Props, ns <: Tuple, ts <: Tuple, T >: NamedTuple.NamedTuple[ns, ts] <: PropsToNamedTuple[Value, Props]](
+    b: ObjectBuilderFromNamedTuple[Props, T]
+  ) {
+    // Helps reduce the named tuple for IDE hints.
+    // Inspired by https://users.scala-lang.org/t/merging-named-tuples-to-create-new-named-tuples/10750/4
+    transparent inline def fromNamedTuple: ObjectBuilderFromNamedTuple[Props, NamedTuple.NamedTuple[ns, ts]] =
+      b.narrow[NamedTuple.NamedTuple[ns, ts]]
   }
 
   def objFromTuple[Props](
