@@ -38,6 +38,18 @@ trait ValueModule[Value[_]] {
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*): Value[Arr[T]] = arr(IArray(elems*))
 
+  given Conversion[Int, Value[Int32]] =
+    int32(_)
+
+  given Conversion[Long, Value[Int64]] =
+    int64(_)
+
+  given Conversion[Boolean, Value[Bool]] =
+    bool(_)
+
+  given Conversion[String, Value[Str]] =
+    str(_)
+
   def mkEnum[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
     fromMotif(ValueMotif.EnumValue[Base, Cases, T](value))
 

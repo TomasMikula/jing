@@ -43,10 +43,10 @@ object TestApp extends App {
 
         // constructing Obj-ects from named tuples
         Pet(objFromTuple(_(
-          id = int64(12345L),
-          name = str("Cookie"),
-          category = Category(objFromTuple(_(id = int64(1L), name = None))),
-          photoUrls = arr(str("https://cookie.com/pic.jpg")),
+          id = 12345L,
+          name = "Cookie",
+          category = Category(objFromTuple(_(id = 1L, name = None))),
+          photoUrls = arr("https://cookie.com/pic.jpg"),
           tags = None,
           status = enm("available"),
         )))
