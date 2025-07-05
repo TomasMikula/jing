@@ -20,20 +20,11 @@ opaque type PropertyList[Ps] =
 
 object PropertyList {
   extension [Ps](ps: PropertyList[Ps]) {
-    def readNamedTuple[F[_]](t: PropsToNamedTuple[F, Ps])[H[_ <: Mod, _]](
+    def readNamedTuple[F[_]](t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[F, Ps]])[H[_ <: Mod, _]](
       fReq: [A] => F[A] => H[Required.type, A],
       fOpt: [A] => (F[A] | None.type) => H[Optional.type, A],
     ): ObjectMotif[H, Ps] =
       ps.zipWithNamedTuple[F, H](t)(
-        [A] => (_, fa) => fReq(fa),
-        [A] => (_, ofa) => fOpt(ofa),
-      )
-
-    def readNamedTuple2[F[_]](t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[F, Ps]])[H[_ <: Mod, _]](
-      fReq: [A] => F[A] => H[Required.type, A],
-      fOpt: [A] => (F[A] | None.type) => H[Optional.type, A],
-    ): ObjectMotif[H, Ps] =
-      ps.zipWithNamedTuple2[F, H](t)(
         [A] => (_, fa) => fReq(fa),
         [A] => (_, ofa) => fOpt(ofa),
       )

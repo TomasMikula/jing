@@ -161,7 +161,7 @@ trait ValueModule[Value[_]] {
     def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
       fromMotif:
         ValueMotif.Object[Value, Props]:
-          ps.readNamedTuple2[Value](t.toTuple)[ValueMotif.Object.Payload[Value]](
+          ps.readNamedTuple[Value](t.toTuple)[ValueMotif.Object.Payload[Value]](
             [A] => (va: Value[A]) => va,
             [A] => (va: Value[A] | None.type) => toOption(va),
           )

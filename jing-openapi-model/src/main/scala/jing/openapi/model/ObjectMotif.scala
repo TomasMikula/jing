@@ -32,26 +32,13 @@ sealed trait ObjectMotif[F[_ <: ObjectMotif.Mod, _], Props] {
     Applicative[G],
   ): G[Exists[[X] =>> ObjectMotif[H, X]]]
 
-  def zipWithNamedTuple[G[_], H[_ <: Mod, _]](t: PropsToNamedTuple[G, Props])(
+  def zipWithNamedTuple[G[_], H[_ <: Mod, _]](t: NamedTuple[PropNamesTuple[Props], PropTypesTupleU[G, Props]])(
     fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
     fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
   ): ObjectMotif[H, Props] =
-    zipWithNamedTupleAcc[G, NamedTuple.Empty, H](t)(fReq, fOpt)._1
+    zipWithNamedTupleAcc[G, EmptyTuple, EmptyTuple, H](t)(fReq, fOpt)._1
 
-  protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod, _]](
-    t: PropsToNamedTupleAcc[G, Props, Acc],
-  )(
-    fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
-    fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
-  ): (ObjectMotif[H, Props], Acc)
-
-  def zipWithNamedTuple2[G[_], H[_ <: Mod, _]](t: NamedTuple[PropNamesTuple[Props], PropTypesTupleU[G, Props]])(
-    fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
-    fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
-  ): ObjectMotif[H, Props] =
-    zipWithNamedTuple2Acc[G, EmptyTuple, EmptyTuple, H](t)(fReq, fOpt)._1
-
-  protected def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod, _]](
+  protected def zipWithNamedTupleAcc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod, _]](
     t: NamedTuple[PropNamesTupleAcc[Props, NAcc], PropTypesTupleUAcc[G, Props, TAcc]],
   )(
     fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
@@ -117,15 +104,7 @@ object ObjectMotif {
     ): G[Exists[[X] =>> ObjectMotif[H, X]]] =
       G.pure(Indeed(Empty()))
 
-    override protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod,_]](
-      t: PropsToNamedTupleAcc[G, Void, Acc],
-    )(
-      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
-    ): (ObjectMotif[H, Void], Acc) =
-      (Empty(), t: Acc)
-
-    override def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
+    override def zipWithNamedTupleAcc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
       t: NamedTuple[PropNamesTupleAcc[Void, NAcc], PropTypesTupleUAcc[G, Void, TAcc]],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
@@ -214,29 +193,7 @@ object ObjectMotif {
       ): (init, pval) =>
         Indeed(Snoc(init.value, pname, pval.value))
 
-    override protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod,_]](
-      t: PropsToNamedTupleAcc[G, Init || PropName :: PropType, Acc],
-    )(
-      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
-    ): (ObjectMotif[H, Init || PropName :: PropType], Acc) = {
-      type Acc1 =
-        NamedTuples.Cons[PropName, G[PropType], Acc]
-      val (initH, acc1) =
-        init.zipWithNamedTupleAcc(
-          t: PropsToNamedTupleAcc[G, Init, Acc1],
-        )(fReq, fOpt)
-      val g: G[PropType] =
-        acc1.head
-      val h: H[Required.type, PropType] =
-        fReq(pval, g)
-      val acc: Acc =
-        (acc1.tail : NamedTuple[Names[Acc], DropNames[Acc]]) // clearly Acc, but does not reduce to Acc
-          .asInstanceOf[Acc]
-      (Snoc(initH, pname, h), acc)
-    }
-
-    override def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
+    override def zipWithNamedTupleAcc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :: PropType, NAcc], PropTypesTupleUAcc[G, Init || PropName :: PropType, TAcc]],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
@@ -245,7 +202,7 @@ object ObjectMotif {
       type NAcc1 =   PropName  *: NAcc
       type TAcc1 = G[PropType] *: TAcc
       val (initH, acc1) =
-        init.zipWithNamedTuple2Acc[G, NAcc1, TAcc1, H](
+        init.zipWithNamedTupleAcc[G, NAcc1, TAcc1, H](
           t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleUAcc[G, Init, TAcc1]]
         )(fReq, fOpt)
       val g: G[PropType] =
@@ -337,29 +294,7 @@ object ObjectMotif {
       ): (init, pval) =>
         Indeed(SnocOpt(init.value, pname, pval.value))
 
-    override protected def zipWithNamedTupleAcc[G[_], Acc <: AnyNamedTuple, H[_ <: Mod,_]](
-      t: PropsToNamedTupleAcc[G, Init || PropName :? PropType, Acc],
-    )(
-      fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
-    ): (ObjectMotif[H, Init || PropName :? PropType], Acc) ={
-      type Acc1 =
-        NamedTuples.Cons[PropName, G[PropType] | None.type, Acc]
-      val (initH, acc1) =
-        init.zipWithNamedTupleAcc(
-          t: PropsToNamedTupleAcc[G, Init, Acc1],
-        )(fReq, fOpt)
-      val g: G[PropType] | None.type =
-        acc1.head
-      val h: H[Optional.type, PropType] =
-        fOpt(pval, g)
-      val acc: Acc =
-        (acc1.tail : NamedTuple[Names[Acc], DropNames[Acc]]) // clearly Acc, but does not reduce to Acc
-          .asInstanceOf[Acc]
-      (SnocOpt(initH, pname, h), acc)
-    }
-
-    override def zipWithNamedTuple2Acc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
+    override def zipWithNamedTupleAcc[G[_], NAcc <: Tuple, TAcc <: Tuple, H[_ <: Mod,_]](
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :? PropType, NAcc], PropTypesTupleUAcc[G, Init || PropName :? PropType, TAcc]],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
@@ -368,7 +303,7 @@ object ObjectMotif {
       type NAcc1 =   PropName  *: NAcc
       type TAcc1 = (G[PropType] | None.type) *: TAcc
       val (initH, acc1) =
-        init.zipWithNamedTuple2Acc[G, NAcc1, TAcc1, H](
+        init.zipWithNamedTupleAcc[G, NAcc1, TAcc1, H](
           t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleUAcc[G, Init, TAcc1]]
         )(fReq, fOpt)
       val g: G[PropType] | None.type =
