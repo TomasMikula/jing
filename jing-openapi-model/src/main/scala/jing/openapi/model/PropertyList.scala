@@ -24,7 +24,7 @@ object PropertyList {
       fReq: [A] => F[A] => H[Required.type, A],
       fOpt: [A] => (F[A] | None.type) => H[Optional.type, A],
     ): ObjectMotif[H, Ps] =
-      ps.zipWithNamedTuple[F, H](t)(
+      ps.zipWithNamedTuple[OrNones[F], H](t)(
         [A] => (_, fa) => fReq(fa),
         [A] => (_, ofa) => fOpt(ofa),
       )
