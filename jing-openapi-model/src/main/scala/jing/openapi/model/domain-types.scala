@@ -110,7 +110,7 @@ type PropTypesTupleAcc[F[_], Props, Acc <: Tuple] <: Tuple =
     case init || kv =>
       kv match
         case _ :: v => PropTypesTupleAcc[F, init, F[v] *: Acc]
-        case _ :? v => PropTypesTupleAcc[F, init, Option[F[v]] *: Acc]
+        case _ :? v => PropTypesTupleAcc[F, init, (F[v] | None.type) *: Acc]
 
 type PropsToNamedTuple[F[_], Props] =
   PropsToNamedTupleAcc[F, Props, NamedTuple.Empty]
@@ -122,4 +122,4 @@ type PropsToNamedTupleAcc[F[_], Props, Acc <: AnyNamedTuple] <: AnyNamedTuple =
     case init || kv =>
       kv match
         case k :: v => PropsToNamedTupleAcc[F, init, NamedTuples.Cons[k, F[v], Acc]]
-        case k :? v => PropsToNamedTupleAcc[F, init, NamedTuples.Cons[k, Option[F[v]], Acc]]
+        case k :? v => PropsToNamedTupleAcc[F, init, NamedTuples.Cons[k, F[v] | None.type, Acc]]

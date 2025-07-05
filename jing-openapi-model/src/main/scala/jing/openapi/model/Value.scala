@@ -73,6 +73,11 @@ object Value extends ValueModule[Value] {
     ): ValueMotif[Lenient, DiscriminatedUnion[Cases]] =
       v match { case Proper(m) => m }
 
+    override def toOption[A](va: Lenient[A] | None.type): Option[Lenient[A]] =
+      va match
+        case va: Lenient[A] => Some(va)
+        case None => None
+
     def oops[S <: String](message: SingletonType[S], details: Option[String]): Lenient[Oops[S]] =
       Oopsy(message, details)
 
@@ -98,6 +103,11 @@ object Value extends ValueModule[Value] {
     v: Value[DiscriminatedUnion[Cases]]
   ): ValueMotif[Value, DiscriminatedUnion[Cases]] =
     v.underlying
+
+  override def toOption[A](va: Value[A] | None.type): Option[Value[A]] =
+    va match
+      case va: Value[A] => Some(va)
+      case None => None
 
   extension [Ps](value: Value[Obj[Ps]]) {
     private def asObject: ValueMotif.Object[Value, Ps] =

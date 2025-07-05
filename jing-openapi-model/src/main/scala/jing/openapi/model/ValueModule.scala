@@ -22,6 +22,9 @@ trait ValueModule[Value[_]] {
   def toMotifObj[Ps](v: Value[Obj[Ps]]): ValueMotif[Value, Obj[Ps]]
   def toMotifDiscriminatedUnion[Cases](v: Value[DiscriminatedUnion[Cases]]): ValueMotif[Value, DiscriminatedUnion[Cases]]
 
+  /** Deferring the responsibility to keep `Value[A]` distinquishable from `None` to the implementation. */
+  def toOption[A](va: Value[A] | None.type): Option[Value[A]]
+
   /*************************
    ** Constructing values **
    *************************/
@@ -135,7 +138,10 @@ trait ValueModule[Value[_]] {
     def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
       fromMotif:
         ValueMotif.Object[Value, Props]:
-          ps.readNamedTuple2[Value](t.toTuple)
+          ps.readNamedTuple2[Value](t.toTuple)[ValueMotif.Object.Payload[Value]](
+            [A] => (va: Value[A]) => va,
+            [A] => (va: Value[A] | None.type) => toOption(va),
+          )
   }
 
   def objFromTuple[Props](

@@ -69,7 +69,7 @@ sealed trait ValueMotif[+F[_], T] {
         b.append("{")
         def go[Ps](o: ObjectMotif[Object.Payload[F], Ps]): Unit = {
           o match
-            case ObjectMotif.Empty => // do nothing
+            case ObjectMotif.Empty() => // do nothing
             case ObjectMotif.Snoc(init, lastName, lastValue) =>
               go(init)
               b.append(lastName.value: String)

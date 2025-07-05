@@ -34,7 +34,7 @@ sealed trait ObjectMotif[F[_ <: ObjectMotif.Mod, _], Props] {
 
   def zipWithNamedTuple[G[_], H[_ <: Mod, _]](t: PropsToNamedTuple[G, Props])(
     fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
-    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
   ): ObjectMotif[H, Props] =
     zipWithNamedTupleAcc[G, NamedTuple.Empty, H](t)(fReq, fOpt)._1
 
@@ -42,12 +42,12 @@ sealed trait ObjectMotif[F[_ <: ObjectMotif.Mod, _], Props] {
     t: PropsToNamedTupleAcc[G, Props, Acc],
   )(
     fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
-    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
   ): (ObjectMotif[H, Props], Acc)
 
   def zipWithNamedTuple2[G[_], H[_ <: Mod, _]](t: NamedTuple[PropNamesTuple[Props], PropTypesTuple[G, Props]])(
     fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
-    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
   ): ObjectMotif[H, Props] =
     zipWithNamedTuple2Acc[G, EmptyTuple, EmptyTuple, H](t)(fReq, fOpt)._1
 
@@ -55,7 +55,7 @@ sealed trait ObjectMotif[F[_ <: ObjectMotif.Mod, _], Props] {
     t: NamedTuple[PropNamesTupleAcc[Props, NAcc], PropTypesTupleAcc[G, Props, TAcc]],
   )(
     fReq: [A] => (F[Mod.Required.type, A], G[A]) => H[Mod.Required.type, A],
-    fOpt: [A] => (F[Mod.Optional.type, A], Option[G[A]]) => H[Mod.Optional.type, A],
+    fOpt: [A] => (F[Mod.Optional.type, A], G[A] | None.type) => H[Mod.Optional.type, A],
   ): (ObjectMotif[H, Props], TAcc)
 
 }
@@ -101,7 +101,7 @@ object ObjectMotif {
       t: PropsToNamedTupleAcc[G, Void, Acc],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
     ): (ObjectMotif[H, Void], Acc) =
       (Empty(), t: Acc)
 
@@ -109,7 +109,7 @@ object ObjectMotif {
       t: NamedTuple[PropNamesTupleAcc[Void, NAcc], PropTypesTupleAcc[G, Void, TAcc]],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
     ): (ObjectMotif[H, Void], TAcc) =
       (Empty(), t: TAcc)
 
@@ -192,7 +192,7 @@ object ObjectMotif {
       t: PropsToNamedTupleAcc[G, Init || PropName :: PropType, Acc],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
     ): (ObjectMotif[H, Init || PropName :: PropType], Acc) = {
       type Acc1 =
         NamedTuples.Cons[PropName, G[PropType], Acc]
@@ -214,7 +214,7 @@ object ObjectMotif {
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :: PropType, NAcc], PropTypesTupleAcc[G, Init || PropName :: PropType, TAcc]],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
     ): (ObjectMotif[H, Init || PropName :: PropType], TAcc) = {
       type NAcc1 =   PropName  *: NAcc
       type TAcc1 = G[PropType] *: TAcc
@@ -309,15 +309,15 @@ object ObjectMotif {
       t: PropsToNamedTupleAcc[G, Init || PropName :? PropType, Acc],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
     ): (ObjectMotif[H, Init || PropName :? PropType], Acc) ={
       type Acc1 =
-        NamedTuples.Cons[PropName, Option[G[PropType]], Acc]
+        NamedTuples.Cons[PropName, G[PropType] | None.type, Acc]
       val (initH, acc1) =
         init.zipWithNamedTupleAcc(
           t: PropsToNamedTupleAcc[G, Init, Acc1],
         )(fReq, fOpt)
-      val g: Option[G[PropType]] =
+      val g: G[PropType] | None.type =
         acc1.head
       val h: H[Optional.type, PropType] =
         fOpt(pval, g)
@@ -331,15 +331,15 @@ object ObjectMotif {
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :? PropType, NAcc], PropTypesTupleAcc[G, Init || PropName :? PropType, TAcc]],
     )(
       fReq: [A] => (F[Required.type, A], G[A]) => H[Required.type, A],
-      fOpt: [A] => (F[Optional.type, A], Option[G[A]]) => H[Optional.type, A],
+      fOpt: [A] => (F[Optional.type, A], G[A] | None.type) => H[Optional.type, A],
     ): (ObjectMotif[H, Init || PropName :? PropType], TAcc) = {
       type NAcc1 =   PropName  *: NAcc
-      type TAcc1 = Option[G[PropType]] *: TAcc
+      type TAcc1 = (G[PropType] | None.type) *: TAcc
       val (initH, acc1) =
         init.zipWithNamedTuple2Acc[G, NAcc1, TAcc1, H](
           t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleAcc[G, Init, TAcc1]]
         )(fReq, fOpt)
-      val g: Option[G[PropType]] =
+      val g: G[PropType] | None.type =
         acc1.head
       val h: H[Optional.type, PropType] =
         fOpt(pval, g)
