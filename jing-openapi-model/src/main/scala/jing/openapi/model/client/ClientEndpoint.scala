@@ -40,7 +40,7 @@ object ClientEndpoint {
       HttpThunk(
         method,
         paramsSchema = RequestSchema.Params.ConstantPath(path),
-        params = Value.obj,
+        params = Value.obj.empty,
         body = Some((bodySchema, Body(i, body))),
         responseSchema,
       )

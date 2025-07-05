@@ -13,7 +13,7 @@ case class Pet(
 ) {
   def toApi: Value[api.schemas.Pet] =
     api.schemas.Pet(
-      Value.obj:
+      Value.obj.builder:
         _
           .set("id", id)
           .set("name", name)

@@ -34,7 +34,6 @@ trait ValueModule[Value[_]] {
   def int32(i: Int): Value[Int32] = fromMotif(ValueMotif.Int32Value(i))
   def int64(i: Long): Value[Int64] = fromMotif(ValueMotif.Int64Value(i))
   def bool(b: Boolean): Value[Bool] = fromMotif(ValueMotif.BoolValue(b))
-  def obj: Value[Obj[Void]] = fromMotif(ValueMotif.Object.empty)
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*): Value[Arr[T]] = arr(IArray(elems*))
 
@@ -67,6 +66,23 @@ trait ValueModule[Value[_]] {
   @targetName("arrInt64")
   def arr(elems: Long*): Value[Arr[Int64]] =
     arr(elems.map(int64)*)
+
+  object obj {
+    val empty: Value[Obj[Void]] =
+      fromMotif(ValueMotif.Object.empty)
+
+    def apply[Props](
+      f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]] => Value[Obj[Props]],
+    )(using
+      ps: PropertyList[Props],
+    ): Value[Obj[Props]] =
+      f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]](ps))
+
+    def builder[Props](
+      f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
+    ): Value[Obj[Props]] =
+      f(ObjectBuilder[Props]).result
+  }
 
   extension [Ps](value: Value[Obj[Ps]]) {
     def set[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :: T]] =
@@ -139,11 +155,6 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
       ValueMotif.Object.extendOpt(b, l, Some(mkEnum(ScalaValueOf.str(value))))
 
-  def obj[Props](
-    f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
-  ): Value[Obj[Props]] =
-    f(ObjectBuilder[Props]).result
-
   class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTuple[Value, Props]](
     ps: PropertyList[Props],
   ) {
@@ -155,13 +166,6 @@ trait ValueModule[Value[_]] {
             [A] => (va: Value[A] | None.type) => toOption(va),
           )
   }
-
-  def objFromTuple[Props](
-    f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]] => Value[Obj[Props]],
-  )(using
-    ps: PropertyList[Props],
-  ): Value[Obj[Props]] =
-    f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]](ps))
 
   def discriminatedUnion[Label <: String, A, As](
     discriminator: (Label IsCaseOf As) { type Type = A },

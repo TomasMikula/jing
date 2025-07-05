@@ -3,7 +3,7 @@ package jing.openapi.examples
 import jing.openapi.client.default.Result.{Failed, Succeeded}
 import jing.openapi.client.default.{Response, instance}
 import jing.openapi.model.*
-import jing.openapi.model.Value.{arr, discriminatedUnion, enm, int64, obj, objFromTuple, str}
+import jing.openapi.model.Value.{arr, discriminatedUnion, enm, int64, obj, str}
 import jing.openapi.model.client.ClientEndpoint
 
 object TestApp extends App {
@@ -32,20 +32,20 @@ object TestApp extends App {
       .body["application/json"]({
 
        // constructing Obj-ects using builder pattern
-        Pet(obj(_
+        Pet(obj.builder(_
           .set("id", 12345L)
           .set("name", "Cookie")
-          .set("category", Category(obj(_.set("id", 1L).skip("name"))))
+          .set("category", Category(obj.builder(_.set("id", 1L).skip("name"))))
           .set("photoUrls", arr(str("https://cookie.com/pic.jpg")))
           .skip("tags")
           .set("status", "available")
         ))
 
         // constructing Obj-ects from named tuples
-        Pet(objFromTuple(_(
+        Pet(obj(_(
           id = 12345L,
           name = "Cookie",
-          category = Category(objFromTuple(_(id = 1L, name = None))),
+          category = Category(obj(_(id = 1L, name = None))),
           photoUrls = arr("https://cookie.com/pic.jpg"),
           tags = None,
           status = enm("available"),

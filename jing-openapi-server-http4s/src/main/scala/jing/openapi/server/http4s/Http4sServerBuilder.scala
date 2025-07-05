@@ -105,10 +105,10 @@ object Http4sServerBuilder {
           if (path != req.uri.path.renderString)
             None.pure[F]
           else
-            Some(Right(Value.obj)).pure[F]
+            Some(Right(Value.obj.empty)).pure[F]
         case Parameterized(params) =>
           route(params, req.uri)
-            .map(_.map(ps => Value.obj.set("params", ps)))
+            .map(_.map(ps => Value.obj.empty.set("params", ps)))
             .pure[F]
         case WithBody(params, bodySchema) =>
           def parseBody[B](bodySchema: BodySchema.NonEmpty[B]): F[Either[ParseError, Value[B]]] =
@@ -132,7 +132,7 @@ object Http4sServerBuilder {
                 None.pure[F]
               else
                 parseBody(bodySchema).map:
-                  _.map { b => Value.obj.set("body", b) }
+                  _.map { b => Value.obj.empty.set("body", b) }
                     .some
             case Parameterized(params) =>
               route(params, req.uri) match
@@ -140,7 +140,7 @@ object Http4sServerBuilder {
                 case Some(Left(e)) => Some(Left(e)).pure[F]
                 case Some(Right(ps)) =>
                   parseBody(bodySchema).map:
-                    _.map { b => Value.obj.set("params", ps).set("body", b) }
+                    _.map { b => Value.obj.empty.set("params", ps).set("body", b) }
                       .some
   }
 
@@ -185,7 +185,7 @@ object Http4sServerBuilder {
         summon[Ps =:= Void]
         if (path.startsWith(p))
           val leftoverPath = if path.length == p.length then None else Some(path.drop(p.length))
-          EitherT.pure((result = Value.obj, leftovers = (leftoverPath, query)))
+          EitherT.pure((result = Value.obj.empty, leftovers = (leftoverPath, query)))
         else
           EitherT.liftF(None)
       case ParameterizedPath(p) =>
@@ -259,7 +259,7 @@ object Http4sServerBuilder {
       case Constant(p) =>
         if (path.startsWith(p))
           val leftoverPath = if path.length == p.length then None else Some(path.drop(p.length))
-          EitherT.pure((result = Value.obj, leftoverPath = leftoverPath))
+          EitherT.pure((result = Value.obj.empty, leftoverPath = leftoverPath))
         else
           EitherT.liftF(None)
       case WithParam(prefix, pName, pSchema, suffix) =>
