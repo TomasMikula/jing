@@ -72,11 +72,11 @@ trait ValueModule[Value[_]] {
       fromMotif(ValueMotif.Object.empty)
 
     def apply[Props](
-      f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]] => Value[Obj[Props]],
+      f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTupleU[Value, Props]] => Value[Obj[Props]],
     )(using
       ps: PropertyList[Props],
     ): Value[Obj[Props]] =
-      f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTuple[Value, Props]](ps))
+      f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTupleU[Value, Props]](ps))
 
     def builder[Props](
       f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
@@ -155,7 +155,7 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
       ValueMotif.Object.extendOpt(b, l, Some(mkEnum(ScalaValueOf.str(value))))
 
-  class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTuple[Value, Props]](
+  class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTupleU[Value, Props]](
     ps: PropertyList[Props],
   ) {
     def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
@@ -297,6 +297,38 @@ trait ValueModule[Value[_]] {
      */
     def props: PropGetter[Ps, NamesOf[Ps]] =
       PropGetter(toMotifObject(value))
+
+    def toNamedTuple: ObjToNamedTuple[Ps, PropNamesTuple[Ps], PropTypesTupleO[Value, Ps], PropTypesTupleU[Value, Ps]] =
+      ObjToNamedTuple(toMotifObject(value))
+  }
+
+  class ObjToNamedTuple[Ps, Ns <: Tuple, Ts <: Tuple, Us <: Tuple](
+    value: ValueMotif.Object[Value, Ps],
+  )(using
+    evN: Ns =:= PropNamesTuple[Ps],
+    evT: Ts =:= PropTypesTupleO[Value, Ps],
+    evU: Us =:= PropTypesTupleU[Value, Ps],
+  ) {
+    def options: NamedTuple.NamedTuple[Ns, Ts] =
+      TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple.NamedTuple[ns, Ts]]:
+        TypeEq(evT.flip).substUpperBounded[Tuple, [ts <: Tuple] =>> NamedTuple.NamedTuple[PropNamesTuple[Ps], ts]]:
+          value.toNamedTuple[Options[Value]]([M <: ObjectMotif.Mod, A] => (_, fa) => fa)
+
+    def orNones: NamedTuple.NamedTuple[Ns, Us] =
+      TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple.NamedTuple[ns, Us]]:
+        TypeEq(evU.flip).substUpperBounded[Tuple, [us <: Tuple] =>> NamedTuple.NamedTuple[PropNamesTuple[Ps], us]]:
+          value.toNamedTuple[OrNones[Value]]:
+            [M <: ObjectMotif.Mod, A] => (m, fa) =>
+              m match
+                case ObjectMotif.Mod.Witness.Req =>
+                  summon[M =:= ObjectMotif.Mod.Required.type]
+                  fa: Value[A]
+                case ObjectMotif.Mod.Witness.Opt =>
+                  summon[M =:= ObjectMotif.Mod.Optional.type]
+                  (fa: Option[Value[A]]).getOrElse(None)
+
+    def apply(): NamedTuple.NamedTuple[Ns, Ts] =
+      options
   }
 
   class PropGetter[Ps, KeySet <: NamesOf[Ps]](obj: ValueMotif.Object[Value, Ps]) extends Selectable {

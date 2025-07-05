@@ -29,7 +29,7 @@ object PropertyList {
         [A] => (_, ofa) => fOpt(ofa),
       )
 
-    def readNamedTuple2[F[_]](t: NamedTuple[PropNamesTuple[Ps], PropTypesTuple[F, Ps]])[H[_ <: Mod, _]](
+    def readNamedTuple2[F[_]](t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[F, Ps]])[H[_ <: Mod, _]](
       fReq: [A] => F[A] => H[Required.type, A],
       fOpt: [A] => (F[A] | None.type) => H[Optional.type, A],
     ): ObjectMotif[H, Ps] =

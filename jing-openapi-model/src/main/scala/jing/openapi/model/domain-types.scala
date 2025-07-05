@@ -100,17 +100,39 @@ type PropNamesTupleAcc[Props, Acc <: Tuple] <: Tuple =
         case k :: _ => PropNamesTupleAcc[init, k *: Acc]
         case k :? _ => PropNamesTupleAcc[init, k *: Acc]
 
-type PropTypesTuple[F[_], Props] =
-  PropTypesTupleAcc[F, Props, EmptyTuple]
+type PropTypesTupleF[F[_ <: ObjectMotif.Mod, _], Props] =
+  PropTypesTupleFAcc[F, Props, EmptyTuple]
 
-type PropTypesTupleAcc[F[_], Props, Acc <: Tuple] <: Tuple =
+type PropTypesTupleFAcc[F[_ <: ObjectMotif.Mod, _], Props, Acc <: Tuple] <: Tuple =
   Props match
     case Void =>
       Acc
     case init || kv =>
       kv match
-        case _ :: v => PropTypesTupleAcc[F, init, F[v] *: Acc]
-        case _ :? v => PropTypesTupleAcc[F, init, (F[v] | None.type) *: Acc]
+        case _ :: v => PropTypesTupleFAcc[F, init, F[ObjectMotif.Mod.Required.type, v] *: Acc]
+        case _ :? v => PropTypesTupleFAcc[F, init, F[ObjectMotif.Mod.Optional.type, v] *: Acc]
+
+type Options[F[_]] = [M <: ObjectMotif.Mod, A] =>>
+  M match
+    case ObjectMotif.Mod.Required.type => F[A]
+    case ObjectMotif.Mod.Optional.type => Option[F[A]]
+
+type OrNones[F[_]] = [M <: ObjectMotif.Mod, A] =>>
+  M match
+    case ObjectMotif.Mod.Required.type => F[A]
+    case ObjectMotif.Mod.Optional.type => F[A] | None.type
+
+type PropTypesTupleO[F[_], Props] =
+  PropTypesTupleF[Options[F], Props]
+
+type PropTypesTupleOAcc[F[_], Props, Acc <: Tuple] =
+  PropTypesTupleFAcc[Options[F], Props, Acc]
+
+type PropTypesTupleU[F[_], Props] =
+  PropTypesTupleF[OrNones[F], Props]
+
+type PropTypesTupleUAcc[F[_], Props, Acc <: Tuple] =
+  PropTypesTupleFAcc[OrNones[F], Props, Acc]
 
 type PropsToNamedTuple[F[_], Props] =
   PropsToNamedTupleAcc[F, Props, NamedTuple.Empty]

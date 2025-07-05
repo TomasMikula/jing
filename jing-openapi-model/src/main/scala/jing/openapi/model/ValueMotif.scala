@@ -148,6 +148,11 @@ object ValueMotif {
         [a] => (ofa: Option[F[a]]) => ofa.fold(M.pure(None))(fa => f(fa).map(Some(_))),
       ).map(Object(_))
 
+    def toNamedTuple[H[_ <: ObjectMotif.Mod, _]](
+      f: [M <: ObjectMotif.Mod, A] => (ObjectMotif.Mod.Witness[M], Object.Payload[F][M, A]) => H[M, A],
+    ): NamedTuple.NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[H, Ps]] =
+      value.toNamedTuple(f)
+
   }
 
   object Object {

@@ -15,10 +15,11 @@ final case class PetIn(
 object PetIn {
   def fromApi(p: Value[api.schemas.Pet]): Either[String, PetIn] =
     val api.schemas.Pet(obj) = p
+    val pet = obj.toNamedTuple()
     for
-      categoryIdOpt <- obj.props["category"].traverse:
+      categoryIdOpt <- pet.category.traverse:
         Category.idFromApi(_).toRight("missing category.id")
-      tagIds <- obj.props["tags"]
+      tagIds <- pet.tags
         .traverse: tags =>
           tags
             .asArray
@@ -28,10 +29,10 @@ object PetIn {
               Tag.idFromApi(tag).toRight(s"missing tags[$i].id")
     yield
       PetIn(
-        name       = obj.props["name"].stringValue,
+        name       = pet.name.stringValue,
         categoryId = categoryIdOpt,
-        photoUrls  = obj.props["photoUrls"].asArray.map(_.stringValue),
+        photoUrls  = pet.photoUrls.asArray.map(_.stringValue),
         tagIds     = tagIds,
-        status     = obj.props["status"].map(PetStatus.fromApi),
+        status     = pet.status.map(PetStatus.fromApi),
       )
 }
