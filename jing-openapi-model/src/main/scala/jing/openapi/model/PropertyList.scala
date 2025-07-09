@@ -1,7 +1,5 @@
 package jing.openapi.model
 
-import jing.openapi.model.ObjectMotif.Mod
-import jing.openapi.model.ObjectMotif.Mod.{Optional, Required}
 import libretto.lambda.util.SingletonType
 
 import scala.NamedTuple.NamedTuple
@@ -16,17 +14,27 @@ import scala.annotation.targetName
  * where `||` associates to the left.
  */
 opaque type PropertyList[Ps] =
-  ObjectMotif[[M <: ObjectMotif.Mod, A] =>> Unit, Ps]
+  ObjectMotif[[_] =>> Unit, [_] =>> Unit, Ps]
 
 object PropertyList {
   extension [Ps](ps: PropertyList[Ps]) {
-    def readNamedTuple[F[_]](t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[F, Ps]])[H[_ <: Mod, _]](
-      fReq: [A] => F[A] => H[Required.type, A],
-      fOpt: [A] => (F[A] | None.type) => H[Optional.type, A],
-    ): ObjectMotif[H, Ps] =
-      ps.zipWithNamedTuple[OrNones[F], H](t)(
-        [A] => (_, fa) => fReq(fa),
-        [A] => (_, ofa) => fOpt(ofa),
+    def readNamedTuple[Req[_], Opt[_]](
+      t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[Req, Opt, Ps]],
+    ): ObjectMotif[Req, Opt, Ps] =
+      ps.zipWithNamedTuple[Req, Opt, Req, Opt](t)(
+        [A] => (_, ra) => ra,
+        [A] => (_, oa) => oa,
+      )
+
+    def readNamedTuple[Req[_], Opt[_], G[_], H[_]](
+      t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[Req, Opt, Ps]],
+    )(
+      g: [A] => Req[A] => G[A],
+      h: [A] => Opt[A] => H[A],
+    ): ObjectMotif[G, H, Ps] =
+      ps.zipWithNamedTuple[Req, Opt, G, H](t)(
+        [A] => (_, ra) => g(ra),
+        [A] => (_, oa) => h(oa),
       )
   }
 

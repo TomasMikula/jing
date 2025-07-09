@@ -67,7 +67,7 @@ sealed trait ValueMotif[+F[_], T] {
         b.append("]")
       case obj: Object[f, ps] =>
         b.append("{")
-        def go[Ps](o: ObjectMotif[Object.Payload[F], Ps]): Unit = {
+        def go[Ps](o: ObjectMotif[F, Optional[F], Ps]): Unit = {
           o match
             case ObjectMotif.Empty() => // do nothing
             case ObjectMotif.Snoc(init, lastName, lastValue) =>
@@ -76,7 +76,7 @@ sealed trait ValueMotif[+F[_], T] {
               b.append(": ")
               f(lastValue, b)
               b.append(",")
-            case so: ObjectMotif.SnocOpt[pf, init, k, v] =>
+            case so: ObjectMotif.SnocOpt[req, opt, init, k, v] =>
               go(so.init)
               (so.pval: Option[F[v]]) match
                 case None =>
@@ -132,53 +132,32 @@ object ValueMotif {
   case class Array[F[_], T](elems: IArray[F[T]]) extends ValueMotif[F, Arr[T]]
 
   case class Object[F[_], Ps](
-    value: ObjectMotif[Object.Payload[F], Ps],
+    value: ObjectMotif[F, Optional[F], Ps],
   ) extends ValueMotif[F, Obj[Ps]] {
 
-    def getPayload[K](using i: IsPropertyOf[K, Ps]): Object.Payload[F][i.Mod, i.Type] =
+    def get[K](using i: IsPropertyOf[K, Ps]): i.ReqOrOpt[F, Optional[F]][i.Type] =
       value.get[K]
-
-    def get[K](using i: IsPropertyOf[K, Ps]): i.Modality[F[i.Type]] =
-      Object.Payload.toModality(i):
-        getPayload[K]
-
     def traverseObj[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[ValueMotif.Object[G, Ps]] =
-      value.traverse[M, Object.Payload[G]](
+      value.traverse[M, G, [x] =>> Option[G[x]]](
         f,
         [a] => (ofa: Option[F[a]]) => ofa.fold(M.pure(None))(fa => f(fa).map(Some(_))),
       ).map(Object(_))
 
-    def toNamedTuple[H[_ <: ObjectMotif.Mod, _]](
-      f: [M <: ObjectMotif.Mod, A] => (ObjectMotif.Mod.Witness[M], Object.Payload[F][M, A]) => H[M, A],
-    ): NamedTuple.NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[H, Ps]] =
-      value.toNamedTuple(f)
+    def toNamedTuple: NamedTuple.NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[F, Optional[F], Ps]] =
+      value.toNamedTuple(
+        [A] => fa => fa,
+        [A] => ofa => ofa,
+      )
+
+    def toNamedTuple[G[_], H[_]](
+      g: [A] => F[A] => G[A],
+      h: [A] => Option[F[A]] => H[A],
+    ): NamedTuple.NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[G, H, Ps]] =
+      value.toNamedTuple(g, h)
 
   }
 
   object Object {
-    type Payload[+F[_]] =
-      [M <: ObjectMotif.Mod, A] =>>
-        M match
-          case ObjectMotif.Mod.Required.type => F[A]
-          case ObjectMotif.Mod.Optional.type => Option[F[A]]
-
-    object Payload {
-      def toModality[K, Ps, F[_]](i: K IsPropertyOf Ps)(value: Payload[F][i.Mod, i.Type]): i.Modality[F[i.Type]] =
-        i.modAndModalityInterlocked match {
-          case Left((ev1, ev2)) =>
-            val v: F[i.Type] =
-              TypeEq(ev1).substUpperBounded[ObjectMotif.Mod, [m <: ObjectMotif.Mod] =>> Payload[F][m, i.Type]]:
-                value
-            ev2.flip.at[F[i.Type]]:
-              v
-          case Right((ev1, ev2)) =>
-            val v: Option[F[i.Type]] =
-              TypeEq(ev1).substUpperBounded[ObjectMotif.Mod, [m <: ObjectMotif.Mod] =>> Payload[F][m, i.Type]]:
-                value
-            ev2.flip.at[F[i.Type]]:
-              v
-        }
-    }
 
     def empty[F[_]]: ValueMotif.Object[F, Void] =
       Object(ObjectMotif.Empty())

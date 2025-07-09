@@ -71,23 +71,21 @@ object ValueCodecJson {
         value.isNotOops[s]
     }
 
-  import ObjectMotif.Mod
-
   private def encodeObjectProps[Props](
-    schema: ObjectMotif[[_ <: Mod, A] =>> Schema[A], Props],
+    schema: ObjectMotif[Schema, Schema, Props],
     value: Value[Obj[Props]],
     builder: StringBuilder,
   ): Boolean =
     schema match
       case ObjectMotif.Empty() =>
         false
-      case s: ObjectMotif.Snoc[schema, init, pname, ptype] =>
+      case s: ObjectMotif.Snoc[sch1, sch2, init, pname, ptype] =>
         summon[Props =:= (init || pname :: ptype)]
         val (vInit, vLast) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
         appendProp(s.pval, s.pname.value, vLast, propsWritten, builder)
         true
-      case s: ObjectMotif.SnocOpt[schema, init, pname, ptype] =>
+      case s: ObjectMotif.SnocOpt[sch1, sch2, init, pname, ptype] =>
         summon[Props =:= (init || pname :? ptype)]
         val (vInit, vLastOpt) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
@@ -223,7 +221,7 @@ object ValueCodecJson {
 
   // Note: Ignores any superfluous fields, for better or worse.
   private def decodeObjectLenient[Props](
-    schema: ObjectMotif[[_ <: Mod, A] =>> Schema[A], Props],
+    schema: ObjectMotif[Schema, Schema, Props],
     jsonLoc: Stack[String],
     json: JsonObject,
   ): DecodeResult[Value.Lenient[Obj[Props]]] =

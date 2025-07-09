@@ -155,13 +155,13 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
       ValueMotif.Object.extendOpt(b, l, Some(mkEnum(ScalaValueOf.str(value))))
 
-  class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTupleU[Value, Props]](
+  class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTupleF[Value, [x] =>> Value[x] | None.type, Props]](
     ps: PropertyList[Props],
   ) {
     def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
       fromMotif:
         ValueMotif.Object[Value, Props]:
-          ps.readNamedTuple[Value](t.toTuple)[ValueMotif.Object.Payload[Value]](
+          ps.readNamedTuple[Value, [x] =>> Value[x] | None.type, Value, Optional[Value]](t.toTuple)(
             [A] => (va: Value[A]) => va,
             [A] => (va: Value[A] | None.type) => toOption(va),
           )
@@ -287,7 +287,7 @@ trait ValueModule[Value[_]] {
      *
      * @see [[props]] The indirect alternative with better IDE hints about the actual property names.
      */
-    def get[K <: NamesOf[Ps]](using i: IsPropertyOf[K, Ps]): i.Modality[Value[i.Type]] =
+    def get[K <: NamesOf[Ps]](using i: IsPropertyOf[K, Ps]): i.ReqOrOpt[Value, Optional[Value]][i.Type] =
       toMotifObject(value).get[K]
 
     /** Intermediary for accessing `Obj`ect's properties.
@@ -312,20 +312,15 @@ trait ValueModule[Value[_]] {
     def options: NamedTuple.NamedTuple[Ns, Ts] =
       TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple.NamedTuple[ns, Ts]]:
         TypeEq(evT.flip).substUpperBounded[Tuple, [ts <: Tuple] =>> NamedTuple.NamedTuple[PropNamesTuple[Ps], ts]]:
-          value.toNamedTuple[Options[Value]]([M <: ObjectMotif.Mod, A] => (_, fa) => fa)
+          value.toNamedTuple
 
     def orNones: NamedTuple.NamedTuple[Ns, Us] =
       TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple.NamedTuple[ns, Us]]:
         TypeEq(evU.flip).substUpperBounded[Tuple, [us <: Tuple] =>> NamedTuple.NamedTuple[PropNamesTuple[Ps], us]]:
-          value.toNamedTuple[OrNones[Value]]:
-            [M <: ObjectMotif.Mod, A] => (m, fa) =>
-              m match
-                case ObjectMotif.Mod.Witness.Req =>
-                  summon[M =:= ObjectMotif.Mod.Required.type]
-                  fa: Value[A]
-                case ObjectMotif.Mod.Witness.Opt =>
-                  summon[M =:= ObjectMotif.Mod.Optional.type]
-                  (fa: Option[Value[A]]).getOrElse(None)
+          value.toNamedTuple[Value, [x] =>> Value[x] | None.type](
+            [A] => fa => fa,
+            [A] => ofa => ofa.getOrElse(None),
+          )
 
     def apply(): NamedTuple.NamedTuple[Ns, Ts] =
       options
@@ -352,7 +347,7 @@ trait ValueModule[Value[_]] {
 
     type Fields = PropertyGetters[Ps, NamedTuple.Empty]
 
-    def selectDynamic(propName: String): (ev: propName.type IsPropertyOf Ps) ?=> ev.Modality[Value[ev.Type]] =
+    def selectDynamic(propName: String): (ev: propName.type IsPropertyOf Ps) ?=> ev.ReqOrOpt[Value, Optional[Value]][ev.Type] =
       (ev: propName.type IsPropertyOf Ps) ?=> obj.get[propName.type]
 
     /** Get the property `K` of this object.
@@ -368,7 +363,7 @@ trait ValueModule[Value[_]] {
      *
      * The type argument `K` is constrained to (the union of) property names (`"x" | "y" | "z"`).
      */
-    def apply[K <: KeySet](using i: IsPropertyOf[K, Ps]): i.Modality[Value[i.Type]] =
+    def apply[K <: KeySet](using i: IsPropertyOf[K, Ps]): i.ReqOrOpt[Value, Optional[Value]][i.Type] =
       obj.get[K]
   }
 

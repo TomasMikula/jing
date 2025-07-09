@@ -2,6 +2,7 @@ package jing.openapi.model
 
 import libretto.lambda.Items1
 import libretto.lambda.util.{Applicative, Exists, SingletonType}
+import libretto.lambda.util.Exists.Indeed
 
 /** Schema structure parametric in the type of nested schemas.
  *
@@ -10,26 +11,36 @@ import libretto.lambda.util.{Applicative, Exists, SingletonType}
  */
 sealed trait SchemaMotif[F[_], A] {
   import SchemaMotif.*
-  import ObjectMotif.Mod
 
   def translate[G[_]](h: [X] => F[X] => G[X]): SchemaMotif[G, A] =
     this match
       case p: Primitive[G, A] => p.recast[G]
       case Array(elem) => Array(h(elem))
-      case Object(value) => Object(value.translate[Object.Payload[G]]([M <: Mod, A] => fa => h(fa)))
+      case Object(value) => Object:
+        value.translate[G, G](
+          [A] => fa => h(fa),
+          [A] => fa => h(fa),
+        )
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
       case p: Primitive[F, A] => p.recast[G]
       case Array(elem) => Array(h(elem).value)
-      case Object(value) => Object(value.wipeTranslate[Object.Payload[G]]([M <: Mod, A] => fa => h(fa)).value)
+      case Object(value) => Object:
+        value.wipeTranslate[G, G](
+          [A] => fa => h(fa),
+          [A] => fa => h(fa),
+        ).value
 
-  def wipeTranslateA[G[_], H[_]](h: [X] => F[X] => G[Exists[H]])(using G: Applicative[G]): G[SchemaMotif[H, ?]] =
+  def wipeTranslateA[M[_], G[_]](h: [X] => F[X] => M[Exists[G]])(using M: Applicative[M]): M[SchemaMotif[G, ?]] =
     this match
-      case p: Primitive[F, A] => G.pure(p.recast[H])
+      case p: Primitive[F, A] => M.pure(p.recast[G])
       case Array(elem) => h(elem).map(el => Array(el.value))
       case Object(value) =>
-        value.wipeTranslateA[G, Object.Payload[H]]([M <: Mod, A] => fa => h(fa))
+        value.wipeTranslateA[M, G, G](
+          [A] => fa => h(fa),
+          [A] => fa => h(fa),
+        )
           .map(o => Object(o.value))
 
   def isNotOops[S](using A =:= Oops[S]): Nothing =
@@ -95,12 +106,10 @@ object SchemaMotif {
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 
   case class Object[F[_], Ps](
-    value: ObjectMotif[Object.Payload[F], Ps],
+    value: ObjectMotif[F, F, Ps],
   ) extends SchemaMotif[F, Obj[Ps]]
 
   object Object {
-    type Payload[F[_]] = [M <: ObjectMotif.Mod, A] =>> F[A]
-
     def empty[F[_]]: Object[F, Void] =
       Object(ObjectMotif.Empty())
 
