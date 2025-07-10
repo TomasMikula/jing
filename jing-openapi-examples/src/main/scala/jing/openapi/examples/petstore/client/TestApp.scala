@@ -1,22 +1,16 @@
-package jing.openapi.examples
+package jing.openapi.examples.petstore.client
 
 import jing.openapi.client.default.Result.{Failed, Succeeded}
 import jing.openapi.client.default.{Response, instance}
+import jing.openapi.examples.petstore.api
 import jing.openapi.model.*
 import jing.openapi.model.Value.{arr, discriminatedUnion, enm, int64, obj, str}
 import jing.openapi.model.client.ClientEndpoint
 
 object TestApp extends App {
 
-  val api = jing.openapi("https://petstore3.swagger.io/api/v3/openapi.json")
-
   val serverUrl = "https://petstore3.swagger.io/api/v3"
   // val serverUrl = "http://localhost:8080"
-
-  // loading from local file works, too, although resolving a relative path
-  // currently breaks Metals suggestions (https://github.com/scalameta/metals/issues/7460)
-  //
-  // val api = jing.openapi("petstore3.json") // relative to this source file
 
   import api.schemas.{Category, Pet}
 

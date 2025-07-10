@@ -43,7 +43,7 @@ api
   .runAgainst("https://petstore3.swagger.io/api/v3")
 ```
 
-See more in [TestApp.scala](https://github.com/TomasMikula/jing/blob/main/jing-openapi-examples/src/main/scala/jing/openapi/examples/TestApp.scala).
+See more in [TestApp.scala](https://github.com/TomasMikula/jing/blob/main/jing-openapi-examples/src/main/scala/jing/openapi/examples/petstore/client/TestApp.scala).
 
 ## Design Principles
 
