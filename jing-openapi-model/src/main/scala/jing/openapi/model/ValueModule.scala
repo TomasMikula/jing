@@ -121,9 +121,19 @@ trait ValueModule[Value[_]] {
     def set(propName: Label, value: String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Str, Tail] =
       ValueMotif.Object.extend(b, l, str(value))
 
+  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :? Str || Tail])
+    @targetName("setOpt")
+    def set(propName: Label, value: String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Str, Tail] =
+      ValueMotif.Object.extendOpt(b, l, Some(str(value)))
+
   extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Int64 || Tail])
     def set(propName: Label, value: Long)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Int64, Tail] =
       ValueMotif.Object.extend(b, l, int64(value))
+
+  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :? Int64 || Tail])
+    @targetName("setOpt")
+    def set(propName: Label, value: Long)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Int64, Tail] =
+      ValueMotif.Object.extendOpt(b, l, Some(int64(value)))
 
   extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :: Enum[Str, Cases] || Tail])
     @targetName("setEnum")
@@ -137,14 +147,6 @@ trait ValueModule[Value[_]] {
 
     def setOpt(propName: Label, value: Option[Value[A]])(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? A, Tail] =
       ValueMotif.Object.extendOpt(b, l, value)
-
-    @targetName("setOpt")
-    def set(propName: Label, value: String)(using ev: A =:= Str, l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Str, Tail] =
-      ValueMotif.Object.extendOpt(b, l, Some(str(value)))
-
-    @targetName("setOpt")
-    def set(propName: Label, value: Long)(using ev: A =:= Int64, l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Int64, Tail] =
-      ValueMotif.Object.extendOpt(b, l, Some(int64(value)))
 
     def skip(propName: Label)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? A, Tail] =
       ValueMotif.Object.extendOpt(b, l, None)
