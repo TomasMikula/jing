@@ -30,10 +30,19 @@ trait ValueModule[Value[_]] {
    *************************/
 
   def unit: Value[Unit] = fromMotif(ValueMotif.Uno)
+
+  /** Constructs `Value[Str]` from Scala string. Also available as a [[Conversion]]. */
   def str(s: String): Value[Str] = fromMotif(ValueMotif.StringValue(s))
+
+  /** Constructs `Value[Int32]` from Scala Int. Also available as a [[Conversion]]. */
   def int32(i: Int): Value[Int32] = fromMotif(ValueMotif.Int32Value(i))
+
+  /** Constructs `Value[Int64]` from Scala Long. Also available as a [[Conversion]]. */
   def int64(i: Long): Value[Int64] = fromMotif(ValueMotif.Int64Value(i))
+
+  /** Constructs `Value[Bool]` from Scala Boolean. Also available as a [[Conversion]]. */
   def bool(b: Boolean): Value[Bool] = fromMotif(ValueMotif.BoolValue(b))
+
   def arr[T](elems: IArray[Value[T]]): Value[Arr[T]] = fromMotif(ValueMotif.Array(elems))
   def arr[T](elems: Value[T]*): Value[Arr[T]] = arr(IArray(elems*))
 
