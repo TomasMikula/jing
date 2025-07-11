@@ -88,14 +88,8 @@ trait ValueModule[Value[_]] {
     def set[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :: T]] =
       extend(SingletonType(k), v)
 
-    def set(k: String, v: String): Value[Obj[Ps || k.type :: Str]] =
-      set(k, str(v))
-
     def setOpt[T](k: String, v: Value[T]): Value[Obj[Ps || k.type :? T]] =
       extendOpt(SingletonType(k), Some(v))
-
-    def setOpt(k: String, v: String): Value[Obj[Ps || k.type :? Str]] =
-      setOpt(k, str(v))
 
     def extend[K <: String, V](k: SingletonType[K], v: Value[V]): Value[Obj[Ps || K :: V]] =
       fromMotif(ValueMotif.Object.extend(toMotifObject(value), k, v))
@@ -116,24 +110,6 @@ trait ValueModule[Value[_]] {
   extension [Acc, Label <: String, A, Tail](b: ObjectBuilder[Acc, Label :: A || Tail])
     def set(propName: Label, value: Value[A])(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: A, Tail] =
       ValueMotif.Object.extend(b, l, value)
-
-  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Str || Tail])
-    def set(propName: Label, value: String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Str, Tail] =
-      ValueMotif.Object.extend(b, l, str(value))
-
-  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :? Str || Tail])
-    @targetName("setOpt")
-    def set(propName: Label, value: String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Str, Tail] =
-      ValueMotif.Object.extendOpt(b, l, Some(str(value)))
-
-  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :: Int64 || Tail])
-    def set(propName: Label, value: Long)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :: Int64, Tail] =
-      ValueMotif.Object.extend(b, l, int64(value))
-
-  extension [Acc, Label <: String, Tail](b: ObjectBuilder[Acc, Label :? Int64 || Tail])
-    @targetName("setOpt")
-    def set(propName: Label, value: Long)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Int64, Tail] =
-      ValueMotif.Object.extendOpt(b, l, Some(int64(value)))
 
   extension [Acc, Label <: String, Cases, Tail](b: ObjectBuilder[Acc, Label :: Enum[Str, Cases] || Tail])
     @targetName("setEnum")
