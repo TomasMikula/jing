@@ -89,7 +89,24 @@ object PetstoreServerHttp4s extends IOApp {
       .handle("/pet/findByStatus_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/findByTags_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/{petId}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
-      .handle("/pet/{petId}_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
+
+      .handle("/pet/{petId}_POST"): in =>
+        val (params = params) = in.toNamedTuple()
+        val (petId = petId, name = name, status = status) = params.toNamedTuple()
+        store
+          .updateNameAndStatus(petId.longValue, name.map(_.stringValue), status.map(_.stringValue))
+          .map:
+            case Left(errMsg) =>
+              Response:
+                _
+                  .status("400")
+                  .bodyDespiteSpec_plainText(errMsg)
+            case Right(pet) =>
+              Response:
+                _
+                  .status("200")
+                  .body["application/json"](pet)
+
       .handle("/pet/{petId}_DELETE")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/{petId}/uploadImage_POST")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/store/inventory_GET")(_ => IO(Response.plainText(Status.NotImplemented)))

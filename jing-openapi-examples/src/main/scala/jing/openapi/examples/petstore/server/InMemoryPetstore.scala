@@ -7,6 +7,7 @@ import jing.openapi.examples.petstore.api.schemas.*
 import jing.openapi.examples.petstore.model
 import jing.openapi.examples.petstore.server.InMemoryPetstore.PetstoreState
 import jing.openapi.model.Value
+import jing.openapi.examples.petstore.model.PetStatus
 
 class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
   def createPet(pet: Value[Pet]): IO[Either[String, Value[Pet]]] =
@@ -28,6 +29,14 @@ class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
       case Right((petId, petIn)) =>
         state
           .modifyState(InMemoryPetstore.updatePet(petId, petIn).toState)
+          .map(_.map(pet => pet.toApi))
+
+  def updateNameAndStatus(petId: Long, newName: Option[String], newStatus: Option[String]): IO[Either[String, Value[Pet]]] =
+    newStatus
+      .traverse[Either[String, _], PetStatus](PetStatus.fromString(_))
+      .flatTraverse: (newStatus: Option[PetStatus]) =>
+        state
+          .modifyState(InMemoryPetstore.updateNameAndStatus(petId, newName, newStatus).toState)
           .map(_.map(pet => pet.toApi))
 }
 
@@ -103,6 +112,19 @@ object InMemoryPetstore {
         photoUrls = petIn.photoUrls,
         tags = tagsOpt.getOrElse(pet0.tags),
         status = statusOpt.getOrElse(pet0.status),
+      )
+
+  def updateNameAndStatus(
+    petId: Long,
+    newName: Option[String],
+    newStatus: Option[PetStatus],
+  ): StateT[Either[String, _], PetstoreState, model.Pet] =
+    for
+      pet0 <- getPet(petId)
+    yield
+      pet0.copy(
+        name = newName.getOrElse(pet0.name),
+        status = newStatus.getOrElse(pet0.status)
       )
 
   private def setPet(pet: model.Pet): State[PetstoreState, Unit] =

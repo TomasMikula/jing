@@ -23,6 +23,13 @@ object PetStatus {
       case "pending" => Pending
       case "sold" => Sold
 
+  def fromString(status: String): Either[String, PetStatus] =
+    status match
+      case "available" => Right(Available)
+      case "pending" => Right(Pending)
+      case "sold" => Right(Sold)
+      case other => Left(s"Invalid status '$other'. Permitted values are ${PetStatus.values.map(_.singletonStringValue).mkString("'", "', '", "'")}.")
+
   def toApi(status: PetStatus): Value[Enum[Str, Void || "available" || "pending" || "sold"]] =
     ???
 }
