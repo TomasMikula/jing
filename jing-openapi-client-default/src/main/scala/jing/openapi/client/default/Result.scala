@@ -1,5 +1,8 @@
 package jing.openapi.client.default
 
+import jing.openapi.model.Value.Lenient.Oopsy
+import libretto.lambda.util.NonEmptyList
+
 import java.io.IOException
 import java.io.StringWriter
 
@@ -36,6 +39,7 @@ object Result {
 
     sealed trait NotSupported extends Failure
     case class UnsupportedContentType(statusCode: Int, contentType: String, body: String) extends NotSupported
+    case class UnsupportedSchema(problems: NonEmptyList[Oopsy[? <: String]]) extends NotSupported
 
     case class UnexpectedError(thrown: Throwable) extends Failure {
       override def toString(): String =
@@ -55,6 +59,7 @@ object Result {
   def parseError[T](statusCode: Int, message: String, underlying: Throwable): Result[T] = Failed(Failure.ParseError(statusCode, message, underlying))
   def schemaViolation[T](details: String): Result[T] = Failed(Failure.SchemaViolation(details))
   def unsupportedContentType[T](statusCode: Int, contentType: String, body: String): Result[T] = Failed(Failure.UnsupportedContentType(statusCode, contentType, body))
+  def unsupportedSchema[T](problems: NonEmptyList[Oopsy[? <: String]]): Result[T] = Failed(Failure.UnsupportedSchema(problems))
   def unexpectedError[T](thrown: Throwable): Result[T] = Failed(Failure.UnexpectedError(thrown))
 
   // TODO: accumulate errors (but first need to be able to represent multiple errors)

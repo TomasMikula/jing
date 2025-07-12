@@ -5,6 +5,9 @@ import libretto.lambda.util.{SingletonType, Validated}
 import scala.reflect.ClassTag
 
 case class Value[T](underlying: ValueMotif[Value, T]) {
+  def show: String =
+    Value.show(this)
+
   def isNotOops[S](using T =:= Oops[S]): Nothing =
     underlying.isNotOops[S]
 }

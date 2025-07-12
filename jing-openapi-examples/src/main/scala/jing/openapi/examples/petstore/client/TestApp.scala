@@ -89,7 +89,7 @@ object TestApp extends App {
     case Failed(e) =>
       println(s"Failed with: $e")
     case Succeeded(Response.Accurate(value)) =>
-      val body: Value.Lenient[Arr[Pet]] =
+      val body: Value[Arr[Pet]] =
         value
           .assertCase["200"]
           .assertCase["application/json"]
@@ -116,7 +116,7 @@ object TestApp extends App {
     case Failed(e) =>
       println(s"Failed with: $e")
     case Succeeded(Response.Accurate(value)) =>
-      val body: Value.Lenient[Arr[Pet]] =
+      val body: Value[Arr[Pet]] =
         value
           .assertCase["200"]
           .assertCase["application/json"]
