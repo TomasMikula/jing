@@ -1,4 +1,6 @@
 package jing.openapi.client.default
 
-given instance: ClientJdk =
-  new ClientJdk
+import jing.openapi.model.Value
+
+given instance: ClientJdk[Value.Lenient] =
+  new ClientJdk([A] => Result.Succeeded(_))

@@ -5,7 +5,7 @@ import jing.openapi.client.default.Response as Resp
 import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.client.{Client, HttpThunk}
-import jing.openapi.model.{::, :?, Arr, Body, BodySchema, DiscriminatedUnion, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueMotif, ||}
+import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, DiscriminatedUnion, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueModule, ValueMotif}
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq
 import libretto.lambda.util.TypeEq.Refl
@@ -17,9 +17,13 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.OptionConverters.*
 
-class ClientJdk extends Client {
+class ClientJdk[Val[_]](
+  fromLenient: [A] => Value.Lenient[A] => Result[Val[A]],
+)(using
+  Val: ValueModule[Val],
+) extends Client {
 
-  override type Response[T] = Result[Resp[Value.Lenient, T]]
+  override type Response[T] = Result[Resp[Val, T]]
 
   override type SupportedMimeType = "application/json"
 
@@ -143,7 +147,7 @@ class ClientJdk extends Client {
   private def parseResponse[T](
     schema: ResponseSchema[T],
     response: HttpResponse[String],
-  ): Result[Resp[Value.Lenient, T]] = {
+  ): Result[Resp[Val, T]] = {
     val code = response.statusCode()
     schema.match
       case ResponseSchema(items) =>
@@ -153,7 +157,7 @@ class ClientJdk extends Client {
               .map:
                 case Right(value) =>
                   Resp.Accurate:
-                    Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), value)
+                    Val.discriminatedUnion(IsCaseOf.fromMember(i), value)
                 case Left((TypeEq(Refl()), extraneousBody)) =>
                   Resp.WithExtraneousBody(IsCaseOf.fromMember(i), extraneousBody)
           case None =>
@@ -164,13 +168,13 @@ class ClientJdk extends Client {
     statusCode: Int,
     schema: BodySchema[T],
     response: HttpResponse[String],
-  ): Result[Either[(T =:= Unit, Resp.StringBody), Value.Lenient[T]]] =
+  ): Result[Either[(T =:= Unit, Resp.StringBody), Val[T]]] =
     schema match
       case BodySchema.Empty =>
         Result.Succeeded:
           response.body() match
             case body if body.isEmpty =>
-              Right(Value.Lenient.unit)
+              Right(Val.unit)
             case body =>
               val ct = response.headers().firstValue("Content-Type").toScala
               Left((summon, Resp.StringBody(ct, body)))
@@ -183,7 +187,7 @@ class ClientJdk extends Client {
             byMediaType.getOption(contentType) match
               case Some(Indeed((i, s))) =>
                 parseBody(statusCode, s, contentType, response.body())
-                  .map(b => Right(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), b)))
+                  .map(b => Right(Val.discriminatedUnion(IsCaseOf.fromMember(i), b)))
               case None =>
                 Result.unexpectedContentType(statusCode, contentType, response.body())
           case None =>
@@ -194,7 +198,7 @@ class ClientJdk extends Client {
     schema: Schema[T],
     contentType: String,
     body: String,
-  ): Result[Value.Lenient[T]] =
+  ): Result[Val[T]] =
     contentType match
       case "application/json" =>
         io.circe.parser.parse(body) match
@@ -208,9 +212,9 @@ class ClientJdk extends Client {
   private def jsonParsingFailure[T](code: Int, e: ParsingFailure): Result[T] =
     Result.parseError(code, s"JSON parsing failure: ${e.message}", e.underlying)
 
-  private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Value.Lenient[T]] =
+  private def parseJsonBody[T](schema: Schema[T], body: Json): Result[Val[T]] =
     ValueCodecJson.decodeLenient(schema, body) match
-      case DecodeResult.Succeeded(value) => Result.Succeeded(value)
+      case DecodeResult.Succeeded(value) => fromLenient(value)
       case DecodeResult.SchemaViolation(details) => Result.schemaViolation(details)
 
   private def urlEncode(s: String): String =
