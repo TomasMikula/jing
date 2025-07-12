@@ -14,6 +14,7 @@ import java.io.IOException
 import java.net.http.HttpRequest.{BodyPublisher, BodyPublishers}
 import java.net.http.HttpResponse.BodyHandlers
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.OptionConverters.*
 
 class ClientJdk extends Client {
@@ -175,7 +176,10 @@ class ClientJdk extends Client {
               Left((summon, Resp.StringBody(ct, body)))
       case BodySchema.Variants(byMediaType) =>
         response.headers().firstValue("Content-Type").toScala match
-          case Some(contentType) =>
+          case Some(headerValue) =>
+            val NonEmptyList(contentType, rawParams) =
+              headerValue.split(";", -1).map(_.trim).toList : @unchecked // safe because `split(_, -1)` always returns a non-empty array
+            // TODO: take Content-Type parameters (charset, boundary) into account
             byMediaType.getOption(contentType) match
               case Some(Indeed((i, s))) =>
                 parseBody(statusCode, s, contentType, response.body())
