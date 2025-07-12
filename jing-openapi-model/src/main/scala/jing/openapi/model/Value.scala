@@ -21,27 +21,7 @@ object Value extends ValueModule[Value] {
     ) extends Value.Lenient[Oops[S]]
 
     def show: String =
-      val b = new StringBuilder
-      show(b)
-      b.result()
-
-    def show(
-      b: StringBuilder,
-    ): Unit = {
-      this match
-        case Proper(underlying) =>
-          underlying.show([A] => (va: Lenient[A], b: StringBuilder) => va.show(b), b)
-        case Oopsy(message, details) =>
-          b.append("Oops(")
-          b.append(message)
-          details match
-            case Some(s) =>
-              b.append(": ")
-              b.append(s)
-            case None =>
-              // do nothing
-          b.append(")")
-    }
+      Lenient.show(this)
 
     def toValue: Validated[Oopsy[? <: String], Value[T]] =
       this match
@@ -78,6 +58,22 @@ object Value extends ValueModule[Value] {
         case va: Lenient[A] => Some(va)
         case None => None
 
+    override def showAppend[A](v: Lenient[A])(b: StringBuilder): Unit = {
+      v match
+        case Proper(underlying) =>
+          underlying.show([A] => (va: Lenient[A], c: StringBuilder) => showAppend(va)(c), b)
+        case Oopsy(message, details) =>
+          b.append("Oops(")
+          b.append(message)
+          details match
+            case Some(s) =>
+              b.append(": ")
+              b.append(s)
+            case None =>
+              // do nothing
+          b.append(")")
+    }
+
     def oops[S <: String](message: SingletonType[S], details: Option[String]): Lenient[Oops[S]] =
       Oopsy(message, details)
 
@@ -109,10 +105,6 @@ object Value extends ValueModule[Value] {
       case va: Value[A] => Some(va)
       case None => None
 
-  extension [Ps](value: Value[Obj[Ps]]) {
-    private def asObject: ValueMotif.Object[Value, Ps] =
-      value.underlying match
-        case o: ValueMotif.Object[Value, ps] =>
-          o
-  }
+  override def showAppend[A](v: Value[A])(b: StringBuilder): Unit =
+    v.underlying.show([X] => (vx: Value[X], c: StringBuilder) => showAppend(vx)(c), b)
 }

@@ -22,6 +22,8 @@ trait ValueModule[Value[_]] {
   def toMotifObj[Ps](v: Value[Obj[Ps]]): ValueMotif[Value, Obj[Ps]]
   def toMotifDiscriminatedUnion[Cases](v: Value[DiscriminatedUnion[Cases]]): ValueMotif[Value, DiscriminatedUnion[Cases]]
 
+  def showAppend[A](v: Value[A])(b: StringBuilder): Unit
+
   /** Deferring the responsibility to keep `Value[A]` distinquishable from `None` to the implementation. */
   def toOption[A](va: Value[A] | None.type): Option[Value[A]]
 
@@ -437,4 +439,9 @@ trait ValueModule[Value[_]] {
         .get(x.tag)
         .apply(x.value)
   }
+
+  def show[A](va: Value[A]): String =
+    val b = new StringBuilder
+    showAppend(va)(b)
+    b.result()
 }
