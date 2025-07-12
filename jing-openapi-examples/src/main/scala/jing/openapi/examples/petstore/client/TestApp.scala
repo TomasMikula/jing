@@ -29,7 +29,7 @@ object TestApp extends App {
         Pet(obj.builder(_
           .set("id", 12345L)
           .set("name", "Cookie")
-          .set("category", Category(obj.builder(_.set("id", 1L).skip("name"))))
+          .skip("category")
           .set("photoUrls", arr(str("https://cookie.com/pic.jpg")))
           .skip("tags")
           .set("status", "available")
@@ -39,7 +39,7 @@ object TestApp extends App {
         Pet(obj(_(
           id = 12345L,
           name = "Cookie",
-          category = Category(obj(_(id = 1L, name = None))),
+          category = None,
           photoUrls = arr("https://cookie.com/pic.jpg"),
           tags = None,
           status = enm("available"),
