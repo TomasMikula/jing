@@ -27,7 +27,7 @@ object TestApp extends App {
 
        // constructing Obj-ects using builder pattern
         Pet(obj.builder(_
-          .set("id", 12345L)
+          .set("id", 12345L) // XXX: petstore3.swagger.io does require id when creating a pet 🤦
           .set("name", "Cookie")
           .skip("category")
           .set("photoUrls", arr(str("https://cookie.com/pic.jpg")))
@@ -37,7 +37,7 @@ object TestApp extends App {
 
         // constructing Obj-ects from named tuples
         Pet(obj(_(
-          id = 12345L,
+          id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
           name = "Cookie",
           category = None,
           photoUrls = arr("https://cookie.com/pic.jpg"),
@@ -48,7 +48,25 @@ object TestApp extends App {
       })
       .runAgainst(serverUrl)
 
-  println(postResult.map(_.show))
+  // obtain pet id from the response
+  val petId =
+    postResult match
+      case Failed(e) =>
+        println(s"Failed with: $e")
+        -1
+      case Succeeded(Response.Accurate(value)) =>
+        val body: Value[Pet] =
+          value
+            .assertCase["200"]
+            .assertCase["application/json"]
+        println(body.show)
+        val Pet(pet) = body
+        pet.props["id"] match
+          case Some(id) => id.longValue
+          case None => -1
+      case Succeeded(resp @ Response.WithExtraneousBody(_, body)) =>
+        println(s"${resp.statusCode}: $body")
+        -1
 
   // Update the pet's name and status
   // --------------------------------
@@ -61,7 +79,7 @@ object TestApp extends App {
       .Post
       .as[ClientEndpoint]
       .params(_
-        .set("petId", 12345L)  // path parameter
+        .set("petId", petId)   // path parameter
         .set("name", "Muffin") // query parameter
         .set("status", "sold") // query parameter
       )
