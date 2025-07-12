@@ -19,7 +19,7 @@ import scala.jdk.OptionConverters.*
 
 class ClientJdk extends Client {
 
-  override type Response[T] = Result[Resp[T]]
+  override type Response[T] = Result[Resp[Value.Lenient, T]]
 
   override type SupportedMimeType = "application/json"
 
@@ -143,7 +143,7 @@ class ClientJdk extends Client {
   private def parseResponse[T](
     schema: ResponseSchema[T],
     response: HttpResponse[String],
-  ): Result[Resp[T]] = {
+  ): Result[Resp[Value.Lenient, T]] = {
     val code = response.statusCode()
     schema.match
       case ResponseSchema(items) =>

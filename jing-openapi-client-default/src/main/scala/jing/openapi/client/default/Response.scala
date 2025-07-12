@@ -1,27 +1,39 @@
 package jing.openapi.client.default
 
-import jing.openapi.model.{DiscriminatedUnion, IsCaseOf, Value}
+import jing.openapi.model.{DiscriminatedUnion, IsCaseOf, ValueModule}
 
-enum Response[T] {
-  case Accurate(value: Value.Lenient[DiscriminatedUnion[T]])
-
-  case WithExtraneousBody[Status, T](
-    i: (Status IsCaseOf T) { type Type = Unit },
-    body: Response.StringBody,
-  ) extends Response[T]
-
-  def statusCode: String =
-    this match
-      case Accurate(value) => value.discriminator
-      case WithExtraneousBody(i, body) => i.label
-
-  def show: String =
-    this match
-      case Accurate(value) => value.show
-      case WithExtraneousBody(i, body) => s"${i.label}(${body.body})"
+sealed trait Response[+Value[_], T] {
+  def statusCode: String
+  def show: String
 }
 
 object Response {
+
+  case class Accurate[Value[_], T](
+    value: Value[DiscriminatedUnion[T]],
+  )(using
+    ValueModule[Value],
+  ) extends Response[Value, T] {
+
+    override def statusCode: String =
+      value.discriminator
+
+    override def show: String =
+      summon[ValueModule[Value]].show(value)
+
+  }
+
+  case class WithExtraneousBody[Status, T](
+    i: (Status IsCaseOf T) { type Type = Unit },
+    body: Response.StringBody,
+  ) extends Response[Nothing, T] {
+
+    override def statusCode: String = i.label
+
+    override def show: String = s"${i.label}(${body.body})"
+
+  }
+
   case class StringBody(
     contentType: Option[String],
     body: String,

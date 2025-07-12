@@ -10,6 +10,7 @@ case class Value[T](underlying: ValueMotif[Value, T]) {
 }
 
 object Value extends ValueModule[Value] {
+  given ValueModule[Value] = this
 
   /** Value permitting nested errors ([[Oops]]-typed values). */
   enum Lenient[T] {
@@ -34,6 +35,8 @@ object Value extends ValueModule[Value] {
   }
 
   object Lenient extends ValueModule[Lenient] {
+    given ValueModule[Lenient] = this
+
     override def classTag[T]: ClassTag[Lenient[T]] = summon[ClassTag[Lenient[T]]]
 
     override def fromMotif[T](v: ValueMotif[Lenient, T]): Lenient[T] = Proper(v)
