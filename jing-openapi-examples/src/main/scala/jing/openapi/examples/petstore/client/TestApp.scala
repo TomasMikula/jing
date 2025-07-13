@@ -1,10 +1,9 @@
 package jing.openapi.examples.petstore.client
 
-import jing.openapi.client.default.Result.{Failed, Succeeded}
-import jing.openapi.client.default.{Response, instance}
+import jing.openapi.client.default.instance
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.*
-import jing.openapi.model.Value.{arr, discriminatedUnion, enm, int64, obj, str}
+import jing.openapi.model.Value.{arr, enm, obj}
 import jing.openapi.model.client.ClientEndpoint
 
 object TestApp {
@@ -31,7 +30,7 @@ object TestApp {
             .set("id", 12345L) // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             .set("name", "Cookie")
             .skip("category")
-            .set("photoUrls", arr(str("https://cookie.com/pic.jpg")))
+            .set("photoUrls", arr("https://cookie.com/pic.jpg"))
             .skip("tags")
             .set("status", "available")
           ))
