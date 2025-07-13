@@ -69,11 +69,11 @@ object TestApp {
         .`/pet/{petId}`
         .Post
         .as[ClientEndpoint]
-        .params(_
-          .set("petId", petId)   // path parameter
-          .set("name", "Muffin") // query parameter
-          .set("status", "sold") // query parameter
-        )
+        .params.fromNamedTuple:
+          ( petId = petId   // path parameter
+          , name = "Muffin" // query parameter
+          , status = "sold" // query parameter
+          )
         .runAgainst(serverUrl)
         .assertSuccess("Updating pet failed") match
           case resp =>
@@ -87,9 +87,9 @@ object TestApp {
       .`/pet/findByStatus`
       .Get
       .as[ClientEndpoint]
-      .params(_
-        .set("status", "available")
-      )
+      .params.fromNamedTuple:
+        ( status = enm("available")
+        )
       .runAgainst(serverUrl)
       .assertSuccess("findByStatus failed")
       .assertStatus["200"]
@@ -105,9 +105,9 @@ object TestApp {
       .`/pet/findByTags`
       .Get
       .as[ClientEndpoint]
-      .params(_
-        .set("tags", arr("tag1", "tag2")),
-      )
+      .params.fromNamedTuple:
+        ( tags = arr("tag1", "tag2")
+        )
       .runAgainst(serverUrl)
       .assertSuccess("findByTags failed")
       .assertStatus["200"]

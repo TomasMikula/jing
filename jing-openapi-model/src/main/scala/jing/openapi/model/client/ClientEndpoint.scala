@@ -3,20 +3,17 @@ package jing.openapi.model.client
 import jing.openapi.model.*
 import jing.openapi.model.RequestSchema.ConstantPath
 
+import scala.NamedTuple.NamedTuple
+
 class ClientEndpoint[Is, O](
   private val underlying: HttpEndpoint[Is, O],
 ) {
   import ClientEndpoint.*
 
-  def params[Qs, Rest](using ev: ToRightAssoc[Is] =:= ("params" :: Obj[Qs] || Rest))(
-    params: Value[Obj[Qs]],
-  ): ClientEndpoint.WithQueryParams[Is, Qs, Rest, O] =
-    WithQueryParams(this, params)
-
-  def params[Qs, Rest](using ev: ToRightAssoc[Is] =:= ("params" :: Obj[Qs] || Rest))(
-    f: Value.ObjectBuilder[Void, ToRightAssoc[Qs]] => Value.ObjectBuilder[Qs, Void],
-  ): ClientEndpoint.WithQueryParams[Is, Qs, Rest, O] =
-    params(f(Value.ObjectBuilder[Qs]).result)
+  def params[Ps, Rest](using
+    ev: ToRightAssoc[Is] =:= ("params" :: Obj[Ps] || Rest),
+  ): PendingParams[Is, Ps, PropNamesTuple[Ps], PropTypesTupleU[Value, Ps], Rest, O] =
+    PendingParams[Is, Ps, PropNamesTuple[Ps], PropTypesTupleU[Value, Ps], Rest, O](this)
 }
 
 object ClientEndpoint {
@@ -44,6 +41,23 @@ object ClientEndpoint {
         body = Some((bodySchema, Body(i, body))),
         responseSchema,
       )
+
+  class PendingParams[Is, Ps, PNames <: PropNamesTuple[Ps], PTypes <: PropTypesTupleU[Value, Ps], Rest, O](
+    endpoint: ClientEndpoint[Is, O],
+  ) {
+    def fromValue(
+      params: Value[Obj[Ps]],
+    ): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
+      WithQueryParams(endpoint, params)
+
+    def fromNamedTuple(t: NamedTuple[PNames, PTypes])(using PropertyList[Ps]): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
+      fromValue(Value.obj(_(t.toTuple)))
+
+    def apply(
+      f: Value.ObjectBuilder[Void, ToRightAssoc[Ps]] => Value.ObjectBuilder[Ps, Void],
+    ): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
+      fromValue(f(Value.ObjectBuilder[Ps]).result)
+  }
 
   sealed trait RequestBuilder[Is, Acc, Remaining, O] {
     def toRequest(using ev1: Acc =:= Is, ev2: Remaining =:= Void): HttpThunk[Nothing, O]
