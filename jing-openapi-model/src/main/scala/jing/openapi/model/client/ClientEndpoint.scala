@@ -50,10 +50,10 @@ object ClientEndpoint {
     ): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
       WithQueryParams(endpoint, params)
 
-    def fromNamedTuple(t: NamedTuple[PNames, PTypes])(using PropertyList[Ps]): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
+    def apply(t: NamedTuple[PNames, PTypes])(using PropertyList[Ps]): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
       fromValue(Value.obj(_(t.toTuple)))
 
-    def apply(
+    def builder(
       f: Value.ObjectBuilder[Void, ToRightAssoc[Ps]] => Value.ObjectBuilder[Ps, Void],
     ): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
       fromValue(f(Value.ObjectBuilder[Ps]).result)

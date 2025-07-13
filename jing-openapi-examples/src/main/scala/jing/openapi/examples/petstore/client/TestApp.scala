@@ -69,7 +69,7 @@ object TestApp {
         .`/pet/{petId}`
         .Post
         .as[ClientEndpoint]
-        .params.fromNamedTuple:
+        .params:
           ( petId = petId   // path parameter
           , name = "Muffin" // query parameter
           , status = "sold" // query parameter
@@ -87,7 +87,7 @@ object TestApp {
       .`/pet/findByStatus`
       .Get
       .as[ClientEndpoint]
-      .params.fromNamedTuple:
+      .params:
         ( status = enm("available")
         )
       .runAgainst(serverUrl)
@@ -105,7 +105,7 @@ object TestApp {
       .`/pet/findByTags`
       .Get
       .as[ClientEndpoint]
-      .params.fromNamedTuple:
+      .params:
         ( tags = arr("tag1", "tag2")
         )
       .runAgainst(serverUrl)
