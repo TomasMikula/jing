@@ -52,21 +52,14 @@ object TestApp extends App {
   val petId =
     postResult match
       case Failed(e) =>
-        println(s"Failed with: $e")
+        println(s"Create pet failed with: $e")
         -1
-      case Succeeded(Response.Accurate(value)) =>
-        val body: Value[Pet] =
-          value
-            .assertCase["200"]
-            .assertCase["application/json"]
-        println(body.show)
-        val Pet(pet) = body
+      case Succeeded(resp) =>
+        println(s"Create pet result: ${resp.show}")
+        val Pet(pet) = resp.assertStatus.apply["200"].assertCase["application/json"]
         pet.props["id"] match
           case Some(id) => id.longValue
           case None => -1
-      case Succeeded(resp @ Response.WithExtraneousBody(_, body)) =>
-        println(s"${resp.statusCode}: $body")
-        -1
 
   // Update the pet's name and status
   // --------------------------------
@@ -86,7 +79,7 @@ object TestApp extends App {
       .runAgainst(serverUrl)
 
   println()
-  println(updateResult.map(_.show))
+  println(s"Update pet result: ${updateResult.map(_.show)}")
 
   // Find available pets
   // -------------------
@@ -105,15 +98,10 @@ object TestApp extends App {
   println()
   findResult match
     case Failed(e) =>
-      println(s"Failed with: $e")
-    case Succeeded(Response.Accurate(value)) =>
-      val body: Value[Arr[Pet]] =
-        value
-          .assertCase["200"]
-          .assertCase["application/json"]
-      println(body.show)
-    case Succeeded(resp @ Response.WithExtraneousBody(_, body)) =>
-      println(s"${resp.statusCode}: $body")
+      println(s"findByStatus failed with: $e")
+    case Succeeded(resp) =>
+      val body = resp.assertStatus["200"].assertCase["application/json"]
+      println(s"findByStatus result: ${body.show}")
 
   // Find pets with the given tags
   // -----------------------------
@@ -132,13 +120,8 @@ object TestApp extends App {
   println()
   findByTagsResult match
     case Failed(e) =>
-      println(s"Failed with: $e")
-    case Succeeded(Response.Accurate(value)) =>
-      val body: Value[Arr[Pet]] =
-        value
-          .assertCase["200"]
-          .assertCase["application/json"]
-      println(body.show)
-    case Succeeded(resp @ Response.WithExtraneousBody(_, body)) =>
-      println(s"${resp.statusCode}: $body")
+      println(s"findByTags failed with: $e")
+    case Succeeded(resp) =>
+      val body = resp.assertStatus["200"].assertCase["application/json"]
+      println(s"findByTags result: ${body.show}")
 }
