@@ -6,7 +6,7 @@ import cats.syntax.all.*
 import jing.openapi.examples.petstore.api.schemas.*
 import jing.openapi.examples.petstore.model
 import jing.openapi.examples.petstore.server.InMemoryPetstore.PetstoreState
-import jing.openapi.model.Value
+import jing.openapi.model.{||, Arr, Enum, Str, Value}
 import jing.openapi.examples.petstore.model.PetStatus
 
 class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
@@ -38,6 +38,21 @@ class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
         state
           .modifyState(InMemoryPetstore.updateNameAndStatus(petId, newName, newStatus).toState)
           .map(_.map(pet => pet.toApi))
+
+  def findAll: IO[Value[Arr[Pet]]] =
+    state
+      .get
+      .map: state =>
+        Value.arr(state.pets.values.map(_.toApi).toArray*)
+
+  def findByStatus(
+    status: Value[Enum[Str, Void || "available" || "pending" || "sold"]],
+  ): IO[Value[Arr[Pet]]] =
+    val st = PetStatus.fromApi(status)
+    state
+      .get
+      .map: state =>
+        Value.arr(state.pets.values.filter(_.status == st).map(_.toApi).toArray*)
 }
 
 object InMemoryPetstore {

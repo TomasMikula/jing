@@ -3,12 +3,15 @@ package jing.openapi.examples.petstore.server
 import cats.effect.{ExitCode, IO, IOApp}
 import com.comcast.ip4s.*
 import jing.openapi.examples.petstore.api
+import jing.openapi.model.{Arr, Value}
 import jing.openapi.model.Value.discriminatedUnion
 import jing.openapi.server.http4s.{Http4sServerBuilder, Response, Routes}
 import org.http4s.Status
 import org.http4s.ember.server.EmberServerBuilder
 
 object PetstoreServerHttp4s extends IOApp {
+
+  import api.schemas.Pet
 
   override def run(args: List[String]): IO[ExitCode] =
     for
@@ -86,7 +89,20 @@ object PetstoreServerHttp4s extends IOApp {
                   .status("200")
                   .body["application/json"](pet)
 
-      .handle("/pet/findByStatus_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/findByStatus_GET"): in =>
+        val (params = params) = in.toNamedTuple()
+        val (status = status) = params.toNamedTuple()
+        val findPets: IO[Value[Arr[Pet]]] =
+          status match
+            case Some(status) => store.findByStatus(status)
+            case None         => store.findAll
+        findPets
+          .map: pets =>
+            Response:
+              _
+                .status("200")
+                .body["application/json"](pets)
+
       .handle("/pet/findByTags_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
       .handle("/pet/{petId}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
 
