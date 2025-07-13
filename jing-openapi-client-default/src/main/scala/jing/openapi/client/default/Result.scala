@@ -7,10 +7,27 @@ import java.io.IOException
 import java.io.StringWriter
 
 sealed trait Result[T] {
+  import Result.*
+
   def flatMap[U](f: T => Result[U]): Result[U]
 
   def map[U](f: T => U): Result[U] =
     flatMap(t => Result.Succeeded(f(t)))
+
+  def assertSuccess(failureMsg: String): T =
+    this match
+      case Succeeded(value) =>
+        value
+      case Failed(failure) =>
+        throw IllegalStateException(s"$failureMsg: $failure")
+
+  def assertFailure: Failure =
+    this match
+      case Succeeded(value) =>
+        throw IllegalStateException(s"Expected failure, but succeeded with $value")
+      case Failed(failure) =>
+        failure
+
 }
 
 object Result {
