@@ -29,7 +29,7 @@ object TestApp {
           Pet(obj.builder(_
             .set("id", 12345L) // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             .set("name", "Cookie")
-            .skip("category")
+            .set("category", Category(obj.builder(_.skip("id").set("name", "Dogs"))))
             .set("photoUrls", arr("https://cookie.com/pic.jpg"))
             .set("tags", arr(
               Tag(obj(_(id = None, name = "cutie"))),
@@ -42,7 +42,7 @@ object TestApp {
           Pet(obj(_(
             id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             name = "Cookie",
-            category = None,
+            category = Category(obj(_(id = None, name = "Dogs"))),
             photoUrls = arr("https://cookie.com/pic.jpg"),
             tags = arr(
               Tag(obj(_(id = None, name = "cutie"))),

@@ -110,12 +110,27 @@ object InMemoryPetstore {
         .get(tagId)
         .toRight(left = s"Tag id=$tagId does not exist.")
 
+  def getCategoryByNameOpt(name: String): StateT[Either[String, _], PetstoreState, Option[model.Category]] =
+    StateT.inspectF:
+      _.categories
+        .values
+        .find(_.name == name)
+        .asRight
+
   def getTagByNameOpt(tagName: String): StateT[Either[String, _], PetstoreState, Option[model.Tag]] =
     StateT.inspectF:
       _.tags
         .values
         .find(_.name == tagName)
         .asRight
+
+  private def createCategory(name: String): StateT[Either[String, _], PetstoreState, model.Category] =
+    for
+      id <- nextIdT
+      cat = model.Category(id, name)
+      _ <- setCategoryT(cat)
+    yield
+      cat
 
   private def createTag(tagName: String): StateT[Either[String, _], PetstoreState, model.Tag] =
     for
@@ -125,11 +140,32 @@ object InMemoryPetstore {
     yield
       tag
 
+  def getOrCreateCategoryByName(name: String): StateT[Either[String, _], PetstoreState, model.Category] =
+    getCategoryByNameOpt(name)
+      .flatMap:
+        case Some(cat) => cat.pure
+        case None => createCategory(name)
+
   def getOrCreateTagByName(tagName: String): StateT[Either[String, _], PetstoreState, model.Tag] =
     getTagByNameOpt(tagName)
       .flatMap:
         case Some(tag) => tag.pure
         case None => createTag(tagName)
+
+  def getOrCreateCategory(
+    catIdIorName: Ior[Long, String],
+  ): StateT[Either[String, _], PetstoreState, model.Category] =
+    catIdIorName match
+      case Ior.Left(id) =>
+        getCategory(id)
+      case Ior.Right(name) =>
+        getOrCreateCategoryByName(name)
+      case Ior.Both(id, name) =>
+        getCategory(id)
+          .flatMapF: cat =>
+            if (cat.name == name)
+              then Right(cat)
+              else Left(s"Category id=$id is not named '$name'. It is named '${cat.name}'.")
 
   def getOrCreateTag(
     tagIdIorName: Ior[Long, String],
@@ -148,7 +184,7 @@ object InMemoryPetstore {
 
   def createPet(petIn: model.PetIn): StateT[Either[String, _], PetstoreState, model.Pet] =
     for
-      categoryOpt <- petIn.categoryId.traverse(getCategory)
+      categoryOpt <- petIn.category.traverse(getOrCreateCategory)
       tagsOpt <- petIn.tags.traverse(_.traverse(getOrCreateTag))
       id <- nextIdT
       pet = model.Pet(
@@ -167,7 +203,7 @@ object InMemoryPetstore {
     val model.PetIn(name, categoryIdOpt, photoUrls, tags, statusOpt) = petIn
     for
       pet0 <- getPet(petId)
-      categoryOpt <- categoryIdOpt.traverse(getCategory)
+      categoryOpt <- categoryIdOpt.traverse(getOrCreateCategory)
       tagsOpt <- tags.traverse(_.traverse(getOrCreateTag))
     yield
       pet0.copy(
@@ -196,6 +232,9 @@ object InMemoryPetstore {
 
   private def setPetT(pet: model.Pet): StateT[Either[String, _], PetstoreState, Unit] =
     StateT.fromState(setPet(pet).map(Right(_)))
+
+  private def setCategoryT(cat: model.Category): StateT[Either[String, _], PetstoreState, Unit] =
+    StateT.modify { s => s.copy(categories = s.categories.updated(cat.id, cat)) }
 
   private def setTagT(tag: model.Tag): StateT[Either[String, _], PetstoreState, Unit] =
     StateT.modify { s => s.copy(tags = s.tags.updated(tag.id, tag)) }

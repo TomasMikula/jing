@@ -7,7 +7,7 @@ import jing.openapi.model.Value
 
 final case class PetIn(
   name: String,
-  categoryId: Option[Long],
+  category: Option[Ior[Long, String]],
   photoUrls: IArray[String],
   tags: Option[List[Ior[Long, String]]],
   status: Option[PetStatus],
@@ -18,8 +18,9 @@ object PetIn {
     val api.schemas.Pet(obj) = p
     val pet = obj.toNamedTuple()
     for
-      categoryIdOpt <- pet.category.traverse:
-        Category.idFromApi(_).toRight("missing category.id")
+      categoryOpt <- pet.category.traverse:
+        Category.idIorNameFromApi(_)
+          .leftMap(errMsg => s"category: $errMsg")
       tagIdIorNames <- pet.tags
         .traverse: tags =>
           tags
@@ -32,7 +33,7 @@ object PetIn {
     yield
       PetIn(
         name       = pet.name.stringValue,
-        categoryId = categoryIdOpt,
+        category   = categoryOpt,
         photoUrls  = pet.photoUrls.asArray.map(_.stringValue),
         tags       = tagIdIorNames,
         status     = pet.status.map(PetStatus.fromApi),
