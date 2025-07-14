@@ -103,7 +103,20 @@ object PetstoreServerHttp4s extends IOApp {
                 .status("200")
                 .body["application/json"](pets)
 
-      .handle("/pet/findByTags_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
+      .handle("/pet/findByTags_GET"): in =>
+        val (params = params) = in.toNamedTuple()
+        val (tags = tags) = params.toNamedTuple()
+        val findPets: IO[Value[Arr[Pet]]] =
+          tags match
+            case Some(tags) => store.findByTags(tags)
+            case None       => store.findAll
+        findPets
+          .map: pets =>
+            Response:
+              _
+                .status("200")
+                .body["application/json"](pets)
+
       .handle("/pet/{petId}_GET")(_ => IO(Response.plainText(Status.NotImplemented)))
 
       .handle("/pet/{petId}_POST"): in =>

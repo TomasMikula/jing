@@ -8,10 +8,10 @@ import jing.openapi.model.client.ClientEndpoint
 
 object TestApp {
 
-  val serverUrl = "https://petstore3.swagger.io/api/v3"
-  // val serverUrl = "http://localhost:8080"
+  // val serverUrl = "https://petstore3.swagger.io/api/v3"
+  val serverUrl = "http://localhost:8080"
 
-  import api.schemas.{Category, Pet}
+  import api.schemas.{Category, Pet, Tag}
 
   def main(args: Array[String]): Unit =
     // Create a pet
@@ -31,7 +31,10 @@ object TestApp {
             .set("name", "Cookie")
             .skip("category")
             .set("photoUrls", arr("https://cookie.com/pic.jpg"))
-            .skip("tags")
+            .set("tags", arr(
+              Tag(obj(_(id = None, name = "cutie"))),
+              Tag(obj(_(id = None, name = "good girl")))
+            ))
             .set("status", "available")
           ))
 
@@ -41,7 +44,10 @@ object TestApp {
             name = "Cookie",
             category = None,
             photoUrls = arr("https://cookie.com/pic.jpg"),
-            tags = None,
+            tags = arr(
+              Tag(obj(_(id = None, name = "cutie"))),
+              Tag(obj(_(id = None, name = "good girl")))
+            ),
             status = enm("available"),
           )))
 
@@ -105,7 +111,7 @@ object TestApp {
       .Get
       .as[ClientEndpoint]
       .params:
-        ( tags = arr("tag1", "tag2")
+        ( tags = arr("cutie")
         )
       .runAgainst(serverUrl)
       .assertSuccess("findByTags failed")

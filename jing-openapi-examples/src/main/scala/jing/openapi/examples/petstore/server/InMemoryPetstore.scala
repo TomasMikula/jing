@@ -1,6 +1,6 @@
 package jing.openapi.examples.petstore.server
 
-import cats.data.{State, StateT}
+import cats.data.{Ior, State, StateT}
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import jing.openapi.examples.petstore.api.schemas.*
@@ -52,7 +52,20 @@ class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
     state
       .get
       .map: state =>
-        Value.arr(state.pets.values.filter(_.status == st).map(_.toApi).toArray*)
+        Value.arr(state.pets.values.filter(_.status == st).map(_.toApi).toSeq*)
+
+  def findByTags(
+    tags: Value[Arr[Str]],
+  ): IO[Value[Arr[Pet]]] =
+    val tagNames = tags.asArray.map(_.stringValue).toSet
+    state
+      .get
+      .map: state =>
+        Value.arr:
+          IArray.from:
+            state.pets.values
+              .filter(pet => pet.tags.exists(t => tagNames contains t.name))
+              .map(_.toApi)
 }
 
 object InMemoryPetstore {
@@ -97,10 +110,46 @@ object InMemoryPetstore {
         .get(tagId)
         .toRight(left = s"Tag id=$tagId does not exist.")
 
+  def getTagByNameOpt(tagName: String): StateT[Either[String, _], PetstoreState, Option[model.Tag]] =
+    StateT.inspectF:
+      _.tags
+        .values
+        .find(_.name == tagName)
+        .asRight
+
+  private def createTag(tagName: String): StateT[Either[String, _], PetstoreState, model.Tag] =
+    for
+      id <- nextIdT
+      tag = model.Tag(id, tagName)
+      _ <- setTagT(tag)
+    yield
+      tag
+
+  def getOrCreateTagByName(tagName: String): StateT[Either[String, _], PetstoreState, model.Tag] =
+    getTagByNameOpt(tagName)
+      .flatMap:
+        case Some(tag) => tag.pure
+        case None => createTag(tagName)
+
+  def getOrCreateTag(
+    tagIdIorName: Ior[Long, String],
+  ): StateT[Either[String, _], PetstoreState, model.Tag] =
+    tagIdIorName match
+      case Ior.Left(id) =>
+        getTag(id)
+      case Ior.Right(name) =>
+        getOrCreateTagByName(name)
+      case Ior.Both(id, name) =>
+        getTag(id)
+          .flatMapF: tag =>
+            if (tag.name == name)
+              then Right(tag)
+              else Left(s"Tag id=$id is not named '$name'. It is named '${tag.name}'.")
+
   def createPet(petIn: model.PetIn): StateT[Either[String, _], PetstoreState, model.Pet] =
     for
       categoryOpt <- petIn.categoryId.traverse(getCategory)
-      tagsOpt <- petIn.tagIds.traverse(_.traverse(getTag))
+      tagsOpt <- petIn.tags.traverse(_.traverse(getOrCreateTag))
       id <- nextIdT
       pet = model.Pet(
         id = id,
@@ -115,11 +164,11 @@ object InMemoryPetstore {
       pet
 
   def updatePet(petId: Long, petIn: model.PetIn): StateT[Either[String, _], PetstoreState, model.Pet] =
-    val model.PetIn(name, categoryIdOpt, photoUrls, tagIds, statusOpt) = petIn
+    val model.PetIn(name, categoryIdOpt, photoUrls, tags, statusOpt) = petIn
     for
       pet0 <- getPet(petId)
       categoryOpt <- categoryIdOpt.traverse(getCategory)
-      tagsOpt <- tagIds.traverse(_.traverse(getTag))
+      tagsOpt <- tags.traverse(_.traverse(getOrCreateTag))
     yield
       pet0.copy(
         name = petIn.name,
@@ -147,6 +196,9 @@ object InMemoryPetstore {
 
   private def setPetT(pet: model.Pet): StateT[Either[String, _], PetstoreState, Unit] =
     StateT.fromState(setPet(pet).map(Right(_)))
+
+  private def setTagT(tag: model.Tag): StateT[Either[String, _], PetstoreState, Unit] =
+    StateT.modify { s => s.copy(tags = s.tags.updated(tag.id, tag)) }
 
   extension [E, S, A](st: StateT[Either[E, _], S, A]) {
     /** The new state is the original state in case of error. */

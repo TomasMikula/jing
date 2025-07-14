@@ -1,5 +1,6 @@
 package jing.openapi.examples.petstore.model
 
+import cats.data.Ior
 import cats.syntax.all.*
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value
@@ -8,7 +9,7 @@ final case class PetIn(
   name: String,
   categoryId: Option[Long],
   photoUrls: IArray[String],
-  tagIds: Option[List[Long]],
+  tags: Option[List[Ior[Long, String]]],
   status: Option[PetStatus],
 )
 
@@ -19,20 +20,21 @@ object PetIn {
     for
       categoryIdOpt <- pet.category.traverse:
         Category.idFromApi(_).toRight("missing category.id")
-      tagIds <- pet.tags
+      tagIdIorNames <- pet.tags
         .traverse: tags =>
           tags
             .asArray
             .toList
             .zipWithIndex
             .traverse: (tag, i) =>
-              Tag.idFromApi(tag).toRight(s"missing tags[$i].id")
+              Tag.idIorNameFromApi(tag)
+                .leftMap(errMsg => s"tags[$i]: $errMsg")
     yield
       PetIn(
         name       = pet.name.stringValue,
         categoryId = categoryIdOpt,
         photoUrls  = pet.photoUrls.asArray.map(_.stringValue),
-        tagIds     = tagIds,
+        tags       = tagIdIorNames,
         status     = pet.status.map(PetStatus.fromApi),
       )
 }
