@@ -78,7 +78,7 @@ trait ValueModule[Value[_]] {
   def arr(elems: Long*): Value[Arr[Int64]] =
     arr(elems.map(int64)*)
 
-  object obj {
+  object Obj {
     val empty: Value[Obj[Void]] =
       fromMotif(ValueMotif.Object.empty)
 
@@ -93,6 +93,9 @@ trait ValueModule[Value[_]] {
       f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
     ): Value[Obj[Props]] =
       f(ObjectBuilder[Props]).result
+
+    def unapply[Props](v: Value[Obj[Props]]): Some[NamedTuple.NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]]] =
+      Some(v.toNamedTuple())
   }
 
   extension [Ps](value: Value[Obj[Ps]]) {

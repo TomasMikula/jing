@@ -227,7 +227,7 @@ object ValueCodecJson {
   ): DecodeResult[Value.Lenient[Obj[Props]]] =
     schema match
       case ObjectMotif.Empty() =>
-        Succeeded(Value.Lenient.obj.empty)
+        Succeeded(Value.Lenient.Obj.empty)
       case ObjectMotif.Snoc(init, pname, ptype) =>
         DecodeResult.map2(
           decodeObjectLenient(init, jsonLoc, json),

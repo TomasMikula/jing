@@ -10,6 +10,7 @@ import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.server.ServerBuilder
 import jing.openapi.model.server.ServerBuilder.EndpointHandler
 import jing.openapi.model.{::, :?, Body, BodySchema, DiscriminatedUnion, HttpEndpoint, IsCaseOf, Obj, RequestSchema, ResponseSchema, ScalaReprOf, Schema, SchemaMotif, Value, ValueCodecJson, ||}
+import jing.openapi.model.Value.Obj
 import libretto.lambda.Items1Named
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.{SingletonType, Validated}
@@ -105,10 +106,10 @@ object Http4sServerBuilder {
           if (path != req.uri.path.renderString)
             None.pure[F]
           else
-            Some(Right(Value.obj.empty)).pure[F]
+            Some(Right(Obj.empty)).pure[F]
         case Parameterized(params) =>
           route(params, req.uri)
-            .map(_.map(ps => Value.obj.empty.set("params", ps)))
+            .map(_.map(ps => Obj.empty.set("params", ps)))
             .pure[F]
         case WithBody(params, bodySchema) =>
           def parseBody[B](bodySchema: BodySchema.NonEmpty[B]): F[Either[ParseError, Value[B]]] =
@@ -132,7 +133,7 @@ object Http4sServerBuilder {
                 None.pure[F]
               else
                 parseBody(bodySchema).map:
-                  _.map { b => Value.obj.empty.set("body", b) }
+                  _.map { b => Obj.empty.set("body", b) }
                     .some
             case Parameterized(params) =>
               route(params, req.uri) match
@@ -140,7 +141,7 @@ object Http4sServerBuilder {
                 case Some(Left(e)) => Some(Left(e)).pure[F]
                 case Some(Right(ps)) =>
                   parseBody(bodySchema).map:
-                    _.map { b => Value.obj.empty.set("params", ps).set("body", b) }
+                    _.map { b => Obj.empty.set("params", ps).set("body", b) }
                       .some
   }
 
@@ -185,7 +186,7 @@ object Http4sServerBuilder {
         summon[Ps =:= Void]
         if (path.startsWith(p))
           val leftoverPath = if path.length == p.length then None else Some(path.drop(p.length))
-          EitherT.pure((result = Value.obj.empty, leftovers = (leftoverPath, query)))
+          EitherT.pure((result = Obj.empty, leftovers = (leftoverPath, query)))
         else
           EitherT.liftF(None)
       case ParameterizedPath(p) =>
@@ -259,7 +260,7 @@ object Http4sServerBuilder {
       case Constant(p) =>
         if (path.startsWith(p))
           val leftoverPath = if path.length == p.length then None else Some(path.drop(p.length))
-          EitherT.pure((result = Value.obj.empty, leftoverPath = leftoverPath))
+          EitherT.pure((result = Obj.empty, leftoverPath = leftoverPath))
         else
           EitherT.liftF(None)
       case WithParam(prefix, pName, pSchema, suffix) =>

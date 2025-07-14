@@ -37,7 +37,7 @@ object ClientEndpoint {
       HttpThunk(
         method,
         paramsSchema = RequestSchema.Params.ConstantPath(path),
-        params = Value.obj.empty,
+        params = Value.Obj.empty,
         body = Some((bodySchema, Body(i, body))),
         responseSchema,
       )
@@ -51,7 +51,7 @@ object ClientEndpoint {
       WithQueryParams(endpoint, params)
 
     def apply(t: NamedTuple[PNames, PTypes])(using PropertyList[Ps]): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
-      fromValue(Value.obj(_(t.toTuple)))
+      fromValue(Value.Obj(_(t.toTuple)))
 
     def builder(
       f: Value.ObjectBuilder[Void, ToRightAssoc[Ps]] => Value.ObjectBuilder[Ps, Void],

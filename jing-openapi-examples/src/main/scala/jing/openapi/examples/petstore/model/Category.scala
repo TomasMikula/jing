@@ -3,6 +3,7 @@ package jing.openapi.examples.petstore.model
 import cats.data.Ior
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value
+import jing.openapi.model.Value.Obj
 
 case class Category(
   id: Long,
@@ -19,5 +20,5 @@ object Category {
     ).toRight("missing both 'id' and 'name'")
 
   def toApi(cat: Category): Value[api.schemas.Category] =
-    api.schemas.Category(Value.obj(_(id = cat.id, name = cat.name)))
+    api.schemas.Category(Obj(_(id = cat.id, name = cat.name)))
 }

@@ -3,7 +3,7 @@ package jing.openapi.examples.petstore.client
 import jing.openapi.client.default.instance
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.*
-import jing.openapi.model.Value.{arr, enm, obj}
+import jing.openapi.model.Value.{Obj, arr, enm}
 import jing.openapi.model.client.ClientEndpoint
 
 object TestApp {
@@ -26,27 +26,27 @@ object TestApp {
         .body["application/json"]({
 
         // constructing Obj-ects using builder pattern
-          Pet(obj.builder(_
+          Pet(Obj.builder(_
             .set("id", 12345L) // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             .set("name", "Cookie")
-            .set("category", Category(obj.builder(_.skip("id").set("name", "Dogs"))))
+            .set("category", Category(Obj.builder(_.skip("id").set("name", "Dogs"))))
             .set("photoUrls", arr("https://cookie.com/pic.jpg"))
             .set("tags", arr(
-              Tag(obj(_(id = None, name = "cutie"))),
-              Tag(obj(_(id = None, name = "good girl")))
+              Tag(Obj(_(id = None, name = "cutie"))),
+              Tag(Obj(_(id = None, name = "good girl")))
             ))
             .set("status", "available")
           ))
 
           // constructing Obj-ects from named tuples
-          Pet(obj(_(
+          Pet(Obj(_(
             id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             name = "Cookie",
-            category = Category(obj(_(id = None, name = "Dogs"))),
+            category = Category(Obj(_(id = None, name = "Dogs"))),
             photoUrls = arr("https://cookie.com/pic.jpg"),
             tags = arr(
-              Tag(obj(_(id = None, name = "cutie"))),
-              Tag(obj(_(id = None, name = "good girl")))
+              Tag(Obj(_(id = None, name = "cutie"))),
+              Tag(Obj(_(id = None, name = "good girl")))
             ),
             status = enm("available"),
           )))

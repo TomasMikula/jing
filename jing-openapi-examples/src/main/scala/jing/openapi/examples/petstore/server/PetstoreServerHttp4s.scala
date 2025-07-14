@@ -4,7 +4,7 @@ import cats.effect.{ExitCode, IO, IOApp}
 import com.comcast.ip4s.*
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.{Arr, Value}
-import jing.openapi.model.Value.discriminatedUnion
+import jing.openapi.model.Value.Obj
 import jing.openapi.server.http4s.{Http4sServerBuilder, Response, Routes}
 import org.http4s.Status
 import org.http4s.ember.server.EmberServerBuilder
@@ -90,8 +90,7 @@ object PetstoreServerHttp4s extends IOApp {
                   .body["application/json"](pet)
 
       .handle("/pet/findByStatus_GET"): in =>
-        val (params = params) = in.toNamedTuple()
-        val (status = status) = params.toNamedTuple()
+        val Obj((params = Obj((status = status)))) = in
         val findPets: IO[Value[Arr[Pet]]] =
           status match
             case Some(status) => store.findByStatus(status)

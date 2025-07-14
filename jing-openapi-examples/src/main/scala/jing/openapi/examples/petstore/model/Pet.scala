@@ -2,6 +2,7 @@ package jing.openapi.examples.petstore.model
 
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value
+import jing.openapi.model.Value.Obj
 
 case class Pet(
   id: Long,
@@ -13,7 +14,7 @@ case class Pet(
 ) {
   def toApi: Value[api.schemas.Pet] =
     api.schemas.Pet(
-      Value.obj.builder:
+      Obj.builder:
         _
           .set("id", id)
           .set("name", name)

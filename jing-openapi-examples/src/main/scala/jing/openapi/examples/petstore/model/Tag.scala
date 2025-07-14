@@ -3,6 +3,7 @@ package jing.openapi.examples.petstore.model
 import cats.data.Ior
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value
+import jing.openapi.model.Value.Obj
 
 final case class Tag(
   id: Long,
@@ -11,13 +12,12 @@ final case class Tag(
 
 object Tag {
   def idIorNameFromApi(tag: Value[api.schemas.Tag]): Either[String, Ior[Long, String]] =
-    val api.schemas.Tag(obj) = tag
-    val props = obj.toNamedTuple()
+    val api.schemas.Tag(Obj((id = idOpt, name = nameOpt))) = tag
     Ior.fromOptions(
-      props.id.map(_.longValue),
-      props.name.map(_.stringValue)
+      idOpt.map(_.longValue),
+      nameOpt.map(_.stringValue)
     ).toRight("missing both 'id' and 'name'")
 
   def toApi(tag: Tag): Value[api.schemas.Tag] =
-    api.schemas.Tag(Value.obj(_(id = tag.id, name = tag.name)))
+    api.schemas.Tag(Obj(_(id = tag.id, name = tag.name)))
 }
