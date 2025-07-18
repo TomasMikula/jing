@@ -18,7 +18,10 @@ import jing.openapi.model.{
   HttpEndpoint,
   HttpMethod,
   Obj,
+  ObjectSchemaCompanion,
   OpenApiSpec,
+  PropNamesTuple,
+  PropTypesTupleU,
   RequestSchema,
   ResponseSchema,
   Schema,
@@ -32,6 +35,7 @@ import libretto.lambda.util.{Applicative, Exists, Functor, SingletonType, TypeEq
 import libretto.lambda.util.Applicative.pure
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
+import scala.NamedTuple.NamedTuple
 import scala.annotation.tailrec
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.CollectionConverters.*
@@ -92,6 +96,13 @@ private[openapi] object SwaggerToScalaAst {
         quotedSchemaFromProto[mode.OutEff](s)
           .run(schemaLookupFromPreviousSiblings(ctx))
 
+      def resolveSchemaObj[M](using mode: Mode[q.type, M])(
+        ctx: PreviousSiblings[q.type, M],
+        s: SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?]
+      ): Exists[[Ps] =>> (Type[Ps], mode.OutEff[Expr[Schema[Obj[Ps]]]])] =
+        quotedSchemaObjectFromProto[mode.OutEff](s)
+          .run(schemaLookupFromPreviousSiblings(ctx))
+
       val (tpe, bodyFn) = StructuralRefinement.forMode[N][AnyRef](
         members = schemas.flatMap { case (name, s) =>
           List(
@@ -103,14 +114,24 @@ private[openapi] object SwaggerToScalaAst {
 
             // companion "object"
             name -> MemberDef.poly[q.type, N] { [N] => (n, _) ?=> ctx =>
-              val ex: Exists[[T] =>> (Type[T], n.OutEff[Expr[Schema[T]]])] = resolveSchema[N](ctx, s)
-              given Type[ex.T] = ex.value._1
               val tpeAlias =
                 ctx.types
                   .getOrElse(name, { throw AssertionError(s"Type `$name` not found, even though it should have just been defined") })
                   .asType
                   .asInstanceOf[Type[? <: Any]]
-              val (tp, bodyFn) = schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(name, ex.value._2)
+              val (tp, bodyFn) =
+                s match
+                  case ProtoSchema.Oriented.Proper(obj @ SchemaMotif.Object(_)) =>
+                    // for object types, synthesize an extended companion ObjectSchemaCompanion
+                    val ex: Exists[[Ps] =>> (Type[Ps], n.OutEff[Expr[Schema[Obj[Ps]]]])] = resolveSchemaObj[N](ctx, obj)
+                    type Ps = ex.T
+                    given Type[Ps] = ex.value._1
+                    objectSchemaCompanion(using q, tpeAlias, summon[Type[Ps]])(name, ex.value._2)
+                  case _ =>
+                    // for all other types, synthesize the regular SchemaCompanion
+                    val ex: Exists[[T] =>> (Type[T], n.OutEff[Expr[Schema[T]]])] = resolveSchema[N](ctx, s)
+                    given Type[ex.T] = ex.value._1
+                    schemaCompanion(using q, tpeAlias, summon[Type[ex.T]])(name, ex.value._2)
               MemberDef.Val(tp, bodyFn)
             },
           )
@@ -337,57 +358,37 @@ private[openapi] object SwaggerToScalaAst {
     endpointType.asType match
       case '[t] => Indeed((Type.of[t], endpointTerm.map(_.asExprOf[t])))
 
-  /**
-    * @tparam A the abstract ("opaque") alias (of `T`) for which we are creating the companion object
-    * @tparam T the definition of `A`
-    * @tparam M mode (`"term-synth"` or `"type-synth"`)
-    */
   private def schemaCompanion[A, T, M](using q: Quotes, ta: Type[A], tt: Type[T], m: Mode[q.type, M])(
     name: String,
     schema: m.OutEff[Expr[Schema[T]]],
-  ): (qr.TypeRepr, m.OutEff[(owner: qr.Symbol) => qr.Term]) = {
-    import qr.*
-
-    StructuralRefinement.forMode[M][SchemaCompanion[A, T]](
-      members = List(
-        // schema of the "opaque" type
-        "schema" -> MemberDef.poly[q.type, M] { [N] => (_, sub) ?=> ctx =>
-          MemberDef.Val(TypeRepr.of[Schema[A]], sub.downgrader(schema.map { expr => _ => expr.asTerm }))
-        },
-
-        // constructor of the "opaque" type
-        "apply" -> MemberDef.poly[q.type, M] { [N] => (n, _) ?=> _ =>
-          MemberDef.Method(
-            MethodType(paramNames = List("x"))(
-              self => List(TypeRepr.of[Value[T]]),
-              self => TypeRepr.of[Value[A]],
-            ),
-            body = n.applicativeOutEff.pure { (self, argss) =>
-              // implementation is just identity
-              val List(List(x)) = argss
-              x.asExpr.asTerm
-            },
+  ): (qr.TypeRepr, m.OutEff[(owner: qr.Symbol) => qr.Term]) =
+    import q.reflect.*
+    (
+      TypeRepr.of[SchemaCompanion[A, T]],
+      schema.map { schema =>
+        sym => '{
+          new SchemaCompanion[A, T](${schema.asExprOf[Schema[A]]})(using
+            ${'{ summon[A =:= A] }.asExprOf[A =:= T]}
           )
-        },
-
-        // deconstructor, overrides unapply from TotalExtractor
-        "unapply" -> MemberDef.poly[q.type, M] { [N] => (n, _) ?=> _ =>
-          MemberDef.Method(
-            MethodType(paramNames = List("x"))(
-              self => List(TypeRepr.of[Value[A]]),
-              self => TypeRepr.of[Some[Value[T]]],
-            ),
-            body = n.applicativeOutEff.pure { (self, argss) =>
-              // implementation is just wrapping the argument in Some
-              val List(List(x)) = argss
-              '{ Some(${x.asExprOf[Value[T]]}) }.asTerm
-            },
-          )
-        },
-      ),
-      name,
+        }.asTerm
+      }
     )
-  }
+
+  private def objectSchemaCompanion[A, Ps, M](using q: Quotes, ta: Type[A], tt: Type[Ps], m: Mode[q.type, M])(
+    name: String,
+    schema: m.OutEff[Expr[Schema[Obj[Ps]]]],
+  ): (qr.TypeRepr, m.OutEff[(owner: qr.Symbol) => qr.Term]) =
+    import q.reflect.*
+    (
+      TypeRepr.of[ObjectSchemaCompanion[A, Ps, NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]]]],
+      schema.map { schema =>
+        sym => '{
+          new ObjectSchemaCompanion[A, Ps, NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]]](${schema.asExprOf[Schema[A]]})(using
+            ${'{ summon[A =:= A] }.asExprOf[A =:= Obj[Ps]]}
+          )
+        }.asTerm
+      }
+    )
 
   private def pathToObject[M](using q: Quotes, mode: Mode[q.type, M])(
     schemas: SchemaLookup[mode.OutEff],

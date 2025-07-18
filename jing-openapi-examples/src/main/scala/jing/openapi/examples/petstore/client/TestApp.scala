@@ -25,7 +25,7 @@ object TestApp {
         .as[ClientEndpoint]
         .body["application/json"]({
 
-        // constructing Obj-ects using builder pattern
+          // constructing Obj-ects using builder pattern
           Pet(Obj.builder(_
             .set("id", 12345L) // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             .set("name", "Cookie")
@@ -37,6 +37,19 @@ object TestApp {
             ))
             .set("status", "available")
           ))
+
+          // constructing Obj-ects from named tuples
+          Pet.fromNamedTuple(
+            id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
+            name = "Cookie",
+            category = Category.fromNamedTuple(id = None, name = "Dogs"),
+            photoUrls = arr("https://cookie.com/pic.jpg"),
+            tags = arr(
+              Tag.fromNamedTuple(id = None, name = "cutie"),
+              Tag.fromNamedTuple(id = None, name = "good girl"),
+            ),
+            status = enm("available"),
+          )
 
           // constructing Obj-ects from named tuples
           Pet(Obj(_(
