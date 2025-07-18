@@ -1,6 +1,6 @@
 package jing.openapi.examples.petstore.model
 
-import jing.openapi.model.{Enum, Str, Value, ||}
+import jing.openapi.model.{Enum, ScalaValueOf, Str, Value, ||}
 
 enum PetStatus {
   case Available
@@ -12,6 +12,12 @@ enum PetStatus {
       case Available => "available"
       case Pending   => "pending"
       case Sold      => "sold"
+
+  def toApi: Value[Enum[Str, Void || "available" || "pending" || "sold"]] =
+    this match
+      case Available => Value.mkEnum(summon[ScalaValueOf["available", Str]])
+      case Pending   => Value.mkEnum(summon[ScalaValueOf["pending", Str]])
+      case Sold      => Value.mkEnum(summon[ScalaValueOf["sold", Str]])
 
 }
 

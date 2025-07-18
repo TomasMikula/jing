@@ -19,5 +19,5 @@ object Tag {
     ).toRight("missing both 'id' and 'name'")
 
   def toApi(tag: Tag): Value[api.schemas.Tag] =
-    api.schemas.Tag(Obj(_(id = tag.id, name = tag.name)))
+    api.schemas.Tag(id = tag.id, name = tag.name)
 }

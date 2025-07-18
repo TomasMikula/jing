@@ -7,7 +7,7 @@ class SchemaCompanion[A, B](
 )(using
   protected val evidence: A =:= B
 ) {
-  def apply(b: Value[B]): Value[A] =
+  def from(b: Value[B]): Value[A] =
     evidence.substituteContra(b)
 
   def unapply(a: Value[A]): Some[Value[B]] =
@@ -15,7 +15,7 @@ class SchemaCompanion[A, B](
 }
 
 // T is going to be instantiated to its exact upper bound, but named tuple reduction for IDE hints
-// works better this way for the argument type of fromNamedTuple
+// works better this way for the argument type of `apply`
 class ObjectSchemaCompanion[A, Props, T <: NamedTuple[PropNamesTuple[Props], PropTypesTupleU[Value, Props]]](
   schema: Schema[A],
 )(using
@@ -24,7 +24,7 @@ class ObjectSchemaCompanion[A, Props, T <: NamedTuple[PropNamesTuple[Props], Pro
   given propertyList: PropertyList[Props] =
     evidence.substituteCo(schema).propertyList
 
-  def fromNamedTuple(t: T): Value[A] =
+  def apply(t: T): Value[A] =
     evidence.substituteContra:
       Value.Obj[Props](_(t))
 

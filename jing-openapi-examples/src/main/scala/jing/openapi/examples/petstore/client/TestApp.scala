@@ -23,48 +23,19 @@ object TestApp {
         .`/pet`
         .Post
         .as[ClientEndpoint]
-        .body["application/json"]({
-
-          // constructing Obj-ects using builder pattern
-          Pet(Obj.builder(_
-            .set("id", 12345L) // XXX: petstore3.swagger.io does require id when creating a pet 🤦
-            .set("name", "Cookie")
-            .set("category", Category(Obj.builder(_.skip("id").set("name", "Dogs"))))
-            .set("photoUrls", arr("https://cookie.com/pic.jpg"))
-            .set("tags", arr(
-              Tag(Obj(_(id = None, name = "cutie"))),
-              Tag(Obj(_(id = None, name = "good girl")))
-            ))
-            .set("status", "available")
-          ))
-
-          // constructing Obj-ects from named tuples
-          Pet.fromNamedTuple(
+        .body["application/json"](
+          Pet(
             id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
             name = "Cookie",
-            category = Category.fromNamedTuple(id = None, name = "Dogs"),
+            category = Category(id = None, name = "Dogs"),
             photoUrls = arr("https://cookie.com/pic.jpg"),
             tags = arr(
-              Tag.fromNamedTuple(id = None, name = "cutie"),
-              Tag.fromNamedTuple(id = None, name = "good girl"),
+              Tag(id = None, name = "cutie"),
+              Tag(id = None, name = "good girl"),
             ),
             status = enm("available"),
           )
-
-          // constructing Obj-ects from named tuples
-          Pet(Obj(_(
-            id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
-            name = "Cookie",
-            category = Category(Obj(_(id = None, name = "Dogs"))),
-            photoUrls = arr("https://cookie.com/pic.jpg"),
-            tags = arr(
-              Tag(Obj(_(id = None, name = "cutie"))),
-              Tag(Obj(_(id = None, name = "good girl")))
-            ),
-            status = enm("available"),
-          )))
-
-        })
+        )
         .runAgainst(serverUrl)
         .assertSuccess("Creating pet failed")
 

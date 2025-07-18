@@ -2,7 +2,7 @@ package jing.openapi.examples.petstore.model
 
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.Value
-import jing.openapi.model.Value.Obj
+import jing.openapi.model.Value.arr
 
 case class Pet(
   id: Long,
@@ -14,14 +14,12 @@ case class Pet(
 ) {
   def toApi: Value[api.schemas.Pet] =
     api.schemas.Pet(
-      Obj.builder:
-        _
-          .set("id", id)
-          .set("name", name)
-          .setOpt("category", category.map(Category.toApi))
-          .set("photoUrls", Value.arr(photoUrls*))
-          .set("tags", Value.arr(tags.map(Tag.toApi)*))
-          .set("status", status.singletonStringValue)
+      id = id,
+      name = name,
+      category = category.map(Category.toApi).getOrElse(None),
+      photoUrls = arr(photoUrls*),
+      tags = arr(tags.map(Tag.toApi)*),
+      status = status.toApi,
     )
 }
 
