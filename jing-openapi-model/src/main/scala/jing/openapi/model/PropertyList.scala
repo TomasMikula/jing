@@ -17,6 +17,12 @@ opaque type PropertyList[Ps] =
   ObjectMotif[[_] =>> Unit, [_] =>> Unit, Ps]
 
 object PropertyList {
+  def from[F[_], G[_], Ps](obj: ObjectMotif[F, G, Ps]): PropertyList[Ps] =
+    obj.translate[[_] =>> Unit, [_] =>> Unit](
+      [A] => _ => (),
+      [A] => _ => (),
+    )
+
   extension [Ps](ps: PropertyList[Ps]) {
     def readNamedTuple[Req[_], Opt[_]](
       t: NamedTuple[PropNamesTuple[Ps], PropTypesTupleF[Req, Opt, Ps]],

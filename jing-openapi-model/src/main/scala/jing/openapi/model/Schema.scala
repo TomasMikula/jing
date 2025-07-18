@@ -33,8 +33,15 @@ object Schema {
   def unsupported(message: String): Schema[Oops[message.type]] =
     unsupported(SingletonType(message))
 
-  def asObject[Ps](s: Schema[Obj[Ps]]): SchemaMotif.Object[Schema, Ps] =
-    s match
-      case Proper(value) =>
-        SchemaMotif.asObject(value)
+  extension [Ps](s: Schema[Obj[Ps]]) {
+    def asObject: SchemaMotif.Object[Schema, Ps] =
+      s match
+        case Proper(value) =>
+          value.asObject
+
+    def propertyList: PropertyList[Ps] =
+      s match
+        case Proper(value) =>
+          value.propertyList
+  }
 }

@@ -107,7 +107,10 @@ object SchemaMotif {
 
   case class Object[F[_], Ps](
     value: ObjectMotif[F, F, Ps],
-  ) extends SchemaMotif[F, Obj[Ps]]
+  ) extends SchemaMotif[F, Obj[Ps]] {
+    def propertyList: PropertyList[Ps] =
+      PropertyList.from(value)
+  }
 
   object Object {
     def empty[F[_]]: Object[F, Void] =
@@ -146,4 +149,7 @@ object SchemaMotif {
     def asObject: SchemaMotif.Object[F, Ps] =
       s match
         case o: Object[F, Ps] => o
+
+    def propertyList: PropertyList[Ps] =
+      asObject.propertyList
 }
