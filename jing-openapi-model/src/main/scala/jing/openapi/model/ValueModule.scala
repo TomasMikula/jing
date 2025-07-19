@@ -282,6 +282,7 @@ trait ValueModule[Value[_]] {
      * @see [[props]] The indirect alternative with better IDE hints about the actual property names.
      */
     def get[K <: NamesOf[Ps]](using i: IsPropertyOf[K, Ps]): i.ReqOrOpt[Value, Optional[Value]][i.Type] =
+      // keeps failing on incremental compilation due to https://github.com/sbt/zinc/issues/1561
       toMotifObject(value).get[K]
 
     /** Intermediary for accessing `Obj`ect's properties.
@@ -342,7 +343,9 @@ trait ValueModule[Value[_]] {
     type Fields = PropertyGetters[Ps, NamedTuple.Empty]
 
     def selectDynamic(propName: String): (ev: propName.type IsPropertyOf Ps) ?=> ev.ReqOrOpt[Value, Optional[Value]][ev.Type] =
-      (ev: propName.type IsPropertyOf Ps) ?=> obj.get[propName.type]
+      (ev: propName.type IsPropertyOf Ps) ?=>
+        // keeps failing on incremental compilation due to https://github.com/sbt/zinc/issues/1561
+        obj.get[propName.type]
 
     /** Get the property `K` of this object.
      *
@@ -358,6 +361,7 @@ trait ValueModule[Value[_]] {
      * The type argument `K` is constrained to (the union of) property names (`"x" | "y" | "z"`).
      */
     def apply[K <: KeySet](using i: IsPropertyOf[K, Ps]): i.ReqOrOpt[Value, Optional[Value]][i.Type] =
+      // keeps failing on incremental compilation due to https://github.com/sbt/zinc/issues/1561
       obj.get[K]
   }
 
