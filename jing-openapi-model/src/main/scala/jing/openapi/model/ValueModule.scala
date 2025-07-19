@@ -9,6 +9,7 @@ import scala.annotation.targetName
 import scala.reflect.ClassTag
 
 trait ValueModule[Value[_]] {
+  /** Needed to construct arrays of `Value[T]`. */
   given classTag[T]: ClassTag[Value[T]]
 
   def fromMotif[T](v: ValueMotif[Value, T]): Value[T]
