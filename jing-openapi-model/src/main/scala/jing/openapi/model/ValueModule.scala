@@ -94,6 +94,8 @@ trait ValueModule[Value[_]] {
     ): Value[Obj[Props]] =
       f(ObjectBuilder[Props]).result
 
+    // The named tuple in the return type does not reduce in IDE hints.
+    // Revisit after https://github.com/scalameta/metals/issues/7556 is resolved.
     def unapply[Props](v: Value[Obj[Props]]): Some[NamedTuple.NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]]] =
       Some(v.toNamedTuple())
   }
