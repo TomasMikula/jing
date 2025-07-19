@@ -5,6 +5,7 @@ import libretto.lambda.Items1Named.Member
 import libretto.lambda.util.TypeEq.Refl
 import libretto.lambda.util.{SingletonType, TypeEq}
 
+import scala.NamedTuple.NamedTuple
 import scala.annotation.targetName
 import scala.reflect.ClassTag
 
@@ -83,12 +84,24 @@ trait ValueModule[Value[_]] {
     val empty: Value[Obj[Void]] =
       fromMotif(ValueMotif.Object.empty)
 
-    def apply[Props](
-      f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTupleU[Value, Props]] => Value[Obj[Props]],
+    def fromTuple[Props](
+      t: PropTypesTupleU[Value, Props],
     )(using
       ps: PropertyList[Props],
     ): Value[Obj[Props]] =
-      f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTupleU[Value, Props]](ps))
+      fromMotif:
+        ValueMotif.Object[Value, Props]:
+          ps.readNamedTuple[Value, [x] =>> Value[x] | None.type, Value, Optional[Value]](t)(
+            [A] => (va: Value[A]) => va,
+            [A] => (va: Value[A] | None.type) => toOption(va),
+          )
+
+    def apply[Props](
+      f: ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTupleU[Value, Props]] => Value[Obj[Props]],
+    )(using
+      PropertyList[Props],
+    ): Value[Obj[Props]] =
+      f(ObjectBuilderFromNamedTuple[Props, PropNamesTuple[Props], PropTypesTupleU[Value, Props]])
 
     def builder[Props](
       f: ObjectBuilder[Void, ToRightAssoc[Props]] => ObjectBuilder[Props, Void],
@@ -97,8 +110,15 @@ trait ValueModule[Value[_]] {
 
     // The named tuple in the return type does not reduce in IDE hints.
     // Revisit after https://github.com/scalameta/metals/issues/7556 is resolved.
-    def unapply[Props](v: Value[Obj[Props]]): Some[NamedTuple.NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]]] =
+    def unapply[Props](v: Value[Obj[Props]]): Some[NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]]] =
       Some(v.toNamedTuple())
+
+    class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTupleU[Value, Props]](using
+      PropertyList[Props],
+    ) {
+      def apply(t: NamedTuple[N, T]): Value[Obj[Props]] =
+        fromTuple[Props](t)
+    }
   }
 
   extension [Ps](value: Value[Obj[Ps]]) {
@@ -149,18 +169,6 @@ trait ValueModule[Value[_]] {
     @targetName("setEnumOpt")
     def set(propName: Label, value: ScalaUnionOf[Cases] & String)(using l: SingletonType[Label]): ObjectBuilder[Acc || Label :? Enum[Str, Cases], Tail] =
       ValueMotif.Object.extendOpt(b, l, Some(mkEnum(ScalaValueOf.str(value))))
-
-  class ObjectBuilderFromNamedTuple[Props, N <: PropNamesTuple[Props], T <: PropTypesTupleF[Value, [x] =>> Value[x] | None.type, Props]](
-    ps: PropertyList[Props],
-  ) {
-    def apply(t: NamedTuple.NamedTuple[N, T]): Value[Obj[Props]] =
-      fromMotif:
-        ValueMotif.Object[Value, Props]:
-          ps.readNamedTuple[Value, [x] =>> Value[x] | None.type, Value, Optional[Value]](t.toTuple)(
-            [A] => (va: Value[A]) => va,
-            [A] => (va: Value[A] | None.type) => toOption(va),
-          )
-  }
 
   def discriminatedUnion[Label <: String, A, As](
     discriminator: (Label IsCaseOf As) { type Type = A },
@@ -305,20 +313,20 @@ trait ValueModule[Value[_]] {
     evT: Ts =:= PropTypesTupleO[Value, Ps],
     evU: Us =:= PropTypesTupleU[Value, Ps],
   ) {
-    def options: NamedTuple.NamedTuple[Ns, Ts] =
-      TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple.NamedTuple[ns, Ts]]:
-        TypeEq(evT.flip).substUpperBounded[Tuple, [ts <: Tuple] =>> NamedTuple.NamedTuple[PropNamesTuple[Ps], ts]]:
+    def options: NamedTuple[Ns, Ts] =
+      TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple[ns, Ts]]:
+        TypeEq(evT.flip).substUpperBounded[Tuple, [ts <: Tuple] =>> NamedTuple[PropNamesTuple[Ps], ts]]:
           value.toNamedTuple
 
-    def orNones: NamedTuple.NamedTuple[Ns, Us] =
-      TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple.NamedTuple[ns, Us]]:
-        TypeEq(evU.flip).substUpperBounded[Tuple, [us <: Tuple] =>> NamedTuple.NamedTuple[PropNamesTuple[Ps], us]]:
+    def orNones: NamedTuple[Ns, Us] =
+      TypeEq(evN.flip).substUpperBounded[Tuple, [ns <: Tuple] =>> NamedTuple[ns, Us]]:
+        TypeEq(evU.flip).substUpperBounded[Tuple, [us <: Tuple] =>> NamedTuple[PropNamesTuple[Ps], us]]:
           value.toNamedTuple[Value, [x] =>> Value[x] | None.type](
             [A] => fa => fa,
             [A] => ofa => ofa.getOrElse(None),
           )
 
-    def apply(): NamedTuple.NamedTuple[Ns, Ts] =
+    def apply(): NamedTuple[Ns, Ts] =
       options
   }
 

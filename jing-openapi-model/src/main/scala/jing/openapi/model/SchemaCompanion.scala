@@ -32,7 +32,7 @@ class ObjectSchemaCompanion[
 
   def apply(t: TFrom): Value[A] =
     evidence.substituteContra:
-      Value.Obj[Props](_(t))
+      Value.Obj.fromTuple[Props](t)
 
   def toNamedTuple(a: Value[A]): NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]] =
     val obj = deconstruct(a)
