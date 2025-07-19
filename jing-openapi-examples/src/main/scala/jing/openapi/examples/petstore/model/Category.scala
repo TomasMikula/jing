@@ -11,11 +11,10 @@ case class Category(
 
 object Category {
   def idIorNameFromApi(cat: Value[api.schemas.Category]): Either[String, Ior[Long, String]] =
-    val api.schemas.Category(obj) = cat
-    val props = obj.toNamedTuple()
+    val api.schemas.Category((id = id, name = name)) = cat
     Ior.fromOptions(
-      props.id.map(_.longValue),
-      props.name.map(_.stringValue)
+      id.map(_.longValue),
+      name.map(_.stringValue)
     ).toRight("missing both 'id' and 'name'")
 
   def toApi(cat: Category): Value[api.schemas.Category] =

@@ -12,7 +12,7 @@ final case class Tag(
 
 object Tag {
   def idIorNameFromApi(tag: Value[api.schemas.Tag]): Either[String, Ior[Long, String]] =
-    val api.schemas.Tag(Obj((id = idOpt, name = nameOpt))) = tag
+    val api.schemas.Tag((id = idOpt, name = nameOpt)) = tag
     Ior.fromOptions(
       idOpt.map(_.longValue),
       nameOpt.map(_.stringValue)

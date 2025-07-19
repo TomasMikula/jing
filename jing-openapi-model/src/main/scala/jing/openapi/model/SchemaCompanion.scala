@@ -10,13 +10,19 @@ class SchemaCompanion[A, B](
   def from(b: Value[B]): Value[A] =
     evidence.substituteContra(b)
 
-  def unapply(a: Value[A]): Some[Value[B]] =
-    Some(evidence.substituteCo(a))
+  def deconstruct(a: Value[A]): Value[B] =
+    evidence.substituteCo(a)
 }
 
-// T is going to be instantiated to its exact upper bound, but named tuple reduction for IDE hints
-// works better this way for the argument type of `apply`
-class ObjectSchemaCompanion[A, Props, T <: NamedTuple[PropNamesTuple[Props], PropTypesTupleU[Value, Props]]](
+// TFrom and TTo are supposed to be instantiated exactly to their upper and lower bound, respectively.
+// TFrom and TTo might thus seem superfluous. However, named tuple reduction for IDE hints on `apply` and `unapply`
+//  works better if the named tuple is assigned to an outer type parameter, than reducing it on the fly at method call site.
+class ObjectSchemaCompanion[
+  A,
+  Props,
+  TFrom <: NamedTuple[PropNamesTuple[Props], PropTypesTupleU[Value, Props]],
+  TTo   >: NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]],
+](
   schema: Schema[A],
 )(using
   A =:= Obj[Props],
@@ -24,12 +30,14 @@ class ObjectSchemaCompanion[A, Props, T <: NamedTuple[PropNamesTuple[Props], Pro
   given propertyList: PropertyList[Props] =
     evidence.substituteCo(schema).propertyList
 
-  def apply(t: T): Value[A] =
+  def apply(t: TFrom): Value[A] =
     evidence.substituteContra:
       Value.Obj[Props](_(t))
 
-  extension (a: Value[A])
-    def toNamedTuple: NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]] =
-      val Some(b) = unapply(a)
-      b.toNamedTuple()
+  def toNamedTuple(a: Value[A]): NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]] =
+    val obj = deconstruct(a)
+    obj.toNamedTuple()
+
+  def unapply(a: Value[A]): Some[TTo] =
+    Some(toNamedTuple(a))
 }

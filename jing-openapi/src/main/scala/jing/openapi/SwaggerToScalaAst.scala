@@ -21,6 +21,7 @@ import jing.openapi.model.{
   ObjectSchemaCompanion,
   OpenApiSpec,
   PropNamesTuple,
+  PropTypesTupleO,
   PropTypesTupleU,
   RequestSchema,
   ResponseSchema,
@@ -380,10 +381,10 @@ private[openapi] object SwaggerToScalaAst {
   ): (qr.TypeRepr, m.OutEff[(owner: qr.Symbol) => qr.Term]) =
     import q.reflect.*
     (
-      TypeRepr.of[ObjectSchemaCompanion[A, Ps, NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]]]],
+      TypeRepr.of[ObjectSchemaCompanion[A, Ps, NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]], NamedTuple[PropNamesTuple[Ps], PropTypesTupleO[Value, Ps]]]],
       schema.map { schema =>
         sym => '{
-          new ObjectSchemaCompanion[A, Ps, NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]]](${schema.asExprOf[Schema[A]]})(using
+          new ObjectSchemaCompanion[A, Ps, NamedTuple[PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]], NamedTuple[PropNamesTuple[Ps], PropTypesTupleO[Value, Ps]]](${schema.asExprOf[Schema[A]]})(using
             ${'{ summon[A =:= A] }.asExprOf[A =:= Obj[Ps]]}
           )
         }.asTerm

@@ -43,8 +43,8 @@ object TestApp {
 
     // obtain pet id from the response
     val petId =
-      val Pet(pet) = createPetResponse.assertStatus["200"].assertCase["application/json"]
-      pet.props["id"] match
+      val Pet((id = id)) = createPetResponse.assertStatus["200"].assertCase["application/json"]
+      id match
         case Some(id) => id.longValue
         case None => sys.error("Server did not return pet id of a newly created pet")
 

@@ -15,8 +15,7 @@ final case class PetIn(
 
 object PetIn {
   def fromApi(p: Value[api.schemas.Pet]): Either[String, PetIn] =
-    val api.schemas.Pet(obj) = p
-    val pet = obj.toNamedTuple()
+    val api.schemas.Pet(pet) = p
     for
       categoryOpt <- pet.category.traverse:
         Category.idIorNameFromApi(_)
