@@ -60,32 +60,37 @@ sealed trait ValueMotif[+F[_], T] {
         b.append(value.show)
       case Array(elems) =>
         b.append("[")
-        for (x <- elems) {
-          f(x, b)
-          b.append(",")
+        if (elems.size > 0) {
+          f(elems(0), b)
+          for (i <- (1 until elems.size))
+            b.append(", ")
+            f(elems(i), b)
         }
         b.append("]")
       case obj: Object[f, ps] =>
         b.append("{")
-        def go[Ps](o: ObjectMotif[F, Optional[F], Ps]): Unit = {
+        // returns true iff at least 1 element was written, i.e. if separator is needed
+        def go[Ps](o: ObjectMotif[F, Optional[F], Ps]): Boolean = {
           o match
-            case ObjectMotif.Empty() => // do nothing
+            case ObjectMotif.Empty() =>
+              false
             case ObjectMotif.Snoc(init, lastName, lastValue) =>
-              go(init)
+              if go(init) then b.append(", ")
               b.append(lastName.value: String)
               b.append(": ")
               f(lastValue, b)
-              b.append(",")
+              true
             case so: ObjectMotif.SnocOpt[req, opt, init, k, v] =>
-              go(so.init)
+              val isSeparatorNeeded = go(so.init)
               (so.pval: Option[F[v]]) match
                 case None =>
-                  // do nothing
+                  isSeparatorNeeded
                 case Some(v) =>
+                  if (isSeparatorNeeded) b.append(", ")
                   b.append(so.pname.value: String)
                   b.append(": ")
                   f(v, b)
-                  b.append(",")
+                  true
         }
         go((obj: Object[f, ps]).asInstanceOf[Object[F, ps]].value) // TODO: remove unsafe cast when https://github.com/scala/scala3/issues/22993 is fixed
         b.append("}")
