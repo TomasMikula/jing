@@ -37,9 +37,8 @@ api
   .`/pet/findByStatus`
   .Get
   .as[ClientEndpoint]
-  .params(_
-    .set("status", "available")
-  )
+  .params:
+    ( status = "available" )
   .runAgainst("https://petstore3.swagger.io/api/v3")
 ```
 
