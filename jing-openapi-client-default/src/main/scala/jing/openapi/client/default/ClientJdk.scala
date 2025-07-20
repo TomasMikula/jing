@@ -4,7 +4,7 @@ import io.circe.{Json, ParsingFailure}
 import jing.openapi.client.default.Response as Resp
 import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.ValueCodecJson.DecodeResult
-import jing.openapi.model.client.{Client, HttpThunk}
+import jing.openapi.model.client.{Client, HttpRequest}
 import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, DiscriminatedUnion, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueModule, ValueMotif}
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq
@@ -13,7 +13,7 @@ import libretto.lambda.util.TypeEq.Refl
 import java.io.IOException
 import java.net.http.HttpRequest.{BodyPublisher, BodyPublishers}
 import java.net.http.HttpResponse.BodyHandlers
-import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.net.http.{HttpClient, HttpRequest as JHttpRequest, HttpResponse}
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.OptionConverters.*
 
@@ -33,10 +33,10 @@ class ClientJdk[Val[_]](
 
   override def runRequest[O](
     baseUrl: String,
-    req: HttpThunk[SupportedMimeType, O],
+    req: HttpRequest[SupportedMimeType, O],
   ): Response[O] =
     req match {
-      case HttpThunk.Impl(method, paramsSchema, params, body, respSchema) =>
+      case HttpRequest.Impl(method, paramsSchema, params, body, respSchema) =>
         val relativeUrl = toRelativeUrl(paramsSchema, params)
         val uri = new java.net.URI(baseUrl + relativeUrl)
 
@@ -53,7 +53,7 @@ class ClientJdk[Val[_]](
             Result.Succeeded(
               client
                 .send(
-                  HttpRequest
+                  JHttpRequest
                     .newBuilder(uri)
                     .|>(mimeTypeOpt match
                       case Some(mt) => _.header("Content-Type", mt)

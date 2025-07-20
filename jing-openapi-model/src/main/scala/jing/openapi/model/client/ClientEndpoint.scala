@@ -28,13 +28,13 @@ object ClientEndpoint {
   extension [Bs, O](endpoint: ClientEndpoint[Void || "body" :: DiscriminatedUnion[Bs], O])
     def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
       body: Value[i.Type],
-    ): HttpThunk[MimeType, O] =
+    ): HttpRequest[MimeType, O] =
       import endpoint.underlying.{method, responseSchema}
       val (path, bodySchema) =
         endpoint.underlying.requestSchema match
           case RequestSchema.WithBody(RequestSchema.ConstantPath(path), schema) =>
             (path, schema)
-      HttpThunk(
+      HttpRequest(
         method,
         paramsSchema = RequestSchema.Params.ConstantPath(path),
         params = Value.Obj.empty,
@@ -60,7 +60,7 @@ object ClientEndpoint {
   }
 
   sealed trait RequestBuilder[Is, Acc, Remaining, O] {
-    def toRequest(using ev1: Acc =:= Is, ev2: Remaining =:= Void): HttpThunk[Nothing, O]
+    def toRequest(using ev1: Acc =:= Is, ev2: Remaining =:= Void): HttpRequest[Nothing, O]
   }
 
   class WithQueryParams[Is, Qs, Remaining, O](
@@ -72,12 +72,12 @@ object ClientEndpoint {
     override def toRequest(using
       ev1: (Void || "params" :: Obj[Qs]) =:= Is,
       ev2: Remaining =:= Void,
-    ): HttpThunk[Nothing, O] =
+    ): HttpRequest[Nothing, O] =
       import endpoint.underlying.{method, responseSchema}
       val paramsSchema: RequestSchema.Params[Qs] =
         ev1.substituteContra(endpoint.underlying.requestSchema) match
           case RequestSchema.Parameterized(params) => params
-      HttpThunk(
+      HttpRequest(
         method,
         paramsSchema = paramsSchema,
         params = params,

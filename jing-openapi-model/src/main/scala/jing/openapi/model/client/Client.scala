@@ -7,6 +7,6 @@ trait Client {
 
   def runRequest[O](
     baseUrl: String,
-    req: HttpThunk[SupportedMimeType, O],
+    req: HttpRequest[SupportedMimeType, O],
   ): Response[O]
 }

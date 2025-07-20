@@ -2,7 +2,7 @@ package jing.openapi.model.client
 
 import jing.openapi.model.*
 
-sealed trait HttpThunk[+MimeType, O] {
+sealed trait HttpRequest[+MimeType, O] {
   type Params
   type BodyType
 
@@ -22,10 +22,10 @@ sealed trait HttpThunk[+MimeType, O] {
     client: Client,
     witness: MimeType <:< client.SupportedMimeType,
   ): client.Response[O] =
-    client.runRequest(apiBaseUrl, witness.substituteCo[HttpThunk[_, O]](this))
+    client.runRequest(apiBaseUrl, witness.substituteCo[HttpRequest[_, O]](this))
 }
 
-object HttpThunk {
+object HttpRequest {
   case class Impl[Ps, MimeType, Bdy, O](
     method: HttpMethod,
     paramsSchema: RequestSchema.Params[Ps],
@@ -35,7 +35,7 @@ object HttpThunk {
       body: Body[MimeType, Bdy],
     )],
     responseSchema: ResponseSchema[O],
-  ) extends HttpThunk[MimeType, O] {
+  ) extends HttpRequest[MimeType, O] {
     override type Params = Ps
     override type BodyType = Bdy
   }
@@ -49,6 +49,6 @@ object HttpThunk {
       body: Body[MimeType, Bdy],
     )],
     responseSchema: ResponseSchema[O],
-  ): HttpThunk[MimeType, O] =
+  ): HttpRequest[MimeType, O] =
     Impl(method, paramsSchema, params, body, responseSchema)
 }
