@@ -3,7 +3,7 @@ package jing.openapi.examples.petstore.client
 import jing.openapi.client.default.instance
 import jing.openapi.examples.petstore.api
 import jing.openapi.model.*
-import jing.openapi.model.Value.{Obj, arr, enm}
+import jing.openapi.model.Value.{Obj, arr}
 import jing.openapi.model.client.ClientEndpoint
 
 object TestApp {
@@ -33,7 +33,7 @@ object TestApp {
               Tag(id = None, name = "cutie"),
               Tag(id = None, name = "good girl"),
             ),
-            status = enm("available"),
+            status = "available",
           )
         )
         .runAgainst(serverUrl)
@@ -77,8 +77,7 @@ object TestApp {
       .Get
       .as[ClientEndpoint]
       .params:
-        ( status = enm("available")
-        )
+        ( status = "available" )
       .runAgainst(serverUrl)
       .assertSuccess("findByStatus failed")
       .assertStatus["200"]

@@ -57,6 +57,13 @@ object ScalaValueOf {
   def bool(b: Boolean): ScalaValueOf[b.type, Bool] =
     B(SingletonType(b))
 
+  def apply[T, D](t: T)(using q: (T QualifiesAs D)): ScalaValueOf[t.type, D] =
+    q match
+      case QualifiesAs.S => str(t)
+      case QualifiesAs.I => i32(t)
+      case QualifiesAs.L => i64(t)
+      case QualifiesAs.B => bool(t)
+
   given [I <: Int] => (ev: SingletonType[I]) => ScalaValueOf[I, Int32] =
     I32(ev)
 

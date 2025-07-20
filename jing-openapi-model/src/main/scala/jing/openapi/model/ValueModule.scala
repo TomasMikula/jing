@@ -65,8 +65,19 @@ trait ValueModule[Value[_]] {
   def mkEnum[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
     fromMotif(ValueMotif.EnumValue[Base, Cases, T](value))
 
+  /** Constructs `Value[Enum[Base, Cases]]` from a corresponding Scala primitive. Also available as a [[Conversion]]. */
   def enm[Base, Cases](value: ScalaUnionOf[Cases])(using ev: ScalaValueOf[value.type, Base]): Value[Enum[Base, Cases]] =
     fromMotif(ValueMotif.EnumValue[Base, Cases, value.type](ev))
+
+  given enumConversion[Base, Cases, T](using
+    ev1: T <:< ScalaUnionOf[Cases],
+    ev3: (T QualifiesAs Base),
+  ): Conversion[T, Value[Enum[Base, Cases]] | None.type] =
+    (t: T) =>
+      Subtype(summon[t.type <:< ScalaUnionOf[Cases]]) match
+        case Subtype.Refl() =>
+          val u = ScalaValueOf[T, Base](t)
+          mkEnum[Base, Cases, t.type](u)
 
   @targetName("arrStr")
   def arr(elems: String*): Value[Arr[Str]] =
