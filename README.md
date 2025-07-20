@@ -85,8 +85,6 @@ Successful proof of concept.
 
 Lots of OpenAPI features are still missing.
 
-There's no support for implementing servers yet (but is planned).
-
 There's lot's of space for improvement even with regards to the above principles
 (but feel free to call me out on violations thereof, at least I will know that you care).
 
