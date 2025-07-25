@@ -55,7 +55,7 @@ val scalacOptionsCommon =
     "-Xkind-projector:underscores",
   )
 
-val LibrettoVersion = "0.3.6-SNAPSHOT"
+val LibrettoVersion = "0.3.6"
 val Http4sVersion = "0.23.30"
 
 lazy val macroUtil = project
