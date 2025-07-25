@@ -4,11 +4,49 @@ ThisBuild / organization := "dev.continuously.jing"
 
 ThisBuild / licenses += ("MPL 2.0", url("https://opensource.org/licenses/MPL-2.0"))
 ThisBuild / homepage := Some(url("https://github.com/TomasMikula/jing"))
+ThisBuild / description := "Just Import 'N' Go: Spec-first APIs without codegen"
 ThisBuild / scmInfo := Some(
   ScmInfo(
     url("https://github.com/TomasMikula/jing"),
     "scm:git:git@github.com:TomasMikula/jing.git"
   )
+)
+
+ThisBuild / developers := List(
+  Developer(
+    id = "TomasMikula",
+    name = "Tomas Mikula",
+    email = "tomas.mikula@continuously.dev",
+    url = url("https://continuously.dev")
+  ),
+)
+
+// Remove all additional repository other than Maven Central from POM
+ThisBuild / pomIncludeRepository := { _ => false }
+ThisBuild / publishMavenStyle := true
+
+ThisBuild / publishTo := {
+  if (isSnapshot.value)
+    Some("central-snapshots" at "https://central.sonatype.com/repository/maven-snapshots/")
+  else
+    localStaging.value
+}
+
+import ReleaseTransformations._
+
+releaseProcess := Seq[ReleaseStep](
+  checkSnapshotDependencies,
+  inquireVersions,
+  runClean,
+  runTest,
+  setReleaseVersion,
+  commitReleaseVersion,
+  tagRelease,
+  releaseStepCommand("publishSigned"),
+  releaseStepCommand("sonaRelease"),
+  setNextVersion,
+  commitNextVersion,
+  pushChanges,
 )
 
 val scalacOptionsCommon =
@@ -23,6 +61,7 @@ val Http4sVersion = "0.23.30"
 lazy val macroUtil = project
   .in(file("macro-util"))
   .settings(
+    name := "jing-macro-util",
     libraryDependencies ++= Seq(
       "dev.continuously.libretto" %% "libretto-lambda" % LibrettoVersion,
       "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
@@ -99,5 +138,7 @@ lazy val jingOpenApiExamples = project
       ),
     libraryDependencies ++= Seq(
       "org.http4s" %% "http4s-ember-server" % Http4sVersion,
-    )
+    ),
+    publish / skip := true,
+
   )
