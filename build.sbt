@@ -75,6 +75,7 @@ lazy val jingOpenApiModel = project
     macroUtil,
   )
   .settings(
+    name := "jing-openapi-model",
     scalacOptions ++= scalacOptionsCommon,
     libraryDependencies ++= Seq(
       "dev.continuously.libretto" %% "libretto-lambda" % LibrettoVersion,
@@ -89,6 +90,7 @@ lazy val jingOpenApi = project
     macroUtil,
   )
   .settings(
+    name := "jing-openapi",
     libraryDependencies ++= Seq(
       "io.swagger.parser.v3" % "swagger-parser" % "2.1.26",
     ),
@@ -105,6 +107,7 @@ lazy val jingOpenApiClientDefault = project
     jingOpenApiModel,
   )
   .settings(
+    name := "jing-openapi-client-default",
     scalacOptions ++=
       scalacOptionsCommon,
   )
@@ -115,6 +118,7 @@ lazy val jingOpenApiServerHttp4s = project
     jingOpenApiModel,
   )
   .settings(
+    name := "jing-openapi-server-http4s",
     scalacOptions ++=
       scalacOptionsCommon,
     libraryDependencies ++= Seq(
@@ -131,6 +135,7 @@ lazy val jingOpenApiExamples = project
     jingOpenApi % Provided,
   )
   .settings(
+    name := "jing-openapi-examples",
     scalacOptions ++=
       scalacOptionsCommon ++
       Seq(
