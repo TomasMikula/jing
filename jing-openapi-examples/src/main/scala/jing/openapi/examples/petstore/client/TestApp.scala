@@ -22,7 +22,7 @@ object TestApp {
         .paths
         .`/pet`
         .Post
-        .as[ClientEndpoint]
+        .interpretAs[ClientEndpoint]
         .body["application/json"](
           Pet(
             id = 12345L, // XXX: petstore3.swagger.io does require id when creating a pet 🤦
@@ -57,7 +57,7 @@ object TestApp {
         .paths
         .`/pet/{petId}`
         .Post
-        .as[ClientEndpoint]
+        .interpretAs[ClientEndpoint]
         .params:
           ( petId = petId   // path parameter
           , name = "Muffin" // query parameter
@@ -75,7 +75,7 @@ object TestApp {
       .paths
       .`/pet/findByStatus`
       .Get
-      .as[ClientEndpoint]
+      .interpretAs[ClientEndpoint]
       .params:
         ( status = "available" )
       .runAgainst(serverUrl)
@@ -92,7 +92,7 @@ object TestApp {
       .paths
       .`/pet/findByTags`
       .Get
-      .as[ClientEndpoint]
+      .interpretAs[ClientEndpoint]
       .params:
         ( tags = arr("cutie")
         )
