@@ -1,5 +1,7 @@
 # JING: Just Import 'N' Go
 
+[![Maven Central Version](https://img.shields.io/maven-central/v/dev.continuously.jing/jing-openapi_3)](https://central.sonatype.com/search?namespace=dev.continuously.jing)
+
 ## Goal
 
  **Frictionless** _spec-first_ programming against OpenAPI
@@ -26,6 +28,23 @@ Use compile-time metaprogramming to generate code from spec "on-the-fly" in the 
 This approach requires **no build setup** other than adding `jing` to library dependencies.
 
 Additionally, the generated endpoints are **ready to use,** using reasonable default choices of HTTP and JSON libraries behind the scenes.
+
+## Quick Start
+
+1. Add JING to library dependencies
+  - sbt
+    ```scala
+    libraryDependencies += "dev.continuously.jing" %% "jing-openapi" % "0.0.2"
+    ```
+  - Scala CLI
+    ```scala
+    //> using dep dev.continuously.jing::jing-openapi:0.0.2
+    ```
+2. Just _"import"_ an API
+  ```scala
+  val api = jing.openapi("https://petstore3.swagger.io/api/v3/openapi.json")
+  ```
+3. And discover the rest from there 😉
 
 ## Example
 
