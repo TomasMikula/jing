@@ -64,18 +64,18 @@ object ClientEndpoint {
     def toRequest(using ev1: Acc =:= Is, ev2: Remaining =:= Void): HttpRequest[Nothing, O]
   }
 
-  class WithQueryParams[Is, Qs, Remaining, O](
+  class WithQueryParams[Is, Ps, Remaining, O](
     endpoint: ClientEndpoint[Is, O],
-    params: Value[Obj[Qs]],
-  ) extends RequestBuilder[Is, Void || "params" :: Obj[Qs], Remaining, O] {
+    params: Value[Obj[Ps]],
+  ) extends RequestBuilder[Is, Void || "params" :: Obj[Ps], Remaining, O] {
     // TODO: body method
 
     override def toRequest(using
-      ev1: (Void || "params" :: Obj[Qs]) =:= Is,
+      ev1: (Void || "params" :: Obj[Ps]) =:= Is,
       ev2: Remaining =:= Void,
     ): HttpRequest[Nothing, O] =
       import endpoint.underlying.{method, responseSchema}
-      val paramsSchema: RequestSchema.Params[Qs] =
+      val paramsSchema: RequestSchema.Params[Ps] =
         ev1.substituteContra(endpoint.underlying.requestSchema) match
           case RequestSchema.Parameterized(params) => params
       HttpRequest(
@@ -85,19 +85,20 @@ object ClientEndpoint {
         body = None,
         responseSchema,
       )
+  }
 
-    def runAgainst(using (Void || "params" :: Obj[Qs]) =:= Is, Remaining =:= Void)(
-      apiBaseUrl: String,
-    )(using
-      @implicitNotFound(
-        "No given Client instance in scope to run this request.\n" +
-        "To use the default Java HTTP client, import jing.openapi.client.default.instance " +
-        "(you might need to add \"dev.continuously.jing\" %% \"jing-openapi-client-default\" % \"<version>\" to library dependencies).\n" +
-        "Other Client instances might be available via integrations.\n"
-      )
-      client: Client,
-    ): client.Response[O] = {
-      toRequest.runAgainst(apiBaseUrl)
+  object WithQueryParams {
+    extension [Ps, O](wqp: WithQueryParams[Void || "params" :: Obj[Ps], Ps, Void, O]) {
+      def runAgainst(apiBaseUrl: String)(using
+        @implicitNotFound(
+          "No given Client instance in scope to run this request.\n" +
+          "To use the default Java HTTP client, import jing.openapi.client.default.instance " +
+          "(you might need to add \"dev.continuously.jing\" %% \"jing-openapi-client-default\" % \"<version>\" to library dependencies).\n" +
+          "Other Client instances might be available via integrations.\n"
+        )
+        client: Client,
+      ): client.Response[O] =
+        wqp.toRequest.runAgainst(apiBaseUrl)
     }
   }
 }
