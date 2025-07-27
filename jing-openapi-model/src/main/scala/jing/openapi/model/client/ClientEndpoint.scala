@@ -4,6 +4,7 @@ import jing.openapi.model.*
 import jing.openapi.model.RequestSchema.ConstantPath
 
 import scala.NamedTuple.NamedTuple
+import scala.annotation.implicitNotFound
 
 class ClientEndpoint[Is, O](
   private val underlying: HttpEndpoint[Is, O],
@@ -88,6 +89,12 @@ object ClientEndpoint {
     def runAgainst(using (Void || "params" :: Obj[Qs]) =:= Is, Remaining =:= Void)(
       apiBaseUrl: String,
     )(using
+      @implicitNotFound(
+        "No given Client instance in scope to run this request.\n" +
+        "To use the default Java HTTP client, import jing.openapi.client.default.instance " +
+        "(you might need to add \"dev.continuously.jing\" %% \"jing-openapi-client-default\" % \"<version>\" to library dependencies).\n" +
+        "Other Client instances might be available via integrations.\n"
+      )
       client: Client,
     ): client.Response[O] = {
       toRequest.runAgainst(apiBaseUrl)

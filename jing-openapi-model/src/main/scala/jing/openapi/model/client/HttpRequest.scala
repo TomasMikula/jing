@@ -1,6 +1,7 @@
 package jing.openapi.model.client
 
 import jing.openapi.model.*
+import scala.annotation.implicitNotFound
 
 sealed trait HttpRequest[+MimeType, O] {
   type Params
@@ -19,6 +20,12 @@ sealed trait HttpRequest[+MimeType, O] {
   )]
 
   def runAgainst(apiBaseUrl: String)(using
+    @implicitNotFound(
+      "No given Client instance in scope to run this request.\n" +
+      "To use the default Java HTTP client, import jing.openapi.client.default.instance " +
+      "(you might need to add \"dev.continuously.jing\" %% \"jing-openapi-client-default\" % \"<version>\" to library dependencies).\n" +
+      "Other Client instances might be available via integrations.\n"
+    )
     client: Client,
     witness: MimeType <:< client.SupportedMimeType,
   ): client.Response[O] =
