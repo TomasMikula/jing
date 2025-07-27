@@ -285,7 +285,7 @@ object ValueCodecJson {
     jsonLoc: Stack[String],
     jsonElems: Vector[Json],
   ): DecodeResult[Value.Lenient[Arr[T]]] = {
-    val builder = IArray.newBuilder[Value.Lenient[T]]
+    val builder = IArray.newBuilder[Value.Lenient[T]](using Value.Lenient.classTag)
     builder.sizeHint(jsonElems.size)
     boundary {
       var i = 0

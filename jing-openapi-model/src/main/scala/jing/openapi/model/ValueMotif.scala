@@ -101,7 +101,10 @@ sealed trait ValueMotif[+F[_], T] {
         b.append(")")
   }
 
-  def traverse[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using M: Applicative[M]): M[ValueMotif[G, T]] =
+  def traverse[M[_], G[_]](f: [A] => F[A] => M[G[A]])(using
+    G: ValueModule[G],
+    M: Applicative[M],
+  ): M[ValueMotif[G, T]] =
     this match
       case Uno => M.pure(Uno)
       case s: StringValue => M.pure(s)
@@ -112,7 +115,7 @@ sealed trait ValueMotif[+F[_], T] {
       case Array(elems) =>
         Applicative
           .traverseList(elems.toList) { a => f(a) }
-          .map(bs => Array(IArray.from(bs)))
+          .map(bs => Array(IArray.from(bs)(using G.classTag)))
       case o: Object[f, ps] =>
         o.asInstanceOf[Object[F, ps]] // https://github.com/scala/scala3/issues/22993
           .traverseObj(f)
