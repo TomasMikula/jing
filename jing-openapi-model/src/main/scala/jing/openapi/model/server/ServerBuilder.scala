@@ -1,9 +1,10 @@
 package jing.openapi.model.server
 
 import jing.macroUtil.TupledFunctions
-import jing.openapi.model.{::, ||, EndpointList, HttpEndpoint}
+import jing.openapi.model.{::, EndpointList, HttpEndpoint, ||}
+
 import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
-import scala.annotation.experimental
+import scala.annotation.{experimental, implicitNotFound}
 
 trait ServerBuilder extends EndpointList.Interpreter {
   import ServerBuilder.*
@@ -153,7 +154,10 @@ object ServerBuilder {
       private[HandlerAccumulator] val acc: List[EndpointHandler[ReqHandler]],
       private[HandlerAccumulator] val remaining: EndpointList[Remaining, ?],
     ) {
-      def end(using Remaining =:= Void): ServerDefn =
+      def end(using
+        @implicitNotFound("Unhandled endpoints remaining: ${Remaining}")
+        ev: Remaining =:= Void
+      ): ServerDefn =
         build(acc.reverse)
     }
 
