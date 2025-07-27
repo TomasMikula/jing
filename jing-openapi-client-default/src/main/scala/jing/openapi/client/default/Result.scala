@@ -14,6 +14,10 @@ sealed trait Result[T] {
   def map[U](f: T => U): Result[U] =
     flatMap(t => Result.Succeeded(f(t)))
 
+  /** Returns the success value.
+   *
+   * @throws IllegalStateException if this `Result` is not [[Succeeded]].
+   */
   def assertSuccess(failureMsg: String): T =
     this match
       case Succeeded(value) =>
@@ -21,6 +25,10 @@ sealed trait Result[T] {
       case Failed(failure) =>
         throw IllegalStateException(s"$failureMsg: $failure")
 
+  /** Returns the failure.
+   *
+   * @throws IllegalStateException if this `Result` is not [[Failed]].
+   */
   def assertFailure: Failure =
     this match
       case Succeeded(value) =>

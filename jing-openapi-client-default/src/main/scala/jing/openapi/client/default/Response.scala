@@ -8,6 +8,10 @@ sealed trait Response[Value[_], T] {
   def statusCode: String
   def show: String
 
+  /** Allows to assert a certain response status.
+   *
+   * Use only after you have inspected the [[statusCode]], or for happy path exploration.
+   */
   def assertStatus: AssertStatus[Value, T, DiscriminatorOf[T]] =
     AssertStatus[Value, T, DiscriminatorOf[T]](this)
 }
@@ -47,6 +51,10 @@ object Response {
   class AssertStatus[Value[_], T, Discriminators <: DiscriminatorOf[T]](
     resp: Response[Value, T],
   ):
+    /** Asserts that the response status is the given one (specified as type argument).
+     *
+     * @throws IllegalStateException if the status code is different from the given one.
+     */
     def apply[S <: Discriminators](using i: S IsCaseOf T, V: ValueModule[Value]): Value[i.Type] =
       resp match
         case Accurate(value) =>

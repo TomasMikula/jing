@@ -11,11 +11,15 @@ class ClientEndpoint[Is, O](
 ) {
   import ClientEndpoint.*
 
+  /** Used to supply parameter values to this endpoint.
+   *
+   * If this endpoint does not take parameters, does not compile.
+   */
   def params[Ps, Rest](using
     @implicitNotFound(
-      "Cannot prove that endpoint input starts with \"params\" field.\n" +
+      "Cannot prove that endpoint input starts with `Obj`-typed \"params\" field.\n" +
       "Expected:\n" +
-      "  Void || \"params\" :: ... || ...\n" +
+      "  Void || \"params\" :: Obj[...] || ...\n" +
       "Actual:\n" +
       "  ${Is}."
     )
@@ -34,6 +38,7 @@ object ClientEndpoint {
     }
 
   extension [Bs, O](endpoint: ClientEndpoint[Void || "body" :: DiscriminatedUnion[Bs], O])
+    /** Supplies body to this endpoint, turning it into a fully constructed [[HttpRequest]]. */
     def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
       body: Value[i.Type],
     ): HttpRequest[MimeType, O] =
@@ -53,14 +58,17 @@ object ClientEndpoint {
   class PendingParams[Is, Ps, PNames <: PropNamesTuple[Ps], PTypes <: PropTypesTupleU[Value, Ps], Rest, O](
     endpoint: ClientEndpoint[Is, O],
   ) {
+    /** Accepts request parameters as an `Obj`-typed value. */
     def fromValue(
       params: Value[Obj[Ps]],
     ): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
       WithQueryParams(endpoint, params)
 
+    /** Accepts request parameters as a named tuple. */
     def apply(t: NamedTuple[PNames, PTypes])(using PropertyList[Ps]): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
       fromValue(Value.Obj(_(t.toTuple)))
 
+    /** Allows to supply request parameters one-by-one via a builder provided to the function `f`. */
     def builder(
       f: Value.ObjectBuilder[Void, ToRightAssoc[Ps]] => Value.ObjectBuilder[Ps, Void],
     ): ClientEndpoint.WithQueryParams[Is, Ps, Rest, O] =
@@ -68,7 +76,11 @@ object ClientEndpoint {
   }
 
   sealed trait RequestBuilder[Is, Acc, Remaining, O] {
-    def toRequest(using ev1: Acc =:= Is, ev2: Remaining =:= Void): HttpRequest[Nothing, O]
+    def toRequest(using
+      ev1: Acc =:= Is,
+      @implicitNotFound("Cannot prove that there are no more inputs to the endpoint, namely that ${Remaining} =:= Void.")
+      ev2: Remaining =:= Void,
+    ): HttpRequest[Nothing, O]
   }
 
   class WithQueryParams[Is, Ps, Remaining, O](
@@ -96,6 +108,7 @@ object ClientEndpoint {
 
   object WithQueryParams {
     extension [Ps, O](wqp: WithQueryParams[Void || "params" :: Obj[Ps], Ps, Void, O]) {
+      /** Executes this request against the given API URL, using a `given Client`. */
       def runAgainst(apiBaseUrl: String)(using
         @implicitNotFound(
           "No given Client instance in scope to run this request.\n" +

@@ -399,6 +399,10 @@ trait ValueModule[Value[_]] {
     def discriminator: DiscriminatorOf[Cases] & String =
       asDiscriminatedUnion.discriminatorValue
 
+    /** Allows to assert a certain case of the discriminated union.
+     *
+     * Use only after you have inspected the [[discriminator]], or for happy path exploration.
+     */
     def assertCase: AssertCase[Cases, DiscriminatorOf[Cases]] =
       AssertCase(value.asDiscriminatedUnion)
 
@@ -412,6 +416,10 @@ trait ValueModule[Value[_]] {
   }
 
   class AssertCase[Cases, DiscriminatorSet <: DiscriminatorOf[Cases]](value: ValueMotif.DiscUnion[? <: Value, Cases]) {
+    /** Asserts that this value is of the given case (specified as type argument).
+     *
+     * @throws IllegalStateException if this value does not contain the given case.
+     */
     def apply[C <: DiscriminatorSet](using ev: C IsCaseOf Cases): Value[ev.Type] =
       val s = value.underlying
       assertCaseImpl(IsCaseOf.toMember(ev), s.tag, s.value)

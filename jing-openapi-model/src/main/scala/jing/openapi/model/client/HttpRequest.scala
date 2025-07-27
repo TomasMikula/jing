@@ -19,6 +19,7 @@ sealed trait HttpRequest[+MimeType, O] {
     body: Body[MimeType, BodyType],
   )]
 
+  /** Executes this request against the given API URL, using a `given Client`. */
   def runAgainst(apiBaseUrl: String)(using
     @implicitNotFound(
       "No given Client instance in scope to run this request.\n" +

@@ -30,14 +30,17 @@ class ObjectSchemaCompanion[
   private given propertyList: PropertyList[Props] =
     evidence.substituteCo(schema).propertyList
 
+  /** Constructs a Value from named tuple. */
   def apply(t: TFrom): Value[A] =
     evidence.substituteContra:
       Value.Obj.fromTuple[Props](t)
 
+  /** Deconstructs the Value into a named tuple. */
   def toNamedTuple(a: Value[A]): NamedTuple[PropNamesTuple[Props], PropTypesTupleO[Value, Props]] =
     val obj = deconstruct(a)
     obj.toNamedTuple()
 
+  /** Extractor that deconstructs the Value into a named tuple. */
   def unapply(a: Value[A]): Some[TTo] =
     Some(toNamedTuple(a))
 }
