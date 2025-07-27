@@ -12,6 +12,13 @@ class ClientEndpoint[Is, O](
   import ClientEndpoint.*
 
   def params[Ps, Rest](using
+    @implicitNotFound(
+      "Cannot prove that endpoint input starts with \"params\" field.\n" +
+      "Expected:\n" +
+      "  Void || \"params\" :: ... || ...\n" +
+      "Actual:\n" +
+      "  ${Is}."
+    )
     ev: ToRightAssoc[Is] =:= ("params" :: Obj[Ps] || Rest),
   ): PendingParams[Is, Ps, PropNamesTuple[Ps], PropTypesTupleU[Value, Ps], Rest, O] =
     PendingParams[Is, Ps, PropNamesTuple[Ps], PropTypesTupleU[Value, Ps], Rest, O](this)
