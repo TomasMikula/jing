@@ -10,6 +10,9 @@ case class Value[T](underlying: ValueMotif[Value, T]) {
 
   def isNotOops[S](using T =:= Oops[S]): Nothing =
     underlying.isNotOops[S]
+
+  override def toString: String =
+    show
 }
 
 object Value extends ValueModule[Value] {
@@ -35,6 +38,9 @@ object Value extends ValueModule[Value] {
             .map(Value(_))
         case o @ Oopsy(_, _) =>
           Validated.invalid(o)
+
+    override def toString: String =
+      show
   }
 
   object Lenient extends ValueModule[Lenient] {
