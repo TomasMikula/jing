@@ -27,7 +27,7 @@ class ObjectSchemaCompanion[
 )(using
   A =:= Obj[Props],
 ) extends SchemaCompanion[A, Obj[Props]](schema) {
-  given propertyList: PropertyList[Props] =
+  private given propertyList: PropertyList[Props] =
     evidence.substituteCo(schema).propertyList
 
   def apply(t: TFrom): Value[A] =
