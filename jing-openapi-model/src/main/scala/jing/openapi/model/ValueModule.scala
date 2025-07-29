@@ -402,6 +402,8 @@ trait ValueModule[Value[_]] {
     /** Allows to assert a certain case of the discriminated union.
      *
      * Use only after you have inspected the [[discriminator]], or for happy path exploration.
+     *
+     * For exhaustive handling of this value, use [[switch]].
      */
     def assertCase: AssertCase[Cases, DiscriminatorOf[Cases]] =
       AssertCase(value.asDiscriminatedUnion)
