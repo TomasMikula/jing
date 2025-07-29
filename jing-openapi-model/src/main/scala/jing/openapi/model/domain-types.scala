@@ -1,7 +1,8 @@
 package jing.openapi.model
 
-import libretto.lambda.util.{BiInjective, TypeEq}
+import libretto.lambda.Items1Named.Member
 import libretto.lambda.util.TypeEq.Refl
+import libretto.lambda.util.{BiInjective, TypeEq}
 
 import scala.NamedTuple.AnyNamedTuple
 
@@ -33,6 +34,31 @@ type DiscriminatorOf[Cases] =
   Cases match
     case s :: t => s
     case init || last => DiscriminatorOf[init] | LabelOf[last]
+
+object DiscriminatorOf {
+  def from[Lbl, Cases](i: Lbl IsCaseOf Cases): Lbl & String & DiscriminatorOf[Cases] =
+    fromMember(IsCaseOf.toMember(i))
+
+  def fromMember[Lbl, A, Cases](member: Member[||, ::, Lbl, A, Cases]): Lbl & String & DiscriminatorOf[Cases] = {
+    import Member.{InInit, InLast, Single}
+
+    member match
+      case last: InLast[||, ::, init, lbl, a] =>
+        summon[(init || lbl :: a) =:= Cases].substituteCo[[cs] =>> Lbl & DiscriminatorOf[cs]](
+          last.label.value
+        )
+      case Single(label) =>
+        summon[(Lbl :: A) =:= Cases].substituteCo[[cs] =>> Lbl & DiscriminatorOf[cs]](
+          label.value: DiscriminatorOf[Lbl :: A]
+        )
+      case i: InInit[||, ::, Lbl, A, init, lblB, b] =>
+        summon[(init || lblB :: b) =:= Cases].substituteCo[[cs] =>> Lbl & String & DiscriminatorOf[cs]](
+          (fromMember[Lbl, A, init](i.i)
+            : Lbl & String & DiscriminatorOf[init])
+            : Lbl & String & DiscriminatorOf[init || lblB :: b]
+        )
+  }
+}
 
 object || {
   given BiInjective[||] with {

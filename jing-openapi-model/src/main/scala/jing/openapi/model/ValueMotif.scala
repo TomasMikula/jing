@@ -215,7 +215,7 @@ object ValueMotif {
     def label: Label = underlying.tag.label.value
 
     def discriminatorValue: Label & DiscriminatorOf[As] =
-      discriminatorValueImpl(underlying.tag)
+      DiscriminatorOf.fromMember(underlying.tag)
 
     private def discriminatorValueImpl[Lbl, A, Cases](member: Member[||, ::, Lbl, A, Cases]): Lbl & DiscriminatorOf[Cases] = {
       import Member.{InInit, InLast, Single}

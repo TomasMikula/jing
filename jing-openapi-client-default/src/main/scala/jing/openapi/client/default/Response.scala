@@ -5,7 +5,7 @@ import jing.openapi.model.{DiscriminatedUnion, DiscriminatorOf, IsCaseOf, ValueM
 sealed trait Response[Value[_], T] {
   import Response.*
 
-  def statusCode: String
+  def statusCode: String & DiscriminatorOf[T]
   def show: String
 
   /** Allows to assert a certain response status.
@@ -24,7 +24,7 @@ object Response {
     ValueModule[Value],
   ) extends Response[Value, T] {
 
-    override def statusCode: String =
+    override def statusCode: String & DiscriminatorOf[T] =
       value.discriminator
 
     override def show: String =
@@ -37,7 +37,8 @@ object Response {
     body: Response.StringBody,
   ) extends Response[Value, T] {
 
-    override def statusCode: String = i.label
+    override def statusCode: String & DiscriminatorOf[T] =
+      DiscriminatorOf.from[Status, T](i)
 
     override def show: String = s"${i.label}(${body.body})"
 
