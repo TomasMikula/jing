@@ -5,7 +5,7 @@ import jing.openapi.client.default.Response as Resp
 import jing.openapi.model.RequestSchema.Params.QueryParamSchema
 import jing.openapi.model.ValueCodecJson.DecodeResult
 import jing.openapi.model.client.{Client, HttpRequest}
-import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, DiscriminatedUnion, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueModule, ValueMotif}
+import jing.openapi.model.{||, ::, :?, Arr, Body, BodySchema, DiscriminatedUnion, DiscriminatorOf, Enum, IsCaseOf, Obj, Oops, RequestSchema, ResponseSchema, Schema, SchemaMotif, Value, ValueCodecJson, ValueModule, ValueMotif}
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq
 import libretto.lambda.util.TypeEq.Refl
@@ -23,7 +23,7 @@ class ClientJdk[Val[_]](
   Val: ValueModule[Val],
 ) extends Client {
 
-  override type Response[T] = Result[Resp[Val, T]]
+  override type Response[T] = Result[Resp[Val, T, DiscriminatorOf[T]]]
 
   override type SupportedMimeType = "application/json"
 
@@ -147,7 +147,7 @@ class ClientJdk[Val[_]](
   private def parseResponse[T](
     schema: ResponseSchema[T],
     response: HttpResponse[String],
-  ): Result[Resp[Val, T]] = {
+  ): Result[Resp[Val, T, DiscriminatorOf[T]]] = {
     val code = response.statusCode()
     schema.match
       case ResponseSchema(items) =>

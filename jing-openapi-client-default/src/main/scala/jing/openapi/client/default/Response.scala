@@ -2,18 +2,35 @@ package jing.openapi.client.default
 
 import jing.openapi.model.{DiscriminatedUnion, DiscriminatorOf, IsCaseOf, ValueModule}
 
-sealed trait Response[Value[_], T] {
+// `SC` (status code) is always instantiated to exactly `DiscriminatorOf[T]`,
+// but having it as an explicit type parameter helps to reduce
+// the `DiscriminatorOf[T]` match type to a union of singletons in IDE suggestions.
+sealed trait Response[Value[_], T, SC <: DiscriminatorOf[T]] {
   import Response.*
 
-  def statusCode: String & DiscriminatorOf[T]
+  def statusCode: SC & String
   def show: String
 
-  /** Allows to assert a certain response status.
+  /** Asserts that the response status is the given one (specified as type argument).
    *
    * Use only after you have inspected the [[statusCode]], or for happy path exploration.
+   *
+   * @throws IllegalStateException if the status code is different from the given one.
    */
-  def assertStatus: AssertStatus[Value, T, DiscriminatorOf[T]] =
-    AssertStatus[Value, T, DiscriminatorOf[T]](this)
+  def assertStatus[S <: SC](using i: S IsCaseOf T, V: ValueModule[Value]): Value[i.Type] =
+    this match
+      case Accurate(value) =>
+        value.assertCase[S]
+      case WithExtraneousBody(j, body) =>
+        (IsCaseOf.toMember(i) testEqual IsCaseOf.toMember(j)) match
+          case Some(ev) =>
+            (ev: i.Type =:= Unit).flip.substituteCo[Value]:
+              V.unit
+          case None =>
+            if (i.label == j.label)
+              throw IllegalStateException(s"Seems like the same status ${i.label} is specified twice in the response schema")
+            else
+              throw IllegalStateException(s"Expected status ${i.label}, was ${j.label}")
 }
 
 object Response {
@@ -22,7 +39,7 @@ object Response {
     value: Value[DiscriminatedUnion[T]],
   )(using
     ValueModule[Value],
-  ) extends Response[Value, T] {
+  ) extends Response[Value, T, DiscriminatorOf[T]] {
 
     override def statusCode: String & DiscriminatorOf[T] =
       value.discriminator
@@ -35,7 +52,7 @@ object Response {
   case class WithExtraneousBody[Status, Value[_], T](
     i: (Status IsCaseOf T) { type Type = Unit },
     body: Response.StringBody,
-  ) extends Response[Value, T] {
+  ) extends Response[Value, T, DiscriminatorOf[T]] {
 
     override def statusCode: String & DiscriminatorOf[T] =
       DiscriminatorOf.from[Status, T](i)
@@ -48,27 +65,5 @@ object Response {
     contentType: Option[String],
     body: String,
   )
-
-  class AssertStatus[Value[_], T, Discriminators <: DiscriminatorOf[T]](
-    resp: Response[Value, T],
-  ):
-    /** Asserts that the response status is the given one (specified as type argument).
-     *
-     * @throws IllegalStateException if the status code is different from the given one.
-     */
-    def apply[S <: Discriminators](using i: S IsCaseOf T, V: ValueModule[Value]): Value[i.Type] =
-      resp match
-        case Accurate(value) =>
-          value.assertCase[S]
-        case WithExtraneousBody(j, body) =>
-          (IsCaseOf.toMember(i) testEqual IsCaseOf.toMember(j)) match
-            case Some(ev) =>
-              (ev: i.Type =:= Unit).flip.substituteCo[Value]:
-                V.unit
-            case None =>
-              if (i.label == j.label)
-                throw IllegalStateException(s"Seems like the same status ${i.label} is specified twice in the response schema")
-              else
-                throw IllegalStateException(s"Expected status ${i.label}, was ${j.label}")
 
 }
