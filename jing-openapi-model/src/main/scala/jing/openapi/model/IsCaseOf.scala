@@ -3,6 +3,9 @@ package jing.openapi.model
 import libretto.lambda.Items1Named.Member
 import libretto.lambda.util.SingletonType
 
+import scala.annotation.implicitNotFound
+
+@implicitNotFound("Cannot prove that (${Label} :: <...>) is one of the ||-separated cases in ${Cases}")
 infix opaque type IsCaseOf[Label, Cases] <: { type Type } =
   Member[||, ::, Label, ?, Cases]
 
