@@ -38,8 +38,25 @@ object ClientEndpoint {
     }
 
   extension [Bs, O](endpoint: ClientEndpoint[Void || "body" :: DiscriminatedUnion[Bs], O])
-    /** Supplies body to this endpoint, turning it into a fully constructed [[HttpRequest]]. */
-    def body[MimeType <: String](using i: MimeType IsCaseOf Bs)(
+    /** Allows to supply body to this endpoint, turning it into a fully constructed [[HttpRequest]].
+     *
+     * Returns the auxiliary type [[PendingBody]],
+     * because IDE hints for possible Mime Types work better that way.
+     */
+    def body: PendingBody[Bs, DiscriminatorOf[Bs], O] =
+      PendingBody(endpoint)
+
+  // Revisit the need for this intermediary after
+  // https://github.com/scalameta/metals/issues/7556
+  // is fixed. If persists, report a new ticket, specifically for match type reduction.
+  class PendingBody[Bs, MT <: DiscriminatorOf[Bs], O](
+    endpoint: ClientEndpoint[Void || "body" :: DiscriminatedUnion[Bs], O],
+  ) {
+    /** Takes a Mime Type (as type argument) and a body corresponding to that Mime Type.
+     *
+     * Returns a fully constructed [[HttpRequest]].
+     */
+    def apply[MimeType <: MT](using i: MimeType IsCaseOf Bs)(
       body: Value[i.Type],
     ): HttpRequest[MimeType, O] =
       import endpoint.underlying.{method, responseSchema}
@@ -54,6 +71,7 @@ object ClientEndpoint {
         body = Some((bodySchema, Body(i, body))),
         responseSchema,
       )
+  }
 
   class PendingParams[Is, Ps, PNames <: PropNamesTuple[Ps], PTypes <: PropTypesTupleU[Value, Ps], Rest, O](
     endpoint: ClientEndpoint[Is, O],
