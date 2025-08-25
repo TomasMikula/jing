@@ -15,9 +15,11 @@ class InMemoryPetstore private(state: Ref[IO, PetstoreState]) {
       case Left(msg) =>
         Left(msg).pure[IO]
       case Right(petIn) =>
-        state
-          .modifyState(InMemoryPetstore.createPet(petIn).toState)
+        createPet(petIn)
           .map(_.map(pet => pet.toApi))
+
+  def createPet(petIn: model.PetIn): IO[Either[String, model.Pet]] =
+    state.modifyState(InMemoryPetstore.createPet(petIn).toState)
 
   def updatePet(pet: Value[Pet]): IO[Either[String, Value[Pet]]] =
     (

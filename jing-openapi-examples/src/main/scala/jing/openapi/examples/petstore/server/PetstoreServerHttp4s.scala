@@ -2,7 +2,7 @@ package jing.openapi.examples.petstore.server
 
 import cats.effect.{ExitCode, IO, IOApp}
 import com.comcast.ip4s.*
-import jing.openapi.examples.petstore.api
+import jing.openapi.examples.petstore.{api, model}
 import jing.openapi.model.{Arr, Value}
 import jing.openapi.model.Value.Obj
 import jing.openapi.server.http4s.{Http4sServerBuilder, Response, Routes}
@@ -16,6 +16,7 @@ object PetstoreServerHttp4s extends IOApp {
   override def run(args: List[String]): IO[ExitCode] =
     for
       store <- InMemoryPetstore.initialize
+      _ <- populate(store)
       httpApp =
         routes(store)
           .foreachRequestResponseAttempt(
@@ -318,4 +319,26 @@ object PetstoreServerHttp4s extends IOApp {
       `/user/{username}_PUT` = ???,
       `/user/{username}_DELETE` = ???,
     )
+
+  extension (store: InMemoryPetstore)
+    private def createPetYolo(
+      name: String,
+      category: String,
+      photoUrls: IArray[String] = IArray.empty[String],
+      tags: List[String] = Nil,
+      status: model.PetStatus = model.PetStatus.Available,
+    ): IO[model.Pet] =
+      import cats.data.Ior
+      store
+        .createPet(model.PetIn(name, Some(Ior.Right(category)), photoUrls, Some(tags.map(Ior.Right(_))), Some(status)))
+        .map(_.left.map(RuntimeException(_)))
+        .rethrow
+
+  private def populate(store: InMemoryPetstore): IO[Unit] =
+    import jing.openapi.examples.petstore.model
+    for
+      _ <- store.createPetYolo("Bailey", "Dogs", tags = List("good boy"))
+      _ <- store.createPetYolo("Marley", "Dogs", tags = List("bad boy"))
+      _ <- store.createPetYolo("Lassie", "Dogs", tags = List("good girl"), photoUrls = IArray("http://lassie.me/selfie.jpg"))
+    yield ()
 }
