@@ -45,12 +45,16 @@ import scala.util.{Failure, Success, Try}
 
 private[openapi] object SwaggerToScalaAst {
   def apply(location: String)(using q: Quotes): Expr[Any] = {
-    import quotes.reflect.*
-
     val specString =
       resolveLocation(location) match
         case Left(uri) => readUri(uri)
         case Right(path) => readFile(path)
+
+    fromString(specString)(location)
+  }
+
+  def fromString(specString: String)(location: String)(using q: Quotes): Expr[Any] = {
+    import quotes.reflect.*
 
     val spec =
       val parseResult =
@@ -63,7 +67,10 @@ private[openapi] object SwaggerToScalaAst {
 
     val schemas0: List[(String, ProtoSchema)] = {
       val b = List.newBuilder[(String, ProtoSchema)]
-      spec.getComponents().getSchemas().forEach { (name, schema) => b += ((name, protoSchema(schema))) }
+      Option(spec.getComponents())
+        .flatMap(cs => Option(cs.getSchemas()))
+        .getOrElse(java.util.Map.of())
+        .forEach { (name, schema) => b += ((name, protoSchema(schema))) }
       b.result()
     }
 

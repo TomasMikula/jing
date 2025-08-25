@@ -57,6 +57,7 @@ val scalacOptionsCommon =
 
 val LibrettoVersion = "0.3.6"
 val Http4sVersion = "0.23.30"
+val ScalatestVersion = "3.2.19"
 
 lazy val macroUtil = project
   .in(file("macro-util"))
@@ -93,6 +94,7 @@ lazy val jingOpenApi = project
     name := "jing-openapi",
     libraryDependencies ++= Seq(
       "io.swagger.parser.v3" % "swagger-parser" % "2.1.26",
+      "org.scalatest" %% "scalatest" % ScalatestVersion % "test",
     ),
     scalacOptions ++=
       scalacOptionsCommon ++
