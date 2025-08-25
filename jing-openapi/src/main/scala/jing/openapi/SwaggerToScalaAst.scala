@@ -47,16 +47,19 @@ private[openapi] object SwaggerToScalaAst {
   def apply(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
 
-    val spec =
+    val specString =
       resolveLocation(location) match
-        case Left(uri) =>
-          new OpenAPIParser().readLocation(uri.toString, null, null).getOpenAPI()
-        case Right(path) =>
-          scala.util.Try { java.nio.file.Files.readString(path) } match
-            case Success(str) =>
-              new OpenAPIParser().readContents(str, null, null).getOpenAPI()
-            case Failure(e) =>
-              report.errorAndAbort(s"Failed to read spec from file '$path': $e")
+        case Left(uri) => readUri(uri)
+        case Right(path) => readFile(path)
+
+    val spec =
+      val parseResult =
+        new OpenAPIParser().readContents(specString, null, null)
+      if (parseResult.getMessages().isEmpty())
+        parseResult.getOpenAPI()
+      else
+        val msgs = parseResult.getMessages().asScala
+        report.errorAndAbort(s"Failed to parse OpenAPI spec from $location:\n${msgs.mkString("\n")}")
 
     val schemas0: List[(String, ProtoSchema)] = {
       val b = List.newBuilder[(String, ProtoSchema)]
@@ -1057,4 +1060,25 @@ private[openapi] object SwaggerToScalaAst {
               report.errorAndAbort(s"The given location has no URI schema and is not a valid path: '$location' (${e.getMessage})")
       case Failure(e) =>
         report.errorAndAbort(s"Not a proper URI or path: '$location'")
+
+  private def readFile(path: Path)(using Quotes): String =
+    Try { java.nio.file.Files.readString(path) } match
+      case Success(str) =>
+        str
+      case Failure(e) =>
+        qr.report.errorAndAbort(s"Failed to read spec from file '$path': $e")
+
+  private def readUri(uri: URI)(using Quotes): String =
+    import java.net.http.*
+    val client = HttpClient.newHttpClient()
+    val res = Try:
+      client.send(
+        HttpRequest.newBuilder(uri).build(),
+        HttpResponse.BodyHandlers.ofString(),
+      )
+    res match
+      case Success(resp) =>
+        resp.body()
+      case Failure(e) =>
+        qr.report.errorAndAbort(s"Failed to fetch spec from '$uri': $e")
 }
