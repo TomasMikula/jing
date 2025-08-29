@@ -1,6 +1,6 @@
 package jing.openapi
 
-import jing.openapi.model.{EndpointList, Schema}
+import jing.openapi.model.*
 import org.scalatest.funsuite.AnyFunSuite
 
 import scala.NamedTuple.NamedTuple
@@ -77,6 +77,38 @@ class SwaggerToScalaAstTest extends AnyFunSuite {
         fail("expected unsupported null in int64 enum")
       case Schema.Unsupported(message) =>
         assert(message.value == "null not supported as an enum case of 64-bit integers. Got: 1,2,null")
+  }
+
+  test("parameter $ref") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: Empty API
+        version: 2.0.0
+      paths:
+        /a/b/c:
+          get:
+            parameters:
+              - $ref: "#/components/parameters/debug"
+            responses:
+              "204":
+                description: No Content
+      components:
+        parameters:
+          debug:
+            name: debug
+            schema:
+              type: boolean
+            in: query
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    api.paths.`/a/b/c`.Get.requestSchema match
+      case RequestSchema.Parameterized(params) =>
+        // just checking that it compiles with the given type annotation
+        params : RequestSchema.Params.Proper[Void || "N/A" :? Oops["\'$ref\' not yet supported for parameters: #/components/parameters/debug"]]
   }
 
 }

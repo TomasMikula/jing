@@ -462,13 +462,14 @@ private[openapi] object SwaggerToScalaAst {
   private enum ProtoParam[F[_]]:
     case PathParam(name: String, schema: QuotedPathParamSchema[F])
     case QueryParam(name: String, schema: QuotedQueryParamSchema[F], required: Boolean)
-    case Unsupported(name: String, required: Boolean, reason: ProtoParam.UnsupportedReason)
-    case Error(name: String, required: Boolean, details: String)
+    case Unsupported(name: Option[String], required: Boolean, reason: ProtoParam.UnsupportedReason)
+    case Error(name: Option[String], required: Boolean, details: String)
 
   private object ProtoParam {
     enum UnsupportedReason:
       case UnsupportedLocation(location: String)
       case ContentFieldNotSupported
+      case RefNotSupported(ref: String)
   }
 
   private def resolveParam[F[_]](
@@ -491,9 +492,13 @@ private[openapi] object SwaggerToScalaAst {
       case null =>
         param.getContent match
           case null =>
-            ProtoParam.Error(name, required, details = "parameter must have either schema or content")
+            param.get$ref match
+              case null =>
+                ProtoParam.Error(Option(name), required, details = "parameter must have one of schema, content, $ref")
+              case ref =>
+                ProtoParam.Unsupported(Option(name), required, reason = RefNotSupported(ref))
           case _ =>
-            ProtoParam.Unsupported(name, required, reason = ContentFieldNotSupported)
+            ProtoParam.Unsupported(Option(name), required, reason = ContentFieldNotSupported)
 
       case nnSchema =>
         val schema: ProtoSchema =
@@ -508,7 +513,7 @@ private[openapi] object SwaggerToScalaAst {
           case "query" =>
             QueryParam(name, toQuotedQueryParamSchema(schema, style, explode), required)
           case other =>
-            ProtoParam.Unsupported(name, required, UnsupportedLocation(other))
+            ProtoParam.Unsupported(Option(name), required, UnsupportedLocation(other))
   }
 
   private def toQuotedPathParamSchema[F[_]](
@@ -690,12 +695,13 @@ private[openapi] object SwaggerToScalaAst {
               val msg = reason match
                 case UnsupportedLocation(location) => s"'$location' parameters are not yet supported"
                 case ContentFieldNotSupported => s"'content' field not yet supported. Use schema field instead."
+                case RefNotSupported(ref) => s"'$$ref' not yet supported for parameters: $ref"
               (name, required, msg)
             case ProtoParam.Error(name, required, msg) =>
               (name, required, msg)
         val schema = RequestSchema.Params.QueryParamSchema.unsupported(msg)
         val (tp, exp) = quotedQueryParamSchema(schema)
-        ProtoParam.QueryParam(name, Indeed((tp, F.pure(exp))), required)
+        ProtoParam.QueryParam(name.getOrElse("N/A"), Indeed((tp, F.pure(exp))), required)
       }
 
     val queryParams1 = queryParams ++ unsupportedAsQueryParams
