@@ -958,9 +958,13 @@ private[openapi] object SwaggerToScalaAst {
             // TODO: look for format modifier
             ProtoSchema.str
           case vals =>
-            vals.asScala.toList.map(_.asInstanceOf[String]) match
-              case Nil                 => ProtoSchema.Unsupported("empty enum")
-              case NonEmptyList(v, vs) => ProtoSchema.strEnum(v, vs*)
+            val stringVals = vals.asScala.toList.map(_.asInstanceOf[String])
+            if (stringVals.contains(null))
+              ProtoSchema.Unsupported(s"null not supported as an enum case of strings. Got: ${stringVals.mkString(",")}")
+            else
+              stringVals match
+                case Nil                 => ProtoSchema.Unsupported("empty enum")
+                case NonEmptyList(v, vs) => ProtoSchema.strEnum(v, vs*)
       case "integer" =>
         schema.getFormat() match
           case "int32" =>
@@ -968,19 +972,27 @@ private[openapi] object SwaggerToScalaAst {
               case null =>
                 ProtoSchema.i32
               case vals =>
-                // TODO: detect and report the parser giving use Longs if values don't fit into Int range
-                vals.asScala.toList.map(_.asInstanceOf[Integer].toInt) match
-                  case Nil                 => ProtoSchema.Unsupported("empty enum")
-                  case NonEmptyList(v, vs) => ProtoSchema.int32Enum(v, vs*)
+                // TODO: detect and report the parser giving us Longs if values don't fit into Int range
+                val integerVals = vals.asScala.toList.map(_.asInstanceOf[Integer])
+                if (integerVals.contains(null))
+                  ProtoSchema.Unsupported(s"null not supported as an enum case of 32-bit integers. Got: ${integerVals.mkString(",")}")
+                else
+                  integerVals.map(_.toInt) match
+                    case Nil                 => ProtoSchema.Unsupported("empty enum")
+                    case NonEmptyList(v, vs) => ProtoSchema.int32Enum(v, vs*)
           case "int64" =>
             schema.getEnum match
               case null =>
                 ProtoSchema.i64
               case vals =>
                 // using Number instead of Long, as the parser uses Integer if all cases fit into Int
-                vals.asScala.toList.map(_.asInstanceOf[java.lang.Number].longValue()) match
-                  case Nil                 => ProtoSchema.Unsupported("empty enum")
-                  case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
+                val numberVals = vals.asScala.toList.map(_.asInstanceOf[java.lang.Number])
+                if (numberVals.contains(null))
+                  ProtoSchema.Unsupported(s"null not supported as an enum case of 64-bit integers. Got: ${numberVals.mkString(",")}")
+                else
+                  numberVals.map(_.longValue()) match
+                    case Nil                 => ProtoSchema.Unsupported("empty enum")
+                    case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
           case other =>
             ProtoSchema.Unsupported(s"Unsupported integer format: $other")
       case "boolean" =>
