@@ -39,13 +39,13 @@ object StructuralRefinement {
    *
    * Member definitions can take state and pass new state forward.
    */
-  def typedTermStateful[Base](using baseType: Type[Base])[Q <: Quotes & Singleton](using q: Q)[S[_[_]]](
+  def typedTermStateful[Base](using baseType: Type[Base])[Q <: Quotes & Singleton](using q: Q)[S](
     owner : qr.Symbol,
     members: MemberDefsPoly[q.type, "term-synth", S],
     anonClassNameSuffix: String,
     path: String,
     debugPrint: String => Unit,
-  ): (qr.Term, S[[x] =>> Unit]) = {
+  ): (qr.Term, S) = {
     import qr.*
 
     val (tpe, s, termFn) =
@@ -74,12 +74,12 @@ object StructuralRefinement {
     mode: Mode[q.type, M],
   )[Base](using
     baseType: Type[Base],
-  )[S[_[_]]](
+  )[S](
     members: MemberDefsPoly[q.type, M, S],
     anonClassNameSuffix: String,
     symbolPath: String,
     debugPrint: String => Unit,
-  ): (qr.TypeRepr, S[[x] =>> Unit], mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
+  ): (qr.TypeRepr, S, mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import qr.*
 
     val baseTypeRepr = TypeRepr.of[Base]
@@ -343,31 +343,31 @@ object StructuralRefinement {
       f
 
     /** Helps with type-inference of the polymorphic function with given arguments. */
-    opaque type PolyS[Q <: Quotes, M, S[_[_]], T[_[_]]]
-      <: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S[mode.OutEff], name: String, ctx: PreviousSiblings[Q, N]) => (T[mode.OutEff], MemberDef[Q, mode.OutEff])
-      =  [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S[mode.OutEff], name: String, ctx: PreviousSiblings[Q, N]) => (T[mode.OutEff], MemberDef[Q, mode.OutEff])
+    opaque type PolyS[Q <: Quotes, M, S, T]
+      <: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S, name: String, ctx: PreviousSiblings[Q, N]) => (T, MemberDef[Q, mode.OutEff])
+      =  [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S, name: String, ctx: PreviousSiblings[Q, N]) => (T, MemberDef[Q, mode.OutEff])
 
     object PolyS {
-      def apply[Q <: Quotes, M, S[_[_]], T[_[_]]](
-        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S[mode.OutEff], name: String, ctx: PreviousSiblings[Q, N]) => (T[mode.OutEff], MemberDef[Q, mode.OutEff]),
+      def apply[Q <: Quotes, M, S, T](
+        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (acc: S, name: String, ctx: PreviousSiblings[Q, N]) => (T, MemberDef[Q, mode.OutEff]),
       ): PolyS[Q, M, S, T] =
         f
 
-      def writer[Q <: Quotes, M, W[_[_]]](
-        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (name: String, ctx: PreviousSiblings[Q, N]) => (W[mode.OutEff], MemberDef[Q, mode.OutEff]),
-      ): PolyS[Q, M, [f[_]] =>> Unit, W] =
-        PolyS[Q, M, [f[_]] =>> Unit, W](
+      def writer[Q <: Quotes, M, W](
+        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (name: String, ctx: PreviousSiblings[Q, N]) => (W, MemberDef[Q, mode.OutEff]),
+      ): PolyS[Q, M, Unit, W] =
+        PolyS[Q, M, Unit, W](
           [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (_: Unit, name: String, ctx: PreviousSiblings[Q, N]) => f[N](name, ctx)
         )
 
-      def reader[Q <: Quotes, M, R[_[_]]](
-        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (env: R[mode.OutEff], name: String, ctx: PreviousSiblings[Q, N]) => MemberDef[Q, mode.OutEff],
-      ): PolyS[Q, M, R, [f[_]] =>> Unit] =
-        PolyS[Q, M, R, [f[_]] =>> Unit](
+      def reader[Q <: Quotes, M, R](
+        f: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> (env: R, name: String, ctx: PreviousSiblings[Q, N]) => MemberDef[Q, mode.OutEff],
+      ): PolyS[Q, M, R, Unit] =
+        PolyS[Q, M, R, Unit](
           [N] => (mode, sub) ?=> (env, name, ctx) => ((), f[N](env, name, ctx))
         )
 
-      def fromStateless[Q <: Quotes, M, S[_[_]]](m: MemberDef.Poly[Q, M]): MemberDef.PolyS[Q, M, S, [f[_]] =>> Unit] =
+      def fromStateless[Q <: Quotes, M, S](m: MemberDef.Poly[Q, M]): MemberDef.PolyS[Q, M, S, Unit] =
         PolyS([N] => (mode, sub) ?=> (_, _, ctx) => ((), m[N](ctx)))
     }
   }
@@ -375,10 +375,10 @@ object StructuralRefinement {
   /**
     * @tparam Q (typically singleton) subtype of Quotes
     * @tparam M upper bound on mode
-    * @tparam S accumulated output from member definitions, parameterized by the mode's `OutEff`.
+    * @tparam S accumulated output from member definitions
     */
-  sealed trait MemberDefsPoly[Q <: Quotes, M, S[_[_]]] {
-    def next[T[_[_]]](
+  sealed trait MemberDefsPoly[Q <: Quotes, M, S] {
+    def next[T](
       nextName: String,
       nextDef: MemberDef.PolyS[Q, M, S, T],
     ): MemberDefsPoly[Q, M, T] =
@@ -387,37 +387,51 @@ object StructuralRefinement {
     def foldLeft
       [N](using mode: Mode[Q, N], sub: N IsSubsumedBy M)
       [B](b: B)(f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X))
-    : (B, S[mode.OutEff])
+    : (B, S)
   }
 
   object MemberDefsPoly {
-    case class Empty[Q <: Quotes, M, S[_[_]]](
-      initialState: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> S[mode.OutEff]
+    case class Empty[Q <: Quotes, M, S](
+      initialState: [N] => (mode: Mode[Q, N], sub: N IsSubsumedBy M) ?=> S,
     ) extends MemberDefsPoly[Q, M, S] {
-      override def foldLeft[N](using mode: Mode[Q, N], sub: N IsSubsumedBy M)[B](b: B)(f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X)): (B, S[mode.OutEff]) =
+      override def foldLeft[N](using
+        mode: Mode[Q, N],
+        sub: N IsSubsumedBy M,
+      )[B](
+        b: B,
+      )(
+        f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X),
+      ): (B, S) =
         (b, initialState[N])
     }
 
-    case class Snoc[Q <: Quotes, M, S[_[_]], T[_[_]]](
+    case class Snoc[Q <: Quotes, M, S, T](
       init: MemberDefsPoly[Q, M, S],
       lastName: String,
       lastDef: MemberDef.PolyS[Q, M, S, T],
     ) extends MemberDefsPoly[Q, M, T] {
-      override def foldLeft[N](using mode: Mode[Q, N], sub: N IsSubsumedBy M)[B](b: B)(f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X)): (B, T[mode.OutEff]) =
+      override def foldLeft[N](using
+        mode: Mode[Q, N],
+        sub: N IsSubsumedBy M,
+      )[B](
+        b: B,
+      )(
+        f: [X] => (B, String, PreviousSiblings[Q, N] => (MemberDef[Q, mode.OutEff], X)) => (B, X),
+      ): (B, T) =
         val (b1, s) = init.foldLeft[N](b)(f)
         f(b1, lastName, lastDef[N](s, lastName, _).swap)
     }
 
-    def emptyUnit[Q <: Quotes, M]: MemberDefsPoly[Q, M, [f[_]] =>> Unit] =
-      Empty[Q, M, [f[_]] =>> Unit]([N] => (mode, sub) ?=> ())
+    def emptyUnit[Q <: Quotes, M]: MemberDefsPoly[Q, M, Unit] =
+      Empty[Q, M, Unit]([N] => (mode, sub) ?=> ())
 
     def stateless[M](using
       q: Quotes,
       mode: Mode[q.type, M],
     )(
       members: List[(String, MemberDef.Poly[q.type, M])],
-    ): MemberDefsPoly[q.type, M, [F[_]] =>> Unit] = {
-      val init: MemberDefsPoly[q.type, M, [F[_]] =>> Unit] =
+    ): MemberDefsPoly[q.type, M, Unit] = {
+      val init: MemberDefsPoly[q.type, M, Unit] =
         Empty([N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M) ?=> ())
       members.foldLeft(init) { case (acc, (name, defn)) =>
         Snoc(

@@ -94,7 +94,7 @@ private[openapi] object SwaggerToScalaAst {
     debugPrint(s"Found ${schemas.size} schemas and ${paths.size} paths")
 
     val res =
-      StructuralRefinement.typedTermStateful[OpenApiSpec][q.type][[f[_]] =>> Unit](
+      StructuralRefinement.typedTermStateful[OpenApiSpec][q.type][Unit](
         owner = Symbol.spliceOwner,
         members = MemberDefsPoly.emptyUnit[q.type, "term-synth"]
           .next("schemas", MemberDef.PolyS.fromStateless(schemasField["term-synth"](schemas, s"$apiOwner.schemas")))
@@ -176,17 +176,17 @@ private[openapi] object SwaggerToScalaAst {
     schemas: List[(String, ProtoSchema.Oriented)],
     paths: List[(String, io.swagger.v3.oas.models.PathItem)],
     symbolPath: String,
-  ): MemberDef.PolyS[q.type, M, [f[_]] =>> Unit, [f[_]] =>> List[(String, List[(HttpMethod, qr.TypeRepr)])]] = {
+  ): MemberDef.PolyS[q.type, M, Unit, List[(String, List[(HttpMethod, qr.TypeRepr)])]] = {
     import quotes.reflect.*
 
-    MemberDef.PolyS.writer[q.type, M, [f[_]] =>> List[(String, List[(HttpMethod, TypeRepr)])]] { [M1] => (m1, _) ?=> (_, ctx) =>
+    MemberDef.PolyS.writer[q.type, M, List[(String, List[(HttpMethod, TypeRepr)])]] { [M1] => (m1, _) ?=> (_, ctx) =>
       val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
       val schemaLookup: SchemaLookup[m1.OutEff] =
         schemaLookupFromSchemaField[M1](Mode.sameInTerm(ctx.mode, m1)(schemasField), schemas.map(_._1))
 
-      type State[F[_]] = List[(String, List[(HttpMethod, TypeRepr)])]
+      type State = List[(String, List[(HttpMethod, TypeRepr)])]
       val init: MemberDefsPoly[q.type, M1, State] =
         MemberDefsPoly.Empty[q.type, M1, State]([N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M1) ?=> Nil)
 
@@ -208,7 +208,7 @@ private[openapi] object SwaggerToScalaAst {
     }
   }
 
-  private def endpointsField[M](using q: Quotes): MemberDef.PolyS[q.type, M, [f[_]] =>> List[(String, List[(HttpMethod, qr.TypeRepr)])], [f[_]] =>> Unit] = {
+  private def endpointsField[M](using q: Quotes): MemberDef.PolyS[q.type, M, List[(String, List[(HttpMethod, qr.TypeRepr)])], Unit] = {
     import quotes.reflect.*
 
     MemberDef.PolyS.reader { [M1] => (m1, sub) ?=> (endpoints, _, ctx) =>
@@ -435,7 +435,7 @@ private[openapi] object SwaggerToScalaAst {
       HttpMethod.values.toList
         .flatMap { m => pathOperation(pathItem, m).map((m, _)) }
 
-    type State[F[_]] = List[(HttpMethod, TypeRepr)]
+    type State = List[(HttpMethod, TypeRepr)]
     val init: MemberDefsPoly[q.type, M, State] =
       MemberDefsPoly.Empty[q.type, M, State]([N] => (mode: Mode[q.type, N], sub: N IsSubsumedBy M) ?=> Nil)
 
