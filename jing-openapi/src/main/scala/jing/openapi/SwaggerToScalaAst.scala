@@ -44,6 +44,8 @@ import scala.quoted.*
 import scala.util.{Failure, Success, Try}
 
 private[openapi] object SwaggerToScalaAst {
+  private val debugPrint = println(_)
+
   def apply(location: String)(using q: Quotes): Expr[Any] = {
     val specString =
       resolveLocation(location) match
@@ -55,6 +57,10 @@ private[openapi] object SwaggerToScalaAst {
 
   def fromString(specString: String)(location: String)(using q: Quotes): Expr[Any] = {
     import quotes.reflect.*
+
+    val t0 = System.currentTimeMillis()
+
+    val apiOwner: String = Symbol.spliceOwner.fullName
 
     val spec =
       val parseResult =
@@ -83,19 +89,30 @@ private[openapi] object SwaggerToScalaAst {
       b.result()
     }
 
-    StructuralRefinement.typedTermStateful[OpenApiSpec][q.type][[f[_]] =>> Unit](
-      owner = Symbol.spliceOwner,
-      members = MemberDefsPoly.emptyUnit[q.type, "term-synth"]
-        .next("schemas", MemberDef.PolyS.fromStateless(schemasField["term-synth"](schemas)))
-        .next("paths", pathsField["term-synth"](schemas, paths))
-        .next("endpointList", endpointsField["term-synth"])
-        ,
-      "Api",
-    )._1.asExpr
+    val t1 = System.currentTimeMillis()
+    debugPrint(s"Parsed OpenAPI spec for $apiOwner (${t1 - t0}ms)")
+    debugPrint(s"Found ${schemas.size} schemas and ${paths.size} paths")
+
+    val res =
+      StructuralRefinement.typedTermStateful[OpenApiSpec][q.type][[f[_]] =>> Unit](
+        owner = Symbol.spliceOwner,
+        members = MemberDefsPoly.emptyUnit[q.type, "term-synth"]
+          .next("schemas", MemberDef.PolyS.fromStateless(schemasField["term-synth"](schemas, s"$apiOwner.schemas")))
+          .next("paths", pathsField["term-synth"](schemas, paths, s"$apiOwner.paths"))
+          .next("endpointList", endpointsField["term-synth"])
+          ,
+        "Api",
+        path = apiOwner,
+        debugPrint,
+      )._1.asExpr
+
+    debugPrint(s"Code generation for $location done, handing the result back to the compiler")
+    res
   }
 
   private def schemasField[M](using q: Quotes)(
     schemas: List[(String, ProtoSchema.Oriented)],
+    symbolPath: String,
   ): MemberDef.Poly[q.type, M] = {
     import q.reflect.*
 
@@ -148,6 +165,8 @@ private[openapi] object SwaggerToScalaAst {
           )
         },
         "schemas",
+        path = symbolPath,
+        debugPrint,
       )
       MemberDef.Val(tpe, bodyFn)
     }
@@ -156,6 +175,7 @@ private[openapi] object SwaggerToScalaAst {
   private def pathsField[M](using q: Quotes)(
     schemas: List[(String, ProtoSchema.Oriented)],
     paths: List[(String, io.swagger.v3.oas.models.PathItem)],
+    symbolPath: String,
   ): MemberDef.PolyS[q.type, M, [f[_]] =>> Unit, [f[_]] =>> List[(String, List[(HttpMethod, qr.TypeRepr)])]] = {
     import quotes.reflect.*
 
@@ -175,12 +195,14 @@ private[openapi] object SwaggerToScalaAst {
           acc.next(
             path,
             MemberDef.PolyS[q.type, M1, State, State] { [M2] => (m2, sub) ?=> (s, name, _) =>
-              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem)
+              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem, s"$symbolPath.$name")
               ((name, endpoints) :: s, MemberDef.Val(tpe, bodyFn))
             }
           )
         },
         "paths",
+        symbolPath = symbolPath,
+        debugPrint,
       )
       (endpoints.reverse, MemberDef.Val(tpe, bodyFn))
     }
@@ -405,6 +427,7 @@ private[openapi] object SwaggerToScalaAst {
     schemas: SchemaLookup[mode.OutEff],
     path: String,
     pathItem: io.swagger.v3.oas.models.PathItem,
+    symbolPath: String,
   ): (qr.TypeRepr, List[(HttpMethod, qr.TypeRepr)], mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import quotes.reflect.*
 
@@ -433,6 +456,8 @@ private[openapi] object SwaggerToScalaAst {
           )
         },
         path,
+        symbolPath,
+        debugPrint,
       )
 
     (tp, endpoints.reverse, bodyFn)

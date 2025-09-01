@@ -124,6 +124,8 @@ object TupledFunctions {
         }
       ),
       "UntupledFunction",
+      path = "",
+      debugPrint = _ => (),
     ).asExpr
   }
 

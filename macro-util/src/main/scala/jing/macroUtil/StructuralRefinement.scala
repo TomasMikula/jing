@@ -20,10 +20,13 @@ object StructuralRefinement {
     owner : qr.Symbol,
     members : List[(String, MemberDef.Poly[q.type, "term-synth"])],
     anonClassNameSuffix: String,
+    path: String,
+    debugPrint: String => Unit,
   ): qr.Term = {
     import qr.*
 
-    val (tpe, termFn) = StructuralRefinement.forMode["term-synth"][Base](members, anonClassNameSuffix)
+    val (tpe, termFn) =
+      StructuralRefinement.forMode["term-synth"][Base](members, anonClassNameSuffix, path, debugPrint)
     val term = termFn(owner)
     Typed(term, TypeTree.of(using tpe.asType))
   }
@@ -40,10 +43,13 @@ object StructuralRefinement {
     owner : qr.Symbol,
     members: MemberDefsPoly[q.type, "term-synth", S],
     anonClassNameSuffix: String,
+    path: String,
+    debugPrint: String => Unit,
   ): (qr.Term, S[[x] =>> Unit]) = {
     import qr.*
 
-    val (tpe, s, termFn) = StructuralRefinement.forModeStateful["term-synth"][Base](members, anonClassNameSuffix)
+    val (tpe, s, termFn) =
+      StructuralRefinement.forModeStateful["term-synth"][Base](members, anonClassNameSuffix, path, debugPrint)
     val term = termFn(owner)
     (Typed(term, TypeTree.of(using tpe.asType)), s)
   }
@@ -56,8 +62,11 @@ object StructuralRefinement {
   )(
     members: List[(String, MemberDef.Poly[q.type, M])],
     anonClassNameSuffix: String,
+    path: String,
+    debugPrint: String => Unit,
   ): (qr.TypeRepr, mode.OutEff[(owner: qr.Symbol) => qr.Term]) =
-    val (tp, (), trm) = forModeStateful[M][Base](MemberDefsPoly.stateless(members), anonClassNameSuffix)
+    val (tp, (), trm) =
+      forModeStateful[M][Base](MemberDefsPoly.stateless(members), anonClassNameSuffix, path, debugPrint)
     (tp, trm)
 
   def forModeStateful[M](using
@@ -68,6 +77,8 @@ object StructuralRefinement {
   )[S[_[_]]](
     members: MemberDefsPoly[q.type, M, S],
     anonClassNameSuffix: String,
+    symbolPath: String,
+    debugPrint: String => Unit,
   ): (qr.TypeRepr, S[[x] =>> Unit], mode.OutEff[(owner: qr.Symbol) => qr.Term]) = {
     import qr.*
 
@@ -84,22 +95,25 @@ object StructuralRefinement {
         val ((_, b1), s) =
           members.foldLeft["type-synth"]((PreviousSiblings.empty["type-synth"](using q), b)) {
             [X] => (acc, name, defn) => {
+              val t0 = System.currentTimeMillis()
               val (ctx, b) = acc
               val (m, x) = defn(ctx)
-              val acc1 = m match
+              val (kind, acc1) = m match
                 case td: MemberDef.Type[q] =>
                   val (b1, ref) =
                     if (td.isAbstract)
                       b.addTypeMember(name)
                     else
                       b.addTypeMember(name, Some(td.body))
-                  (ctx.addType(name, ref), b1)
+                  "type" -> (ctx.addType(name, ref), b1)
                 case tm: MemberDef.Val[q, tref] =>
                   val (b1, ref) = b.addMember(name, tm.tpe)
-                  (ctx.addTerm(name, ref), b1)
+                  "val " -> (ctx.addTerm(name, ref), b1)
                 case md: MemberDef.Method[q, tref] =>
                   val (b1, ref) = b.addMember(name, md.tpe)
-                  (ctx.addTerm(name, ref), b1)
+                  "def " -> (ctx.addTerm(name, ref), b1)
+              val t1 = System.currentTimeMillis()
+              debugPrint(s"Synthesized type       of $kind member $symbolPath.$name (${t1 - t0}ms)")
               (acc1, x)
             }
           }
@@ -124,9 +138,10 @@ object StructuralRefinement {
                     PreviousSiblings.empty["type-synth"](using q),
                     List.empty[Symbol],
                   )) { [X] => (acc, name, defn) =>
+                    val t0 = System.currentTimeMillis()
                     val (ctx, syms) = acc
                     val (m, x) = defn(ctx)
-                    val acc1 = m match
+                    val (kind, acc1) = m match
                       case td: MemberDef.Type[q] =>
                         val tp = td.body
                         val tpSym =
@@ -137,7 +152,7 @@ object StructuralRefinement {
                             tpe = tp,
                             privateWithin = Symbol.noSymbol,
                           )
-                        (ctx.addType(name, tpSym.typeRef), tpSym :: syms)
+                        "type" -> (ctx.addType(name, tpSym.typeRef), tpSym :: syms)
                       case tm: MemberDef.Val[q, term] =>
                         val sym =
                           Symbol.newVal(
@@ -147,7 +162,7 @@ object StructuralRefinement {
                             flags = Flags.EmptyFlags,
                             privateWithin = Symbol.noSymbol,
                           )
-                        (ctx.addTerm(name, sym.termRef), sym :: syms)
+                        "val " -> (ctx.addTerm(name, sym.termRef), sym :: syms)
                       case md: MemberDef.Method[q, term] =>
                         val sym =
                           Symbol.newMethod(
@@ -157,7 +172,9 @@ object StructuralRefinement {
                             flags = Flags.EmptyFlags,
                             privateWithin = Symbol.noSymbol,
                           )
-                        (ctx.addTerm(name, sym.termRef), sym :: syms)
+                        "def " -> (ctx.addTerm(name, sym.termRef), sym :: syms)
+                    val t1 = System.currentTimeMillis()
+                    debugPrint(s"Synthesized symbol     of $kind member $symbolPath.$name (${t1 - t0}ms)")
                     (acc1, x)
                   }
 
@@ -187,14 +204,16 @@ object StructuralRefinement {
           val valDefs =
             members.foldLeft["term-synth"](List.empty[Option[Definition]]) {
               [X] => (revAcc, name, defn) =>
+                val t0 = System.currentTimeMillis()
                 val (m, x) = defn(ctx)
-                val revAcc1 =
-                  m.acceptVisitor[Option[Definition]](
-                    caseType = _ => None,
+                val (kind, optDef) =
+                  m.acceptVisitor[(String, Option[Definition])](
+                    caseType = _ =>
+                      "type" -> None,
                     caseVal = (_, bodyF) => {
                       val body = mode.outEffId.at(bodyF)
                       val sym = clsSym.declaredField(name)
-                      Some(ValDef(sym, Some(body(selfSym = sym))))
+                      "val " -> Some(ValDef(sym, Some(body(selfSym = sym))))
                     },
                     caseMethod = (_, bodyF) => {
                       val body = mode.outEffId.at(bodyF)
@@ -203,10 +222,12 @@ object StructuralRefinement {
                           case m :: Nil => m
                           case Nil => report.errorAndAbort(s"Bug: Method `$name` not found in declared methods")
                           case _ => report.errorAndAbort(s"Bug: Multiple methods named `$name` found in declared methods")
-                      Some(DefDef(sym, argss => Some(body(sym, argss))))
+                      "def " -> Some(DefDef(sym, argss => Some(body(sym, argss))))
                     }
                   )
-                  :: revAcc
+                val revAcc1 = optDef :: revAcc
+                val t1 = System.currentTimeMillis()
+                println(s"Synthesized definition of $kind member $symbolPath.$name (${t1 - t0}ms)")
                 (revAcc1, x)
             }._1.reverse.flatten
 
