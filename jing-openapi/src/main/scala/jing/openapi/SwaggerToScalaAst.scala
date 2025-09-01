@@ -179,7 +179,7 @@ private[openapi] object SwaggerToScalaAst {
   ): MemberDef.PolyS[q.type, M, Unit, List[(String, List[(HttpMethod, qr.TypeRepr)])]] = {
     import quotes.reflect.*
 
-    MemberDef.PolyS.writer[q.type, M, List[(String, List[(HttpMethod, TypeRepr)])]] { [M1] => (m1, _) ?=> (_, ctx) =>
+    MemberDef.PolyS.writer[q.type, M, List[(String, List[(HttpMethod, TypeRepr)])]] { [M1] => (m1, _) ?=> ctx =>
       val schemasField: ctx.mode.InTerm =
         ctx.terms.getOrElse("schemas", { throw AssertionError("field `schemas` not previously defined") })
 
@@ -194,9 +194,9 @@ private[openapi] object SwaggerToScalaAst {
         members = paths.foldLeft(init) { case (acc, (path, pathItem)) =>
           acc.next(
             path,
-            MemberDef.PolyS[q.type, M1, State, State] { [M2] => (m2, sub) ?=> (s, name, _) =>
-              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem, s"$symbolPath.$name")
-              ((name, endpoints) :: s, MemberDef.Val(tpe, bodyFn))
+            MemberDef.PolyS[q.type, M1, State, State] { [M2] => (m2, sub) ?=> (s, _) =>
+              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem, s"$symbolPath.$path")
+              ((path, endpoints) :: s, MemberDef.Val(tpe, bodyFn))
             }
           )
         },
@@ -211,7 +211,7 @@ private[openapi] object SwaggerToScalaAst {
   private def endpointsField[M](using q: Quotes): MemberDef.PolyS[q.type, M, List[(String, List[(HttpMethod, qr.TypeRepr)])], Unit] = {
     import quotes.reflect.*
 
-    MemberDef.PolyS.reader { [M1] => (m1, sub) ?=> (endpoints, _, ctx) =>
+    MemberDef.PolyS.reader { [M1] => (m1, sub) ?=> (endpoints, ctx) =>
       import m1.applicativeOutEff
 
       val pathsField: ctx.mode.InTerm =
@@ -444,7 +444,7 @@ private[openapi] object SwaggerToScalaAst {
         members = operations.foldLeft(init) { case (acc, (meth, op)) =>
           acc.next(
             meth.toString,
-            MemberDef.PolyS[q.type, M, State, State] { [N] => (_, sub) ?=> (s, _, _) =>
+            MemberDef.PolyS[q.type, M, State, State] { [N] => (_, sub) ?=> (s, _) =>
               operationToObject(schemas.mapK(sub.downgrader), path, meth, op) match
                 case Indeed((tp, body)) =>
                   val tr = TypeRepr.of(using tp)
