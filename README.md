@@ -106,6 +106,10 @@ Lots of OpenAPI features are still missing.
 There's lot's of space for improvement even with regards to the above principles
 (but feel free to call me out on violations thereof, at least I will know that you care).
 
+Usable only for small to mid-size APIs (tens of paths and schemas),
+as large APIs hit the JVM method size limit.
+Even larger ones effectively never compile (codegen using the Reflect API is veeery slow).
+
 ## Q&A
 
 ### How can JING match the capabilities of standalone code generators, given the restrictions of Scala macros?
