@@ -103,6 +103,36 @@ object SchemaMotif {
       cases.toList([a] => (va: ScalaValueOf[a, T]) => va.get)
   }
 
+  object Enumeration {
+    def str[F[_]](value: String, values: String*): Enumeration[F, Str, ?] =
+      apply(SchemaMotif.S(), ScalaValueOf.str, value, values*)
+
+    def int32[F[_]](value: Int, values: Int*): Enumeration[F, Int32, ?] =
+      apply(SchemaMotif.I32(), ScalaValueOf.i32, value, values*)
+
+    def int64[F[_]](value: Long, values: Long*): Enumeration[F, Int64, ?] =
+      apply(SchemaMotif.I64(), ScalaValueOf.i64, value, values*)
+
+    def bool[F[_]](value: Boolean, values: Boolean*): Enumeration[F, Bool, ?] =
+      apply(SchemaMotif.B(), ScalaValueOf.bool, value, values*)
+
+    private def apply[F[_], Base, X](
+      s: SchemaMotif.BasicPrimitive[F, Base],
+      f: (x: X) => ScalaValueOf[x.type, Base],
+      x0: X,
+      xs: X*
+    ): Enumeration[F, Base, ?] = {
+      val values1: Items1.Product[||, Void, ScalaValueOf[_, Base], ?] =
+        xs.foldLeft[Items1.Product[||, Void, ScalaValueOf[_, Base], ?]](
+          Items1.Product.Single(f(x0))
+        ) { (acc, x) =>
+          Items1.Product.Snoc(acc, f(x))
+        }
+
+      SchemaMotif.Enumeration(s, values1)
+    }
+  }
+
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]
 
   case class Object[F[_], Ps](
