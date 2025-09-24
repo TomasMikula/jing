@@ -34,11 +34,11 @@ Additionally, the generated endpoints are **ready to use,** using reasonable def
 1. Add JING to library dependencies
   - sbt
     ```scala
-    libraryDependencies += "dev.continuously.jing" %% "jing-openapi" % "0.0.2"
+    libraryDependencies += "dev.continuously.jing" %% "jing-openapi" % "0.0.3"
     ```
   - Scala CLI
     ```scala
-    //> using dep dev.continuously.jing::jing-openapi:0.0.2
+    //> using dep dev.continuously.jing::jing-openapi:0.0.3
     ```
 2. Just _"import"_ an API
   ```scala
