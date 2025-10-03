@@ -3,6 +3,7 @@ package jing.openapi.model
 import libretto.lambda.Items1
 import libretto.lambda.util.{Applicative, Exists, SingletonType}
 import libretto.lambda.util.Exists.Indeed
+import libretto.lambda.Items1Named
 
 /** Schema structure parametric in the type of nested schemas.
  *
@@ -21,6 +22,8 @@ sealed trait SchemaMotif[F[_], A] {
           [A] => fa => h(fa),
           [A] => fa => h(fa),
         )
+      case OneOf(discriminator, schemas) =>
+        OneOf(discriminator, schemas.translate(h))
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
@@ -31,6 +34,8 @@ sealed trait SchemaMotif[F[_], A] {
           [A] => fa => h(fa),
           [A] => fa => h(fa),
         ).value
+      case OneOf(discriminator, schemas) =>
+        OneOf(discriminator, schemas.wipeTranslate(h))
 
   def wipeTranslateA[M[_], G[_]](h: [X] => F[X] => M[Exists[G]])(using M: Applicative[M]): M[SchemaMotif[G, ?]] =
     this match
@@ -42,6 +47,10 @@ sealed trait SchemaMotif[F[_], A] {
           [A] => fa => h(fa),
         )
           .map(o => Object(o.value))
+      case OneOf(discriminator, schemas) =>
+        schemas
+          .wipeTranslateA(h)
+          .map(OneOf(discriminator, _))
 
   def isNotOops[S](using A =:= Oops[S]): Nothing =
     throw AssertionError("Impossible: Schemas for type Oops[S] are not representable by SchemaMotif")
@@ -182,4 +191,9 @@ object SchemaMotif {
 
     def propertyList: PropertyList[Ps] =
       asObject.propertyList
+
+  case class OneOf[F[_], Cases](
+    discriminatorProperty: String,
+    schemas: Items1Named.Product[||, ::, F, Cases],
+  ) extends SchemaMotif[F, DiscriminatedUnion[Cases]]
 }

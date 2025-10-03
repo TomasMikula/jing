@@ -55,7 +55,9 @@ val scalacOptionsCommon =
     "-Xkind-projector:underscores",
   )
 
-val LibrettoVersion = "0.3.6"
+ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
+
+val LibrettoVersion = "0.3.7-SNAPSHOT"
 val Http4sVersion = "0.23.30"
 val ScalatestVersion = "3.2.19"
 

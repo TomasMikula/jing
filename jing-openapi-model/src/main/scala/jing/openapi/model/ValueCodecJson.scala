@@ -2,8 +2,9 @@ package jing.openapi.model
 
 import io.circe.{Json, JsonObject}
 import jing.openapi.model.{||, ::, :?, Arr, Enum, Obj, Oops, ScalaUnionOf, ScalaValueOf, Schema, SchemaMotif, Value, ValueMotif}
-import jing.openapi.model.SchemaMotif.{Array, Enumeration, I32, I64, S, B, Object}
+import jing.openapi.model.SchemaMotif.{Array, Enumeration, I32, I64, S, B, Object, OneOf}
 import libretto.lambda.Items1
+import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.SingletonType
 import scala.util.boundary
 import scala.collection.mutable.Stack
@@ -66,6 +67,12 @@ object ValueCodecJson {
             builder += '{'
             encodeObjectProps(o.value, value, builder)
             builder += '}'
+          case o: OneOf[schema, cases] =>
+            (value: Value[DiscriminatedUnion[cases]]).handleDiscriminatedUnion:
+              [Lbl <: String, A] => (i, caseValue) =>
+                val caseSchema = o.schemas.get(IsCaseOf.toMember(i))
+                // Note: No need to encode the discriminator, as it must be part of the value.
+                encode(caseSchema, caseValue, builder)
 
       case u: Schema.Unsupported[s] =>
         value.isNotOops[s]
@@ -192,6 +199,26 @@ object ValueCodecJson {
             json.asObject match
               case Some(obj) => decodeObjectLenient(o.asObject.value, jsonLoc, obj)
               case None => SchemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
+
+          case o: OneOf[schema, cases] =>
+            json.asObject match
+              case Some(obj) =>
+                obj(o.discriminatorProperty) match
+                  case Some(discJson) =>
+                    discJson.asString match
+                      case Some(disc) =>
+                        o.schemas.getOption(disc) match
+                          case Some(Indeed((i, s))) =>
+                            decodeLenientAt(s, jsonLoc, obj.toJson)
+                              .map(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), _))
+                          case None =>
+                            SchemaViolation(s"Discriminator value '$disc' not recognized. Expected one of ${o.schemas.names.mkString("'", "', '", "'")}. At ${jsonLoc.printLoc}.${o.discriminatorProperty}")
+                      case None =>
+                        SchemaViolation(s"Discriminator must be a JSON string, got ${discJson.name} (${discJson.noSpaces}). At ${jsonLoc.printLoc}.${o.discriminatorProperty}")
+                  case None =>
+                    SchemaViolation(s"Missing discriminator property ${o.discriminatorProperty}. At ${jsonLoc.printLoc}")
+              case None =>
+                SchemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
       case Schema.Unsupported(message) =>
         Succeeded(Value.Lenient.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))

@@ -402,6 +402,17 @@ object ModelToScalaAst {
           case e @ Indeed((rel, (t, s))) =>
             given Type[e.T] = t
             Exists(rel.lift[Obj], (Type.of[Obj[e.T]], s.map { s => '{ SchemaMotif.Object($s) } }))
+      case o: SchemaMotif.OneOf[s, cases] =>
+        quotedNamedProductRelAA(o.schemas, f)
+          .map:
+            case ex @ Indeed((rel, (t, nep))) =>
+              given Type[ex.T] = t
+              Exists((
+                rel.lift[DiscriminatedUnion],
+                ( Type.of[DiscriminatedUnion[ex.T]]
+                , nep.map { ep => '{ SchemaMotif.OneOf(${Expr(o.discriminatorProperty)}, $ep)} }
+                )
+              ))
 
   def quotedProduct[F[_], Items](
     p: Items1.Product[||, Void, F, Items],
