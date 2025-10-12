@@ -1,8 +1,7 @@
 package jing.openapi
 
-import jing.openapi.model.{||, Obj, ScalaValueOf, SchemaMotif, Str}
-import libretto.lambda.Items1
-import libretto.lambda.util.Exists
+import jing.openapi.model.{||, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
+import libretto.lambda.util.{Exists, SingletonType}
 import scala.annotation.tailrec
 
 /** Schema with unresolved references to other schemas. */
@@ -11,15 +10,22 @@ private[openapi] enum ProtoSchema {
   case Ref(schemaName: String)
   case Unsupported(details: String)
 
-  import ProtoSchema.Oriented
-
-  /** Translate to oriented schema, such that all references are considered pointing backwards. */
-  def orientBackward: ProtoSchema.Oriented =
+  def resolve(
+    alreadyResolved: Map[String, Schema.Labeled[String, ?]],
+  ): Schema.Labeled[String, ?] =
     this match
-      case Proper(value) => Oriented.Proper(value.translate[[x] =>> Oriented]([X] => ps => ps.orientBackward))
-      case Ref(schemaName) => Oriented.BackwardRef(schemaName)
-      case Unsupported(details) => Oriented.Unsupported(details)
-
+      case Proper(value) =>
+        Schema.Labeled.Unlabeled:
+          value.wipeTranslate[Schema.Labeled[String, _]]([X] => ps => Exists(ps.resolve(alreadyResolved)))
+      case Ref(schemaName) =>
+        alreadyResolved.get(schemaName) match
+          case Some(schema) =>
+            Schema.Labeled.WithLabel(schemaName, schema)
+          case None =>
+            val msg = s"Unresolved schema $schemaName"
+            Schema.Labeled.Unsupported(SingletonType(msg))
+      case Unsupported(details) =>
+          Schema.Labeled.Unsupported(SingletonType(details))
 }
 
 private[openapi] object ProtoSchema {
@@ -136,5 +142,46 @@ private[openapi] object ProtoSchema {
 
       go(acc = Nil, remaining = schemas)
     }
+
+    def resolveAcyclic(schemas: List[(String, ProtoSchema.Oriented)]): List[(String, Schema.Labeled[String, ?])] = {
+      @tailrec
+      def go(
+        revAcc: List[(String, Schema.Labeled[String, ?])],
+        accMap: Map[String, Schema.Labeled[String, ?]], // contains the same elements as revAcc
+        remaining: List[(String, ProtoSchema.Oriented)],
+      ): List[(String, Schema.Labeled[String, ?])] =
+        remaining match
+          case (name, schema) :: tail =>
+            val resolved = resolve(schema, accMap)
+            go((name, resolved) :: revAcc, accMap.updated(name, resolved), tail)
+          case Nil =>
+            revAcc.reverse
+
+      go(Nil, Map.empty, schemas)
+    }
+
+    private def resolve(
+      schema: ProtoSchema.Oriented,
+      alreadyResolved: Map[String, Schema.Labeled[String, ?]],
+    ): Schema.Labeled[String, ?] =
+      schema match
+        case Proper(value) =>
+          Schema.Labeled.Unlabeled:
+            value.wipeTranslate[Schema.Labeled[String, _]]([X] => pso => Exists(resolve(pso, alreadyResolved)))
+        case BackwardRef(schemaName) =>
+          alreadyResolved.get(schemaName) match
+            case Some(schema) =>
+              Schema.Labeled.WithLabel(schemaName, schema)
+            case None =>
+              throw new NoSuchElementException(s"Schema '$schemaName' not found among previously resolved schemas. This is a bug in JING, as it was previously determined to be a backward reference.")
+        case ForwardRef(schemaName, cycle) =>
+          val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
+          Schema.Labeled.Unsupported(SingletonType(msg))
+        case UnresolvedRef(schemaName) =>
+          val msg = s"Unresolved schema $schemaName"
+          Schema.Labeled.Unsupported(SingletonType(msg))
+        case Unsupported(details) =>
+          Schema.Labeled.Unsupported(SingletonType(details))
   }
+
 }

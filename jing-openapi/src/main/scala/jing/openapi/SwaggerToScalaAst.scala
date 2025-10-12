@@ -80,8 +80,9 @@ private[openapi] object SwaggerToScalaAst {
       b.result()
     }
 
-    val schemas: List[(String, ProtoSchema.Oriented)] =
-      ProtoSchema.Oriented.sortTopologically(schemas0)
+    val schemas: List[(String, Schema.Labeled[String, ?])] =
+      ProtoSchema.Oriented.resolveAcyclic:
+        ProtoSchema.Oriented.sortTopologically(schemas0)
 
     val paths: List[(String, io.swagger.v3.oas.models.PathItem)] = {
       val b = List.newBuilder[(String, io.swagger.v3.oas.models.PathItem)]
@@ -111,7 +112,7 @@ private[openapi] object SwaggerToScalaAst {
   }
 
   private def schemasField[M](using q: Quotes)(
-    schemas: List[(String, ProtoSchema.Oriented)],
+    schemas: List[(String, Schema.Labeled[String, ?])],
     symbolPath: String,
   ): MemberDef.Poly[q.type, M] = {
     import q.reflect.*
@@ -119,16 +120,16 @@ private[openapi] object SwaggerToScalaAst {
     MemberDef.poly[q.type, M] { [N] => (_, _) ?=> (ctx: PreviousSiblings[q.type, N]) =>
       def resolveSchema[M](using mode: Mode[q.type, M])(
         ctx: PreviousSiblings[q.type, M],
-        s: ProtoSchema.Oriented,
+        s: Schema.Labeled[String, ?],
       ): Exists[[T] =>> (Type[T], mode.OutEff[Expr[Schema[T]]])] =
-        quotedSchemaFromProto[mode.OutEff](s)
+        quotedSchemaWithReferences[mode.OutEff](s)
           .run(schemaLookupFromPreviousSiblings(ctx))
 
       def resolveSchemaObj[M](using mode: Mode[q.type, M])(
         ctx: PreviousSiblings[q.type, M],
-        s: SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?]
+        s: SchemaMotif.Object[Schema.Labeled[String, _], ?]
       ): Exists[[Ps] =>> (Type[Ps], mode.OutEff[Expr[Schema[Obj[Ps]]]])] =
-        quotedSchemaObjectFromProto[mode.OutEff](s)
+        quotedSchemaObjectWithReferences[mode.OutEff](s)
           .run(schemaLookupFromPreviousSiblings(ctx))
 
       val (tpe, bodyFn) = StructuralRefinement.forMode[N][AnyRef](
@@ -149,7 +150,7 @@ private[openapi] object SwaggerToScalaAst {
                   .asInstanceOf[Type[? <: Any]]
               val (tp, bodyFn) =
                 s match
-                  case ProtoSchema.Oriented.Proper(obj @ SchemaMotif.Object(_)) =>
+                  case Schema.Labeled.Unlabeled(obj @ SchemaMotif.Object(_)) =>
                     // for object types, synthesize an extended companion ObjectSchemaCompanion
                     val ex: Exists[[Ps] =>> (Type[Ps], n.OutEff[Expr[Schema[Obj[Ps]]]])] = resolveSchemaObj[N](ctx, obj)
                     type Ps = ex.T
@@ -173,11 +174,13 @@ private[openapi] object SwaggerToScalaAst {
   }
 
   private def pathsField[M](using q: Quotes)(
-    schemas: List[(String, ProtoSchema.Oriented)],
+    schemas: List[(String, Schema.Labeled[String, ?])],
     paths: List[(String, io.swagger.v3.oas.models.PathItem)],
     symbolPath: String,
   ): MemberDef.PolyS[q.type, M, Unit, List[(String, List[(HttpMethod, qr.TypeRepr)])]] = {
     import quotes.reflect.*
+
+    val schemaMap = schemas.toMap
 
     MemberDef.PolyS.writer[q.type, M, List[(String, List[(HttpMethod, TypeRepr)])]] { [M1] => (m1, _) ?=> ctx =>
       val schemasField: ctx.mode.InTerm =
@@ -195,7 +198,7 @@ private[openapi] object SwaggerToScalaAst {
           acc.next(
             path,
             MemberDef.PolyS[q.type, M1, State, State] { [M2] => (m2, sub) ?=> (s, _) =>
-              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaLookup.mapK(sub.downgrader), path, pathItem, s"$symbolPath.$path")
+              val (tpe, endpoints, bodyFn) = pathToObject[M2](schemaMap, schemaLookup.mapK(sub.downgrader), path, pathItem, s"$symbolPath.$path")
               ((path, endpoints) :: s, MemberDef.Val(tpe, bodyFn))
             }
           )
@@ -424,7 +427,8 @@ private[openapi] object SwaggerToScalaAst {
     )
 
   private def pathToObject[M](using q: Quotes, mode: Mode[q.type, M])(
-    schemas: SchemaLookup[mode.OutEff],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[mode.OutEff],
     path: String,
     pathItem: io.swagger.v3.oas.models.PathItem,
     symbolPath: String,
@@ -445,7 +449,7 @@ private[openapi] object SwaggerToScalaAst {
           acc.next(
             meth.toString,
             MemberDef.PolyS[q.type, M, State, State] { [N] => (_, sub) ?=> (s, _) =>
-              operationToObject(schemas.mapK(sub.downgrader), path, meth, op) match
+              operationToObject(schemas, quotedSchemas.mapK(sub.downgrader), path, meth, op) match
                 case Indeed((tp, body)) =>
                   val tr = TypeRepr.of(using tp)
                   (
@@ -628,7 +632,8 @@ private[openapi] object SwaggerToScalaAst {
         RequestSchema.Params.QueryParamSchema.unsupported(message)
 
   private def operationToObject[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     path: String,
     method: HttpMethod,
     op: io.swagger.v3.oas.models.Operation,
@@ -649,7 +654,7 @@ private[openapi] object SwaggerToScalaAst {
 
     val reqBodySchema: Option[Exists[[B] =>> (Type[B], F[Expr[BodySchema.NonEmpty[B]]])]] =
       Option(op.getRequestBody())
-        .flatMap(requestBodySchema(schemas, _))
+        .flatMap(requestBodySchema(schemas, quotedSchemas, _))
 
     val reqSchema: Exists[[T] =>> (Type[T], F[Expr[RequestSchema[T]]])] =
       requestSchema(paramSchema, reqBodySchema)
@@ -659,7 +664,7 @@ private[openapi] object SwaggerToScalaAst {
       Option(op.getResponses())
         .map(_.entrySet().iterator().asScala.map(e => (e.getKey(), e.getValue())).toList)
         .collect { case r :: rs => NonEmptyList(r, rs) }
-        .map(responseBodyByStatus(schemas, _))
+        .map(responseBodyByStatus(schemas, quotedSchemas, _))
         .getOrElse {
           report.errorAndAbort(s"No response defined for $method $path")
         }
@@ -875,32 +880,35 @@ private[openapi] object SwaggerToScalaAst {
   }
 
   private def requestBodySchema[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     requestBody: io.swagger.v3.oas.models.parameters.RequestBody,
   )(using
     Quotes,
     Applicative[F],
   ): Option[Exists[[T] =>> (Type[T], F[Expr[BodySchema.NonEmpty[T]]])]] =
-    bodySchema(schemas, requestBody.getContent())
+    bodySchema(schemas, quotedSchemas, requestBody.getContent())
 
   private def bodySchema[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     nullableContent: io.swagger.v3.oas.models.media.Content,
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Option[Exists[[T] =>> (Type[T], F[Expr[BodySchema.NonEmpty[T]]])]] =
     nonEmptyEntryList(nullableContent)
-      .map { bodySchema(schemas, _) }
+      .map { bodySchema(schemas, quotedSchemas, _) }
 
   def bodySchema[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     mediaTypes: NonEmptyList[(String, io.swagger.v3.oas.models.media.MediaType)],
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[BodySchema.NonEmpty[T]]])] =
-    bodyVariants(schemas, mediaTypes) match
+    bodyVariants(schemas, quotedSchemas, mediaTypes) match
       case ex @ Indeed((t, fe)) =>
         given Type[ex.T] = t
         Indeed((
@@ -914,7 +922,8 @@ private[openapi] object SwaggerToScalaAst {
       .collect { case xs @ NonEmptyList(_, _) => xs }
 
   private def bodyVariants[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     mediaTypes: NonEmptyList[(String, io.swagger.v3.oas.models.media.MediaType)],
   )(using
     Quotes,
@@ -922,12 +931,13 @@ private[openapi] object SwaggerToScalaAst {
   ): Exists[[Ts] =>> (Type[Ts], F[Expr[Items1Named.Product[||, ::, Schema, Ts]]])] =
     quotedNamedProductUnrelatedAA(
       mediaTypes
-        .mapToProduct[[x] =>> ProtoSchema.Oriented](mt => Exists(protoSchema(mt.getSchema()).orientBackward)),
-        [A] => ps => quotedSchemaFromProto[F](ps),
-    ).run(schemas)
+        .mapToProduct[Schema.Labeled[String, _]](mt => Exists(protoSchema(mt.getSchema()).resolve(schemas))),
+      [A] => ps => quotedSchemaWithReferences[F](ps),
+    ).run(quotedSchemas)
 
   private def responseBodyByStatus[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     byStatus: NonEmptyList[(String, io.swagger.v3.oas.models.responses.ApiResponse)],
   )(using
     Quotes,
@@ -935,8 +945,8 @@ private[openapi] object SwaggerToScalaAst {
   ): Exists[[T] =>> (Type[T], F[Expr[ResponseSchema[T]]])] =
     quotedNamedProductUnrelatedAA(
       byStatus.asProduct,
-      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchemaOrPlainText(sl, apiResponse)),
-    ).run(schemas) match {
+      [A] => apiResponse => Reader((sl: SchemaLookup[F]) => responseBodySchemaOrPlainText(schemas, sl, apiResponse)),
+    ).run(quotedSchemas) match {
       case x @ Indeed((tp, bs)) =>
         given Type[x.T] = tp
         Indeed((
@@ -946,13 +956,14 @@ private[openapi] object SwaggerToScalaAst {
     }
 
   private def responseBodySchemaOrPlainText[F[_]](
-    schemas: SchemaLookup[F],
+    schemas: Map[String, Schema.Labeled[String, ?]],
+    quotedSchemas: SchemaLookup[F],
     apiResponse: io.swagger.v3.oas.models.responses.ApiResponse,
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Exists[[T] =>> (Type[T], F[Expr[BodySchema[T]]])] =
-    bodySchema(schemas, apiResponse.getContent()) match
+    bodySchema(schemas, quotedSchemas, apiResponse.getContent()) match
       case Some(Indeed((tp, exp))) => Indeed((tp, exp.widen))
       case None => Indeed((Type.of[Unit], F.pure('{ BodySchema.Empty })))
 

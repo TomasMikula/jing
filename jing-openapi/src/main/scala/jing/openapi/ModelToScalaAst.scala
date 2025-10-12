@@ -235,8 +235,12 @@ object ModelToScalaAst {
     given Type[S] = tpe
     (Type.of[Oops[S]], '{ Schema.unsupported($exp) })
 
-  def quotedSchemaFromProto[F[_]](
-    schema: ProtoSchema.Oriented,
+  /** Quotes a [[Labeled.Schema]] as `Expr[Schema[?]]`, substituting each labeled schema by a lookup in [[SchemaLookup]].
+   *
+   * Since the looked up type may potentially be different from the one next to the label, the result type is existential.
+   */
+  def quotedSchemaWithReferences[F[_]](
+    schema: Schema.Labeled[String, ?],
   )(using
     q: Quotes,
     F: Applicative[F],
@@ -244,10 +248,10 @@ object ModelToScalaAst {
     import quotes.reflect.*
 
     schema match
-      case ProtoSchema.Oriented.Proper(value) =>
+      case Schema.Labeled.Unlabeled(value) =>
         quotedSchemaMotifRelAA(
           value,
-          [A] => ps => quotedSchemaFromProto(ps) map {
+          [A] => ps => quotedSchemaWithReferences(ps) map {
             case Indeed(te) => Indeed((Unrelated(), te))
           },
         ) map {
@@ -256,33 +260,23 @@ object ModelToScalaAst {
             Indeed((tpe, expr.map { expr => '{ Schema.Proper($expr) } }))
           }
 
-      case ProtoSchema.Oriented.BackwardRef(schemaName) =>
+      case Schema.Labeled.WithLabel(schemaName, _) =>
         Reader(_.lookup(schemaName))
 
-      case ProtoSchema.Oriented.ForwardRef(schemaName, cycle) =>
-        val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
-        val (tpe, trm) = quotedSchemaOops(SingletonType(msg))
-        Reader.pure( Exists(tpe, F.pure(trm)) )
-
-      case ProtoSchema.Oriented.UnresolvedRef(schemaName) =>
-        val msg = s"Unresolved schema $schemaName"
-        val (tpe, trm) = quotedSchemaOops(SingletonType(msg))
-        Reader.pure( Exists(tpe, F.pure(trm)) )
-
-      case ProtoSchema.Oriented.Unsupported(details) =>
-        val (tpe, trm) = quotedSchemaOops(SingletonType(details))
+      case Schema.Labeled.Unsupported(details) =>
+        val (tpe, trm) = quotedSchemaOops(details)
         Reader.pure( Exists((tpe, F.pure(trm))) )
   }
 
-  def quotedSchemaObjectFromProto[F[_]](
-    schema: SchemaMotif.Object[[x] =>> ProtoSchema.Oriented, ?],
+  def quotedSchemaObjectWithReferences[F[_]](
+    schema: SchemaMotif.Object[Schema.Labeled[String, _], ?],
   )(using
     q: Quotes,
     F: Applicative[F],
   ): Reader[SchemaLookup[F], Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]] =
     quotedSchemaMotifObjectRelAA(
       schema.asObject.value,
-      [A] => ps => quotedSchemaFromProto(ps) map {
+      [A] => ps => quotedSchemaWithReferences(ps) map {
         case Indeed(te) => Indeed((Unrelated(), te))
       }
     ) map {

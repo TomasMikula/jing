@@ -44,4 +44,12 @@ object Schema {
         case Proper(value) =>
           value.propertyList
   }
+
+  enum Labeled[L, A] {
+    case WithLabel(label: L, schema: Schema.Labeled[L, A])
+
+    case Unlabeled(value: SchemaMotif[Schema.Labeled[L, _], A])
+
+    case Unsupported[L, S <: String](message: SingletonType[S]) extends Schema.Labeled[L, Oops[S]]
+  }
 }

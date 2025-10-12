@@ -8,7 +8,7 @@ import libretto.lambda.Items1Named
 /** Schema structure parametric in the type of nested schemas.
  *
  * @tparam F representation of nested schemas. In [[Schema]],
- *   [[Schematic]] is used with `F` recursively instantiated to [[Schema]] itself.
+ *   [[SchemMotif]] is used with `F` recursively instantiated to [[Schema]] itself.
  */
 sealed trait SchemaMotif[F[_], A] {
   import SchemaMotif.*
