@@ -81,8 +81,7 @@ private[openapi] object SwaggerToScalaAst {
     }
 
     val schemas: List[(String, Schema.Labeled[String, ?])] =
-      ProtoSchema.Oriented.resolveAcyclic:
-        ProtoSchema.Oriented.sortTopologically(schemas0)
+      ProtoSchema.resolveAcyclic(schemas0)
 
     val paths: List[(String, io.swagger.v3.oas.models.PathItem)] = {
       val b = List.newBuilder[(String, io.swagger.v3.oas.models.PathItem)]
