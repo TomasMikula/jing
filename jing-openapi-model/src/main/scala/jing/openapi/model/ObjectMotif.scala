@@ -11,6 +11,8 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
 
   def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type]
 
+  def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]]
+
   def traverse[M[_], G[_], H[_]](
     g: [A] => Req[A] => M[G[A]],
     h: [A] => Opt[A] => M[H[A]],
@@ -77,6 +79,9 @@ object ObjectMotif {
 
     override def get[K](using i: K IsPropertyOf Void): i.ReqOrOpt[Req, Opt][i.Type] =
       i.propertiesNotVoid
+
+    override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
+      None
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
@@ -151,6 +156,12 @@ object ObjectMotif {
                 ev(init.get[K](using j))
           },
       )
+
+    override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
+      if (k == pname.value)
+        Some(Exists(pval))
+      else
+        init.getOpt(k)
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
@@ -251,6 +262,12 @@ object ObjectMotif {
                 ev(init.get[K](using j))
           },
       )
+
+    override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
+      if (k == pname.value)
+        Some(Exists(pval))
+      else
+        init.getOpt(k)
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],

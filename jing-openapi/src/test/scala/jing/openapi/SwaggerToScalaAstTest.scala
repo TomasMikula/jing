@@ -111,4 +111,57 @@ class SwaggerToScalaAstTest extends AnyFunSuite {
         params : RequestSchema.Params.Proper[Void || "N/A" :? Oops["\'$ref\' not yet supported for parameters: #/components/parameters/debug"]]
   }
 
+  test("recursive schemas report a cycle") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: Mutually recursive schemas
+        version: 1.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: object
+            properties:
+              bar:
+                $ref: "#/components/schemas/Bar"
+          Bar:
+            type: object
+            properties:
+              foo:
+                $ref: "#/components/schemas/Foo"
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    api.schemas.Foo.schema match
+      case Schema.Proper(SchemaMotif.Object(obj)) =>
+        obj.getOpt("bar") match
+          case Some(barSchema) =>
+            barSchema.value match
+              case Schema.Proper(_) =>
+                succeed
+              case other =>
+                fail(s"expected proper Bar schema inside Foo (the cycle shall be reported from inside Bar), got $other")
+          case None =>
+            fail(s"Foo is missing property bar")
+      case other =>
+        fail(s"expected Obj-ect schema, got $other")
+
+    api.schemas.Bar.schema match
+      case Schema.Proper(SchemaMotif.Object(obj)) =>
+        obj.getOpt("foo") match
+          case Some(fooSchema) =>
+            fooSchema.value match
+              case Schema.Unsupported(message) =>
+                assert(message.value == "Unsupported recursive schema: Bar -> Foo -> Bar")
+              case other =>
+                fail(s"expected unsupported recursive schema, got $other")
+          case None =>
+            fail(s"Bar is missing property foo")
+      case other =>
+        fail(s"expected Obj-ect schema, got $other")
+  }
+
 }

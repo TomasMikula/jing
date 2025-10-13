@@ -16,7 +16,7 @@ infix sealed trait IsPropertyOf[K, Ps] {
   import IsPropertyOf.*
 
   type Type
-  type ReqOrOpt[Req[_], Opt[_]] <: [_] =>> Any
+  type ReqOrOpt[Req[_], Opt[_]] <: [A] =>> Req[A] | Opt[A]
 
   def switch[R](
     caseLastProp:    [init] => (Ps =:= (init || K :: Type), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[ReqOrOpt[F, G], F]) => R,
@@ -28,7 +28,7 @@ infix sealed trait IsPropertyOf[K, Ps] {
 }
 
 object IsPropertyOf {
-  type Aux[K, Ps, T, RoO <: [R[_], O[_]] =>> [_] =>> Any] =
+  type Aux[K, Ps, T, RoO <: [R[_], O[_]] =>> [A] =>> R[A] | O[A]] =
     IsPropertyOf[K, Ps] { type Type = T; type ReqOrOpt[F[_], G[_]] = RoO[F, G] }
 
   type IsRequiredPropertyOf[K, Ps] =
@@ -67,7 +67,7 @@ object IsPropertyOf {
       ||.isNotVoid
   }
 
-  case class IsInitPropertyOf[K, Init, Last, T, RoO <: [Req[_], Opt[_]] =>> [A] =>> Any](
+  case class IsInitPropertyOf[K, Init, Last, T, RoO <: [Req[_], Opt[_]] =>> [A] =>> Req[A] | Opt[A]](
     i: IsPropertyOf.Aux[K, Init, T, RoO],
   ) extends IsPropertyOf[K, Init || Last] {
     override type Type = i.Type

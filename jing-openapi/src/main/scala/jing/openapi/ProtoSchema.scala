@@ -1,7 +1,7 @@
 package jing.openapi
 
 import jing.openapi.model.{||, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
-import libretto.lambda.util.{Exists, SingletonType}
+import libretto.lambda.util.{Applicative, Exists, SingletonType}
 import scala.annotation.tailrec
 
 /** Schema with unresolved references to other schemas. */
@@ -26,6 +26,28 @@ private[openapi] enum ProtoSchema {
             Schema.Labeled.Unsupported(SingletonType(msg))
       case Unsupported(details) =>
           Schema.Labeled.Unsupported(SingletonType(details))
+
+  import ProtoSchema.*
+
+  private def resolveA[F[_]](using
+    r: Resolver[ProtoSchema.Oriented, Option[Cycle], F],
+    F: Applicative[F],
+  ): F[ProtoSchema.Oriented] =
+    this match
+      case Proper(value) =>
+        value
+          .wipeTranslateA[F, [x] =>> ProtoSchema.Oriented]([X] => ps => ps.resolveA[F].map(Exists(_)))
+          .map(Oriented.Proper(_))
+      case Ref(schemaName) =>
+        r.resolve(schemaName) map:
+          case Right(schema) =>
+            Oriented.BackwardRef(schemaName)
+          case Left(None) =>
+            Oriented.Unsupported(s"Unresolved schema $schemaName")
+          case Left(Some(Cycle(cycle))) =>
+            Oriented.ForwardRef(schemaName, cycle)
+      case Unsupported(details) =>
+        F.pure(Oriented.Unsupported(details))
 }
 
 private[openapi] object ProtoSchema {
@@ -79,7 +101,7 @@ private[openapi] object ProtoSchema {
     case UnresolvedRef(schemaName: String)
     case Unsupported(details: String)
 
-    def resolve(
+    private[ProtoSchema] def resolve(
       alreadyResolved: Map[String, Schema.Labeled[String, ?]],
     ): Schema.Labeled[String, ?] =
       this match
@@ -102,51 +124,55 @@ private[openapi] object ProtoSchema {
           Schema.Labeled.Unsupported(SingletonType(details))
   }
 
-  private def sortTopologically(schemas: List[(String, ProtoSchema)]): List[(String, ProtoSchema.Oriented)] = {
-    def go1(
-      dependents: List[String],
-      acc: List[(String, Oriented)],
-      subject: ProtoSchema,
-      remaining: List[(String, ProtoSchema)]
-    ): (
-      List[(String, Oriented)],   // extended acc
-      Oriented,                   // oriented subject
-      List[(String, ProtoSchema)] // remaining
-    ) =
-      subject match {
-        case ProtoSchema.Proper(s) =>
-          val ((acc1, remaining1), res) =
-          s.wipeTranslateA[
-            ReaderState[List[String], (List[(String, Oriented)], List[(String, ProtoSchema)]), _],
-            [A] =>> Oriented,
-          ](
-            [X] => (protoSchema) => ReaderState { case (dependents, (acc, remaining)) =>
-              val (acc1, res, remaining1) = go1(dependents, acc, protoSchema, remaining)
-              ((acc1, remaining1), Exists(res))
-            }
-          ).run(dependents, (acc, remaining))
-          (acc1, Oriented.Proper(res), remaining1)
-        case ProtoSchema.Ref(schemaName) =>
-          if (acc.exists { case (n, _) => n == schemaName })
-            (acc, Oriented.BackwardRef(schemaName), remaining)
-          else
-            val i = dependents.indexOf(schemaName)
-            if (i >= 0) {
-              val cycle = dependents.head :: dependents.take(i+1).reverse
-              (acc, Oriented.ForwardRef(schemaName, cycle), remaining)
-            } else {
-              remaining.find { case (n, _) => n == schemaName } match
-                case None =>
-                  (acc, Oriented.UnresolvedRef(schemaName), remaining)
-                case Some((_, subject1)) =>
-                  val remaining1 = remaining.filter { case (n, _) => n != schemaName }
-                  val (acc2, oriented2, remaining2) = go1(schemaName :: dependents, acc, subject1, remaining1)
-                  (acc2 :+ (schemaName, oriented2), Oriented.BackwardRef(schemaName), remaining2)
-            }
-        case ProtoSchema.Unsupported(details) =>
-          (acc, Oriented.Unsupported(details), remaining)
+  private trait Resolver[A, E, F[_]] {
+    def resolve(name: String): F[Either[E, A]]
+  }
+
+  private type TopoSortF[I, O, A] = ReaderState[List[String], (List[(String, O)], List[(String, I)]), A]
+
+  private case class Cycle(schemas: List[String])
+
+  private object TopoSortF {
+    def resolver[I, O](
+      elemResolver: I => TopoSortF[I, O, O],
+      reportCycle: (String, List[String]) => O,
+    ): Resolver[O, Option[Cycle], TopoSortF[I, O, _]] =
+      new Resolver[O, Option[Cycle], TopoSortF[I, O, _]] {
+        override def resolve(name: String): TopoSortF[I, O, Either[Option[Cycle], O]] =
+          ReaderState:
+            case (dependents, (acc, remaining)) =>
+              val i = dependents.indexOf(name)
+              if (i >= 0) {
+                val cycle = dependents.head :: dependents.take(i+1).reverse
+                ((acc, remaining), Left(Some(Cycle(cycle))))
+              } else {
+                acc.collectFirst { case (`name`, o) => o } match
+                  case Some(o) =>
+                    ((acc, remaining), Right(o))
+                  case None =>
+                    remaining.collectFirst { case (`name`, i) => i } match
+                      case None =>
+                        ((acc, remaining), Left(None))
+                      case Some(i) =>
+                        val ((acc1, remaining1), o) =
+                          elemResolver(i).run(name :: dependents, (acc, remaining.filter { case (n, _) => n != name }))
+                        ((acc1 :+ (name, o), remaining1), Right(o))
+              }
       }
 
+    val protoResolver: Resolver[ProtoSchema.Oriented, Option[Cycle], TopoSortF[ProtoSchema, ProtoSchema.Oriented, _]] =
+      new Resolver[ProtoSchema.Oriented, Option[Cycle], TopoSortF[ProtoSchema, ProtoSchema.Oriented, _]] { self =>
+        val elemResolver: ProtoSchema => TopoSortF[ProtoSchema, ProtoSchema.Oriented, ProtoSchema.Oriented] =
+          _.resolveA(using self)
+
+        val delegate = resolver(elemResolver, reportCycle = Oriented.ForwardRef(_, _))
+
+        override def resolve(name: String): TopoSortF[ProtoSchema, Oriented, Either[Option[Cycle], Oriented]] =
+          delegate.resolve(name)
+      }
+  }
+
+  private def sortTopologically(schemas: List[(String, ProtoSchema)]): List[(String, ProtoSchema.Oriented)] = {
     @tailrec
     def go(
       acc: List[(String, Oriented)],
@@ -156,8 +182,10 @@ private[openapi] object ProtoSchema {
         case Nil =>
           acc
         case (name, schema) :: tail =>
-          val (acc1, oriented, remaining1) =
-            go1(dependents = List(name), acc = acc, subject = schema, remaining = tail)
+          val ((acc1, remaining1), oriented) =
+            schema
+              .resolveA(using TopoSortF.protoResolver)
+              .run(List(name), (acc, tail))
           go(acc1 :+ (name, oriented), remaining1)
       }
 
