@@ -1,12 +1,16 @@
 package jing.openapi
 
 import jing.openapi.model.{||, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
-import libretto.lambda.util.{Applicative, Exists, SingletonType}
+import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
+import libretto.lambda.Items1Named
+import libretto.lambda.util.{Applicative, Exists, SingletonType, Validated}
+import libretto.lambda.util.Exists.Indeed
 import scala.annotation.tailrec
 
 /** Schema with unresolved references to other schemas. */
 private[openapi] enum ProtoSchema {
   case Proper(value: SchemaMotif[[A] =>> ProtoSchema, ?])
+  case OneOf(discriminatorProperty: String, schemas: List[ProtoSchema])
   case Ref(schemaName: String)
   case Unsupported(details: String)
 
@@ -28,6 +32,10 @@ private[openapi] enum ProtoSchema {
         value
           .wipeTranslateA[F, Schema.Labeled[String, _]]([X] => ps => ps.resolveA[F].map(Exists(_)))
           .map(Schema.Labeled.Unlabeled(_))
+      case OneOf(discriminatorProperty, protoSchemas) =>
+        Applicative
+          .traverseList(protoSchemas)(_.resolveA[F])
+          .map(resolveOneOf(discriminatorProperty, _))
       case Ref(schemaName) =>
         r.resolve(schemaName) map:
           case Right(schema) =>
@@ -159,4 +167,133 @@ private[openapi] object ProtoSchema {
     go(acc = Nil, remaining = schemas)
   }
 
+  private def resolveOneOf(
+    discriminatorProperty: String,
+    cases: List[Schema.Labeled[String, ?]],
+  ): Schema.Labeled[String, ?] = {
+    val schemasWithDiscriminatorValues: List[Either[String, (String, Schema.Labeled[String, ?])]] =
+      cases.map(s => extractDiscriminatorValue(discriminatorProperty, s).map(_.value._3 -> s))
+    val discriminatorValues: List[(String, Int)] =
+      schemasWithDiscriminatorValues.zipWithIndex.collect { case (Right((value, _)), i) => (value, i) }
+    val discrValueOccurences: Map[String, List[Int]] =
+      discriminatorValues.groupMap(_._1)(_._2)
+    discrValueOccurences.collectFirst { case x @ (_, _ :: _ :: _) => x } match
+      case Some((value, occurrences)) =>
+        Schema.Labeled.unsupported(s"Ambiguous oneOf schema: \"$discriminatorProperty\" = \"$value\" occurs in cases ${occurrences.mkString(", ")} (0-based).")
+      case None =>
+        assert(discrValueOccurences.size == discriminatorValues.size)
+        val discrValues = discrValueOccurences.keySet
+        val discriminatedSchemas: List[(String, Schema.Labeled[String, ?])] =
+          schemasWithDiscriminatorValues
+            .zipWithIndex
+            .foldRight((List.empty[(String, Schema.Labeled[String, ?])], discrValues)) {
+              case ((Right(kv), _), (acc, discrValues)) => (kv :: acc, discrValues)
+              case ((Left(msg), i), (acc, discrValues)) =>
+                // Redeem failure to determine discriminator value - turn it into a oneOf case of type Oops.
+                // Note: Can afford that only because SchemaMotif.OneOf does not (yet) require Obj-typed schemas only.
+                val k =
+                  LazyList
+                    .iterate(s"oops_$i")("o" + _)
+                    .find(k => !discrValues.contains(k))
+                    .get
+                ((k -> Schema.Labeled.unsupported(msg)) :: acc, discrValues + k)
+            }
+            ._1
+        discriminatedSchemas match
+          case nel @ scala.::(_, _) =>
+            Schema.Labeled.Unlabeled(
+              SchemaMotif.OneOf(
+                discriminatorProperty,
+                Items1Named.Product.fromList(nel)[Schema.Labeled[String, _]]([R] => (s, f) => f(s))[||, model.::],
+              )
+            )
+          case Nil =>
+            Schema.Labeled.unsupported("oneOf with 0 cases is not supported")
+  }
+
+  private def extractDiscriminatorValue[A](
+    discriminatorProperty: String,
+    schema: Schema.Labeled[String, A],
+  ): Either[String, Exists[[Ps] =>> (
+    A =:= Obj[Ps],
+    discriminatorProperty.type IsRequiredPropertyOf Ps,
+    String, // the unique value of discriminatorProperty
+  )]] =
+    schema match
+      case Schema.Labeled.Unlabeled(schema) =>
+        schema match
+          case obj: motif.Object[sl, ps] =>
+            extractDiscriminatorValue(discriminatorProperty, obj)
+              .map { case (i, propConstantValue) => Exists((summon[A =:= Obj[ps]], i, propConstantValue)) }
+
+          case other =>
+            Left(s"Expected object with property $discriminatorProperty, found ${shortTypeName(other)}")
+
+      case Schema.Labeled.WithLabel(label, schema) =>
+        extractDiscriminatorValue(discriminatorProperty, schema)
+
+      case Schema.Labeled.Unsupported(message) =>
+        Left(message.value)
+
+  private def extractDiscriminatorValue[Ps](
+    discriminatorProperty: String,
+    objSchema: SchemaMotif.Object[Schema.Labeled[String, _], Ps],
+  ): Either[String, (
+    discriminatorProperty.type IsRequiredPropertyOf Ps,
+    String, // the unique value of discriminatorProperty
+  )] =
+    objSchema.value.getOptFull(discriminatorProperty) match
+      case Some(Indeed(Left((i, propSchema)))) =>
+        asConstantString(propSchema) match
+          case Right(propConstantValue) =>
+            Right((i, propConstantValue))
+          case Left(actual) =>
+            Left(s"discriminator property \"$discriminatorProperty\" must have a constant string type (const or enum with a single case), but was $actual")
+      case Some(Indeed(Right(_))) =>
+        Left(s"discriminator property \"$discriminatorProperty\" must be a required property, but is not")
+      case None =>
+        Left(s"object is missing the discriminator property \"$discriminatorProperty\"")
+
+  private def asConstantString[A](
+    schema: Schema.Labeled[String, A],
+  ): Either[String, String] =
+    schema match
+      case Schema.Labeled.WithLabel(label, schema) =>
+        asConstantString(schema)
+      case Schema.Labeled.Unlabeled(schema) =>
+        schema match
+          case enm @ motif.Enumeration(_, _) =>
+            asConstantString(enm)
+          case motif.S() =>
+            Left(s"unrestricted string")
+          case other =>
+            Left(shortTypeName(other))
+      case Schema.Labeled.Unsupported(message) =>
+        Left(s"Unsupported: ${message.value}")
+
+  private def asConstantString[F[_], Base, Cases](
+    enm: motif.Enumeration[F, Base, Cases]
+  ): Either[String, String] =
+    val motif.Enumeration(base, cases) = enm
+    base match
+      case motif.S() =>
+        summon[Base =:= Str]
+        cases.toList([s] => v => v.get) match
+          case s :: Nil => Right(s)
+          case ss @ (_ :: _ :: _) => Left(s"enum with ${ss.size} cases (${ss.mkString("\"", ", ", "\"")})")
+      case other =>
+        Left(shortTypeName(other))
+
+  private def shortTypeName[F[_], A](
+    schema: SchemaMotif[F, A],
+  ): String =
+    schema match
+      case motif.I32() => "integer"
+      case motif.I64() => "integer"
+      case motif.S() => "string"
+      case motif.B() => "boolean"
+      case motif.Enumeration(_, _) => "enum"
+      case motif.Array(_) => "array"
+      case motif.OneOf(_, _) => "oneOf"
+      case motif.Object(_) => "object"
 }

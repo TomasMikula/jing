@@ -1,11 +1,12 @@
 package jing.openapi
 
 import jing.openapi.model.*
+import org.scalatest.Inside
 import org.scalatest.funsuite.AnyFunSuite
 
 import scala.NamedTuple.NamedTuple
 
-class SwaggerToScalaAstTest extends AnyFunSuite {
+class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
 
   test("empty spec") {
     inline val openapiYaml =
@@ -28,7 +29,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite {
       """
       openapi: 3.0.0
       info:
-        title: Empty API
+        title: Nullable enums
         version: 2.0.0
       paths: {}
       components:
@@ -84,7 +85,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite {
       """
       openapi: 3.0.0
       info:
-        title: Empty API
+        title: Parameter references
         version: 2.0.0
       paths:
         /a/b/c:
@@ -162,6 +163,73 @@ class SwaggerToScalaAstTest extends AnyFunSuite {
             fail(s"Bar is missing property foo")
       case other =>
         fail(s"expected Obj-ect schema, got $other")
+  }
+
+  test("oneOf with discriminator") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: oneOf with discriminator
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Animal:
+            title: Animal
+            oneOf:
+              - $ref: "#/components/schemas/Cat"
+              - $ref: "#/components/schemas/Dog"
+            discriminator:
+              propertyName: species
+          Cat:
+            type: object
+            properties:
+              species:
+                type: string
+                enum: ["Cat"]
+              name:
+                type: string
+            required:
+              - species
+              - name
+          Dog:
+            type: object
+            properties:
+              species:
+                type: string
+                enum: ["Dog"]
+              name:
+                type: string
+            required:
+              - species
+              - name
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    import api.schemas.{Animal, Cat, Dog}
+
+    // check that Animal constructor and deconstructor have the expected types
+    Animal.from        : (Value[DiscriminatedUnion["Cat" :: Cat || "Dog" :: Dog]] => Value[Animal])
+    Animal.deconstruct : (Value[Animal] => Value[DiscriminatedUnion["Cat" :: Cat || "Dog" :: Dog]])
+
+    inside(Animal.schema):
+      case Schema.Proper(value) =>
+        inside(value):
+          case SchemaMotif.OneOf(discriminatorProperty, schemas) =>
+            assert(discriminatorProperty == "species")
+
+            inside(schemas.getOption("Cat")):
+              case Some(found) =>
+                val catSchema = found.value._2
+                assert(catSchema == Cat.schema)
+
+            inside(schemas.getOption("Dog")):
+              case Some(found) =>
+                val dogSchema = found.value._2
+                assert(dogSchema == Dog.schema)
+
   }
 
 }

@@ -994,7 +994,26 @@ private[openapi] object SwaggerToScalaAst {
       case null =>
         schema.get$ref() match
           case null =>
-            ProtoSchema.Unsupported("Swagger schema with no type or $ref")
+            schema.getOneOf() match
+              case null =>
+                ProtoSchema.Unsupported("Swagger schema with no type, $ref, or oneOf")
+              case schemas =>
+                schema.getDiscriminator() match
+                  case null =>
+                    ProtoSchema.Unsupported("Discriminator required for oneOf")
+                  case discriminator =>
+                    discriminator.getPropertyName() match
+                      case null =>
+                        ProtoSchema.Unsupported("Discriminator must have propertyName defined")
+                      case propertyName =>
+                        discriminator.getMapping() match
+                          case null =>
+                            ProtoSchema.OneOf(
+                              propertyName,
+                              schemas.asScala.map(protoSchema(_)).toList,
+                            )
+                          case _ =>
+                            ProtoSchema.Unsupported("Discriminator mapping not yet supported by JING")
           case LocalSchema(name) =>
             ProtoSchema.Ref(name)
           case ref =>

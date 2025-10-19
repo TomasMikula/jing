@@ -52,4 +52,9 @@ object Schema {
 
     case Unsupported[L, S <: String](message: SingletonType[S]) extends Schema.Labeled[L, Oops[S]]
   }
+
+  object Labeled {
+    def unsupported[L](message: String): Schema.Labeled[L, Oops[message.type]] =
+      Labeled.Unsupported(SingletonType(message))
+  }
 }

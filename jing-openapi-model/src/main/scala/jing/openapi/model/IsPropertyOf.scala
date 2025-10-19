@@ -25,17 +25,31 @@ infix sealed trait IsPropertyOf[K, Ps] {
   ): R
 
   def propertiesNotVoid(using Ps =:= Void): Nothing
+
+  def inInit[Last]: IsPropertyOf.Aux[K, Ps || Last, Type, ReqOrOpt] =
+    IsPropertyOf.IsInitPropertyOf(this)
 }
 
 object IsPropertyOf {
+  type Aux1[K, Ps, T] =
+    IsPropertyOf[K, Ps] { type Type = T }
+
   type Aux[K, Ps, T, RoO <: [R[_], O[_]] =>> [A] =>> R[A] | O[A]] =
     IsPropertyOf[K, Ps] { type Type = T; type ReqOrOpt[F[_], G[_]] = RoO[F, G] }
 
-  type IsRequiredPropertyOf[K, Ps] =
+  infix type IsRequiredPropertyOf[K, Ps] =
     IsPropertyOf[K, Ps] { type ReqOrOpt[F[_], G[_]] = F }
 
-  type IsOptionalPropertyOf[K, Ps] =
+  object IsRequiredPropertyOf {
+    type Aux[K, Ps, T] = IsRequiredPropertyOf[K, Ps] { type Type = T }
+  }
+
+  infix type IsOptionalPropertyOf[K, Ps] =
     IsPropertyOf[K, Ps] { type ReqOrOpt[F[_], G[_]] = G }
+
+  object IsOptionalPropertyOf {
+    type Aux[K, Ps, T] = IsOptionalPropertyOf[K, Ps] { type Type = T }
+  }
 
   case class IsLastPropertyOf[Init, K, V]() extends IsPropertyOf[K, Init || K :: V] {
     override type Type = V

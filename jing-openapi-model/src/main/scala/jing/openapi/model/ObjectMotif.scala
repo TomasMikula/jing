@@ -1,5 +1,6 @@
 package jing.openapi.model
 
+import jing.openapi.model.IsPropertyOf.{IsOptionalPropertyOf, IsRequiredPropertyOf}
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
 import libretto.lambda.util.{Applicative, BiInjective, Exists, SingletonType, TypeEq, TypeEqK}
@@ -12,6 +13,13 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
   def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type]
 
   def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]]
+
+  def getOptFull(k: String): Option[Exists[[A] =>>
+    Either[
+      (IsRequiredPropertyOf.Aux[k.type, Props, A], Req[A]),
+      (IsOptionalPropertyOf.Aux[k.type, Props, A], Opt[A]),
+    ]
+  ]]
 
   def traverse[M[_], G[_], H[_]](
     g: [A] => Req[A] => M[G[A]],
@@ -81,6 +89,14 @@ object ObjectMotif {
       i.propertiesNotVoid
 
     override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
+      None
+
+    override def getOptFull(k: String): Option[Exists[[A] =>>
+      Either[
+        (IsRequiredPropertyOf.Aux[k.type, Void, A], Req[A]),
+        (IsOptionalPropertyOf.Aux[k.type, Void, A], Opt[A]),
+      ]
+    ]] =
       None
 
     override def traverse[M[_], G[_], H[_]](
@@ -162,6 +178,25 @@ object ObjectMotif {
         Some(Exists(pval))
       else
         init.getOpt(k)
+
+    override def getOptFull(k: String): Option[Exists[[A] =>>
+      Either[
+        (IsRequiredPropertyOf.Aux[k.type, Init || PropName :: PropType, A], Req[A]),
+        (IsOptionalPropertyOf.Aux[k.type, Init || PropName :: PropType, A], Opt[A]),
+      ]
+    ]] =
+      if (k == pname.value)
+        val ev: k.type =:= PropName = summon[k.type =:= k.type].asInstanceOf
+        val i = summon[IsRequiredPropertyOf.Aux[PropName, Init || PropName :: PropType, PropType]]
+        val j = ev.substituteContra[IsRequiredPropertyOf.Aux[_, Init || PropName :: PropType, PropType]](i)
+        Some(Exists(Left((j, pval))))
+      else
+        init
+          .getOptFull(k)
+          .map {
+            case Indeed(Left((i, v))) => Indeed(Left((i.inInit, v)))
+            case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
+          }
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
@@ -268,6 +303,25 @@ object ObjectMotif {
         Some(Exists(pval))
       else
         init.getOpt(k)
+
+    override def getOptFull(k: String): Option[Exists[[A] =>>
+      Either[
+        (IsRequiredPropertyOf.Aux[k.type, Init || PropName :? PropType, A], Req[A]),
+        (IsOptionalPropertyOf.Aux[k.type, Init || PropName :? PropType, A], Opt[A]),
+      ]
+    ]] =
+      if (k == pname.value)
+        val ev: k.type =:= PropName = summon[k.type =:= k.type].asInstanceOf
+        val i = summon[IsOptionalPropertyOf.Aux[PropName, Init || PropName :? PropType, PropType]]
+        val j = ev.substituteContra[IsOptionalPropertyOf.Aux[_, Init || PropName :? PropType, PropType]](i)
+        Some(Exists(Right((j, pval))))
+      else
+        init
+          .getOptFull(k)
+          .map {
+            case Indeed(Left((i, v))) => Indeed(Left((i.inInit, v)))
+            case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
+          }
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
