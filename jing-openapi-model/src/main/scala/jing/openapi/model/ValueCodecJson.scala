@@ -10,27 +10,54 @@ import scala.util.boundary
 import scala.collection.mutable.Stack
 
 object ValueCodecJson {
-  enum DecodeResult[T]:
-    case Succeeded(value: T)
-    case SchemaViolation(details: String)
+  sealed trait DecodeResult[T]:
+    import DecodeResult.*
 
     def map[U](f: T => U): DecodeResult[U] =
       this match
         case Succeeded(value) => Succeeded(f(value))
         case SchemaViolation(details) => SchemaViolation(details)
+        case ParseError(details) => ParseError(details)
 
     def flatMap[U](f: T => DecodeResult[U]): DecodeResult[U] =
       this match
         case Succeeded(value) => f(value)
         case SchemaViolation(details) => SchemaViolation(details)
+        case ParseError(details) => ParseError(details)
 
   object DecodeResult:
+    sealed trait ParseSuccess[T] extends DecodeResult[T] {
+      override def map[U](f: T => U): ParseSuccess[U] =
+        this match
+          case Succeeded(value) => Succeeded(f(value))
+          case SchemaViolation(details) => SchemaViolation(details)
+
+      def flatMapParseSuccess[U](f: T => ParseSuccess[U]): ParseSuccess[U] =
+        this match
+          case Succeeded(value) => f(value)
+          case SchemaViolation(details) => SchemaViolation(details)
+    }
+
+    object ParseSuccess {
+      def map2[A, B, R](a: ParseSuccess[A], b: ParseSuccess[B])(f: (A, B) => R): ParseSuccess[R] =
+        (a, b) match
+          case (Succeeded(a), Succeeded(b)) => Succeeded(f(a, b))
+          case (SchemaViolation(details), _) => SchemaViolation(details)
+          case (_, SchemaViolation(details)) => SchemaViolation(details)
+    }
+
+    sealed trait Failure[T] extends DecodeResult[T]
+
+    case class Succeeded[T](value: T) extends ParseSuccess[T]
+    case class SchemaViolation[T](details: String) extends ParseSuccess[T] with Failure[T]
+    case class ParseError[T](details: String) extends Failure[T]
+
     // TODO: accumulate errors (but first need to be able to represent multiple errors)
     def map2[A, B, R](a: DecodeResult[A], b: DecodeResult[B])(f: (A, B) => R): DecodeResult[R] =
       (a, b) match
-        case (Succeeded(a), Succeeded(b)) => Succeeded(f(a, b))
-        case (SchemaViolation(details), _) => SchemaViolation(details)
-        case (_, SchemaViolation(details)) => SchemaViolation(details)
+        case (a: ParseSuccess[a], b: ParseSuccess[b]) => ParseSuccess.map2(a, b)(f)
+        case (ParseError(details), _) => ParseError(details)
+        case (_, ParseError(details)) => ParseError(details)
 
   import DecodeResult.{SchemaViolation, Succeeded}
 
@@ -134,7 +161,14 @@ object ValueCodecJson {
   private def writeJsonBoolean(b: Boolean, builder: StringBuilder): Unit =
     builder.append(b)
 
-  def decodeLenient[T](schema: Schema[T], json: Json): DecodeResult[Value.Lenient[T]] =
+  def decodeLenient[T](schema: Schema[T], jsonStr: String): DecodeResult[Value.Lenient[T]] =
+    io.circe.parser.parse(jsonStr) match
+      case Left(e) =>
+        DecodeResult.ParseError(e.message)
+      case Right(json) =>
+        decodeLenient(schema, json)
+
+  def decodeLenient[T](schema: Schema[T], json: Json): DecodeResult.ParseSuccess[Value.Lenient[T]] =
     val jsonLoc = Stack("<root>")
     decodeLenientAt(schema, jsonLoc, json)
 
@@ -142,7 +176,7 @@ object ValueCodecJson {
     schema: Schema[T],
     jsonLoc: Stack[String],
     json: Json,
-  ): DecodeResult[Value.Lenient[T]] =
+  ): DecodeResult.ParseSuccess[Value.Lenient[T]] =
     schema match {
       case Schema.Proper(s) =>
         s match
@@ -176,7 +210,7 @@ object ValueCodecJson {
 
           case Enumeration(base, cases) =>
             decodeLenientAt(Schema.Proper(base), jsonLoc, json)
-              .flatMap {
+              .flatMapParseSuccess {
                 case p: Value.Lenient.Proper[t] =>
                   val Value.Lenient.Proper(v) = p
                   decodeEnumValueLenient(cases, v) match
@@ -251,19 +285,19 @@ object ValueCodecJson {
     schema: ObjectMotif[Schema, Schema, Props],
     jsonLoc: Stack[String],
     json: JsonObject,
-  ): DecodeResult[Value.Lenient[Obj[Props]]] =
+  ): DecodeResult.ParseSuccess[Value.Lenient[Obj[Props]]] =
     schema match
       case ObjectMotif.Empty() =>
         Succeeded(Value.Lenient.Obj.empty)
       case ObjectMotif.Snoc(init, pname, ptype) =>
-        DecodeResult.map2(
+        DecodeResult.ParseSuccess.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropLenient(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
           init.extend(pname, last)
         }
       case ObjectMotif.SnocOpt(init, pname, ptype) =>
-        DecodeResult.map2(
+        DecodeResult.ParseSuccess.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropOptLenient(pname, ptype, jsonLoc, json),
         ) { (init, last) =>
@@ -275,7 +309,7 @@ object ValueCodecJson {
     propSchema: Schema[V],
     jsonLoc: Stack[String],
     jsonObject: JsonObject,
-  ): DecodeResult[Value.Lenient[V]] =
+  ): DecodeResult.ParseSuccess[Value.Lenient[V]] =
     jsonObject(propName.value) match
       case Some(json) =>
         val n = jsonLoc.size
@@ -293,7 +327,7 @@ object ValueCodecJson {
     propSchema: Schema[V],
     jsonLoc: Stack[String],
     jsonObject: JsonObject,
-  ): DecodeResult[Option[Value.Lenient[V]]] =
+  ): DecodeResult.ParseSuccess[Option[Value.Lenient[V]]] =
     jsonObject(propName.value) match
       case Some(json) =>
         val n = jsonLoc.size
@@ -311,7 +345,7 @@ object ValueCodecJson {
     elemSchema: Schema[T],
     jsonLoc: Stack[String],
     jsonElems: Vector[Json],
-  ): DecodeResult[Value.Lenient[Arr[T]]] = {
+  ): DecodeResult.ParseSuccess[Value.Lenient[Arr[T]]] = {
     val builder = IArray.newBuilder[Value.Lenient[T]](using Value.Lenient.classTag)
     builder.sizeHint(jsonElems.size)
     boundary {
