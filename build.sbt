@@ -55,10 +55,10 @@ val scalacOptionsCommon =
     "-Xkind-projector:underscores",
   )
 
-ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
+// ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
-val LibrettoVersion = "0.3.7-SNAPSHOT"
-val Http4sVersion = "0.23.30"
+val LibrettoVersion = "0.3.7"
+val Http4sVersion = "0.23.32"
 val ScalatestVersion = "3.2.19"
 
 lazy val macroUtil = project
