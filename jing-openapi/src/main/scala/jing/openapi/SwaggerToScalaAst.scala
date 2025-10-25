@@ -5,7 +5,6 @@ import java.net.URI
 import java.nio.file.Path
 import jing.macroUtil.{Mode, StructuralRefinement, qr}
 import jing.macroUtil.Mode.IsSubsumedBy
-import jing.macroUtil.Mode.IsSubsumedBy.given
 import jing.macroUtil.StructuralRefinement.{MemberDef, MemberDefsPoly, PreviousSiblings, typeRefUnsafe}
 import jing.openapi.ModelToScalaAst.{*, given}
 import jing.openapi.model.{
@@ -32,11 +31,11 @@ import jing.openapi.model.{
   Value,
 }
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Applicative, Exists, Functor, SingletonType, TypeEq, TypeEqK}
+import libretto.lambda.util.{Applicative, Exists, Functor, SingletonType}
 import libretto.lambda.util.Applicative.pure
 import libretto.lambda.util.Exists.Indeed
-import libretto.lambda.util.TypeEq.Refl
 import scala.NamedTuple.NamedTuple
+import scala.Option.when
 import scala.annotation.tailrec
 import scala.collection.immutable.{:: as NonEmptyList}
 import scala.jdk.CollectionConverters.*
@@ -986,102 +985,259 @@ private[openapi] object SwaggerToScalaAst {
           case None =>
             Indeed((tps, sps.widen))
 
-  private def protoSchema(using Quotes)(
+  private def protoSchema(
     schema: io.swagger.v3.oas.models.media.Schema[?],
-  ): ProtoSchema = {
-    val LocalSchema = "#/components/schemas/(.*)".r
-    schema.getType() match {
+  ): ProtoSchema =
+    protoSchema(
+      $ref = schema.get$ref(),
+      oneOf = schema.getOneOf(),
+      allOf = schema.getAllOf(),
+      anyOf = schema.getAnyOf(),
+      discriminator = schema.getDiscriminator(),
+      `type` = schema.getType(),
+      `enum` = schema.getEnum(),
+      nullable = schema.getNullable(),
+      const = schema.getConst(),
+      format = schema.getFormat(),
+      items = schema.getItems(),
+      properties = schema.getProperties(),
+      required = schema.getRequired(),
+    )
+
+  private def protoSchema(
+    $ref: String | Null,
+    oneOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    anyOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    allOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    discriminator: io.swagger.v3.oas.models.media.Discriminator | Null,
+    `type`: String | Null,
+    `enum`: java.util.List[? <: Object] | Null,
+    nullable: Boolean | Null,
+    const: Object | Null,
+    format: String | Null,
+    items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
+    properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    required: java.util.List[String] | Null,
+  ): ProtoSchema =
+    val problems =
+      List(
+        when(anyOf != null)("anyOf not (yet) supported by JING"),
+        when(allOf != null)("allOf not (yet) supported by JING"),
+        when(nullable != null && nullable == true)("nullable not (yet) supported by JING"),
+        when(const != null)("const not (yet) supported by JING"),
+      )
+    problems.collectFirst { case Some(e) => e } match
+      case Some(e) => ProtoSchema.Unsupported(e)
+      case None => protoSchema($ref, oneOf, discriminator, `type`, `enum`, format, items, properties, required)
+
+  private val LocalSchema =
+    "#/components/schemas/(.*)".r
+
+  private def protoSchema(
+    $ref: String | Null,
+    oneOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    discriminator: io.swagger.v3.oas.models.media.Discriminator | Null,
+    `type`: String | Null,
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+    items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
+    properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    required: java.util.List[String] | Null,
+  ): ProtoSchema =
+    $ref match
       case null =>
-        schema.get$ref() match
-          case null =>
-            schema.getOneOf() match
-              case null =>
-                ProtoSchema.Unsupported("Swagger schema with no type, $ref, or oneOf")
-              case schemas =>
-                schema.getDiscriminator() match
-                  case null =>
-                    ProtoSchema.Unsupported("Discriminator required for oneOf")
-                  case discriminator =>
-                    discriminator.getPropertyName() match
-                      case null =>
-                        ProtoSchema.Unsupported("Discriminator must have propertyName defined")
-                      case propertyName =>
-                        discriminator.getMapping() match
-                          case null =>
-                            ProtoSchema.OneOf(
-                              propertyName,
-                              schemas.asScala.map(protoSchema(_)).toList,
-                            )
-                          case _ =>
-                            ProtoSchema.Unsupported("Discriminator mapping not yet supported by JING")
-          case LocalSchema(name) =>
-            ProtoSchema.Ref(name)
-          case ref =>
-            ProtoSchema.Unsupported(s"The following $$ref format not yet supported: $ref")
-      case "string" =>
-        schema.getEnum match
-          case null =>
-            // TODO: look for format modifier
-            ProtoSchema.str
-          case vals =>
-            val stringVals = vals.asScala.toList.map(_.asInstanceOf[String])
-            if (stringVals.contains(null))
-              ProtoSchema.Unsupported(s"null not supported as an enum case of strings. Got: ${stringVals.mkString(",")}")
-            else
-              stringVals match
-                case Nil                 => ProtoSchema.Unsupported("empty enum")
-                case NonEmptyList(v, vs) => ProtoSchema.strEnum(v, vs*)
-      case "integer" =>
-        schema.getFormat() match
-          case "int32" =>
-            schema.getEnum match
-              case null =>
-                ProtoSchema.i32
-              case vals =>
-                // TODO: detect and report the parser giving us Longs if values don't fit into Int range
-                val integerVals = vals.asScala.toList.map(_.asInstanceOf[Integer])
-                if (integerVals.contains(null))
-                  ProtoSchema.Unsupported(s"null not supported as an enum case of 32-bit integers. Got: ${integerVals.mkString(",")}")
-                else
-                  integerVals.map(_.toInt) match
-                    case Nil                 => ProtoSchema.Unsupported("empty enum")
-                    case NonEmptyList(v, vs) => ProtoSchema.int32Enum(v, vs*)
-          case "int64" =>
-            schema.getEnum match
-              case null =>
-                ProtoSchema.i64
-              case vals =>
-                // using Number instead of Long, as the parser uses Integer if all cases fit into Int
-                val numberVals = vals.asScala.toList.map(_.asInstanceOf[java.lang.Number])
-                if (numberVals.contains(null))
-                  ProtoSchema.Unsupported(s"null not supported as an enum case of 64-bit integers. Got: ${numberVals.mkString(",")}")
-                else
-                  numberVals.map(_.longValue()) match
-                    case Nil                 => ProtoSchema.Unsupported("empty enum")
-                    case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
-          case other =>
-            ProtoSchema.Unsupported(s"Unsupported integer format: $other")
-      case "boolean" =>
-        ProtoSchema.bool
-      case "array" =>
-        val itemSchema = protoSchema(schema.getItems())
-        ProtoSchema.arr(itemSchema)
-      case "object" =>
-        schema.getProperties() match
-          case null =>
-            ProtoSchema.Unsupported("Missing properties field in schema of type 'object'")
-          case props =>
-            val required: Set[String] =
-              schema.getRequired() match
-                case null => Set.empty[String]
-                case props => (Set.newBuilder[String] ++= props.iterator.asScala).result()
-            val b = List.newBuilder[(String, Boolean, ProtoSchema)]
-            props.forEach { (name, s) => b += ((name, required.contains(name), protoSchema(s))) }
-            ProtoSchema.obj(b.result())
+        protoSchema(oneOf, discriminator, `type`, `enum`, format, items, properties, required)
+      case LocalSchema(schemaName) =>
+        val problems =
+          List(
+            when(`type` != null)("combination of $ref and type not supported"),
+            when(oneOf != null)("combination of $ref and oneOf not supported"),
+            when(discriminator != null)("combination of $ref and discriminator not supported"),
+            when(`enum` != null)("combination of $ref and enum not supported"),
+            when(format != null)("combination of $ref and format not supported"),
+            when(items != null)("combination of $ref and items not supported"),
+            when(properties != null)("combination of $ref and properties not supported"),
+            when(required != null)("combination of $ref and required not supported"),
+          )
+        problems.collectFirst { case Some(e) => e } match
+          case Some(e) => ProtoSchema.Unsupported(e)
+          case None => ProtoSchema.Ref(schemaName)
       case other =>
-        ProtoSchema.Unsupported(s"Type '$other' not yet supported.")
-    }
-  }
+        ProtoSchema.Unsupported(s"The following $$ref format not (yet) supported: $other")
+
+  private def protoSchema(
+    oneOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    discriminator: io.swagger.v3.oas.models.media.Discriminator | Null,
+    `type`: String | Null,
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+    items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
+    properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    required: java.util.List[String] | Null,
+  ): ProtoSchema =
+    (oneOf, discriminator) match
+      case (null, null) => protoSchema(`type`, `enum`, format, items, properties, required)
+      case (null, _) => ProtoSchema.Unsupported("discriminator without oneOf or anyOf is not allowed")
+      case (_, null) => ProtoSchema.Unsupported("oneOf requires discriminator (for now)")
+      case (schemas, d) =>
+        (d.getPropertyName(), d.getMapping) match
+          case (null, _) => ProtoSchema.Unsupported("Discriminator must have propertyName defined")
+          case (propertyName, null) => ProtoSchema.OneOf(propertyName, schemas.asScala.map(protoSchema(_)).toList)
+          case (_, _) => ProtoSchema.Unsupported("Discriminator mapping not yet supported by JING")
+
+  private def protoSchema(
+    `type`: String | Null,
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+    items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
+    properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    required: java.util.List[String] | Null,
+  ): ProtoSchema =
+    `type` match
+      case null =>
+        ProtoSchema.Unsupported("Schema must define one of type, $ref, oneOf, anyOf, allOf")
+
+      case "object" =>
+        val problems =
+          List(
+            when(`enum` != null)("enum not supported for type object"),
+            when(items != null)("items not allowed for type object"),
+            when(format != null)("format not allowed for type object"),
+          )
+        problems.collectFirst { case Some(e) => e } match
+          case Some(e) => ProtoSchema.Unsupported(e)
+          case None => protoSchemaObject(properties, required)
+
+      case "array" =>
+        val problems =
+          List(
+            when(`enum` != null)("enum not supported for type array"),
+            when(properties != null)("properties not allowed for type array"),
+            when(required != null)("required not allowed for type array"),
+            when(format != null)("format not allowed for type array"),
+          )
+        problems.collectFirst { case Some(e) => e } match
+          case Some(e) => ProtoSchema.Unsupported(e)
+          case None => protoSchemaArray(items)
+
+      case t: ("string" | "integer" | "boolean") =>
+        val problems =
+          List(
+            when(items != null)("items not allowed for type object"),
+            when(properties != null)("properties not allowed for type array"),
+            when(required != null)("required not allowed for type array"),
+          )
+        problems.collectFirst { case Some(e) => e } match
+          case Some(e) => ProtoSchema.Unsupported(e)
+          case None => protoSchemaScalar(t, `enum`, format)
+
+      case other =>
+        ProtoSchema.Unsupported(s"Type '$other' not (yet) supported.")
+
+  private def protoSchemaObject(
+    properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    required: java.util.List[String] | Null,
+  ): ProtoSchema =
+    properties match
+      case null =>
+        ProtoSchema.Unsupported("Missing properties field in schema of type 'object'")
+      case props =>
+        val requiredProps: Set[String] =
+          required match
+            case null => Set.empty[String]
+            case props => (Set.newBuilder[String] ++= props.iterator.asScala).result()
+        val b = List.newBuilder[(String, Boolean, ProtoSchema)]
+        props.forEach { (name, s) => b += ((name, requiredProps.contains(name), protoSchema(s))) }
+        ProtoSchema.obj(b.result())
+
+  private def protoSchemaArray(
+    items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
+  ): ProtoSchema =
+    items match
+      case null =>
+        ProtoSchema.Unsupported("Missing property 'items' (item schema) for type array")
+      case itemSchema =>
+        ProtoSchema.arr(protoSchema(itemSchema))
+
+  private def protoSchemaScalar(
+    `type`: "string" | "integer" | "boolean",
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+  ): ProtoSchema =
+    `type` match
+      case "string" => protoSchemaString(`enum`, format)
+      case "integer" => protoSchemaInteger(`enum`, format)
+      case "boolean" => protoSchemaBoolean(`enum`, format)
+
+  private def protoSchemaString(
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+  ): ProtoSchema =
+    // TODO: handle format
+    `enum` match
+      case null =>
+        ProtoSchema.str
+      case vals =>
+        val list = vals.asScala.toList
+        val (stringVals, others) = list.partitionMap:
+          case s: String => Left(s)
+          case x => Right(x)
+        others match
+          case Nil =>
+            stringVals match
+              case Nil                 => ProtoSchema.Unsupported("empty enum")
+              case NonEmptyList(v, vs) => ProtoSchema.strEnum(v, vs*)
+          case NonEmptyList(null, _) =>
+            ProtoSchema.Unsupported(s"null not supported as an enum case of strings. Got: ${list.mkString(",")}")
+          case NonEmptyList(x, _) =>
+            ProtoSchema.Unsupported(s"${x.getClass.getSimpleName} not supported as an enum case of strings. Got: ${list.mkString(",")}")
+
+  private def protoSchemaInteger(
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+  ): ProtoSchema =
+    format match
+      case null =>
+        // TODO: default to int32?
+        ProtoSchema.Unsupported(s"type integer needs a format (e.g. int32, int64)")
+      case "int32" =>
+        `enum` match
+          case null =>
+            ProtoSchema.i32
+          case vals =>
+            // TODO: type-test instead of unsafe cast
+            val integerVals = vals.asScala.toList.map(_.asInstanceOf[Integer])
+            if (integerVals.contains(null))
+              ProtoSchema.Unsupported(s"null not supported as an enum case of 32-bit integers. Got: ${integerVals.mkString(",")}")
+            else
+              integerVals.map(_.toInt) match
+                case Nil                 => ProtoSchema.Unsupported("empty enum")
+                case NonEmptyList(v, vs) => ProtoSchema.int32Enum(v, vs*)
+      case "int64" =>
+        `enum` match
+          case null =>
+            ProtoSchema.i64
+          case vals =>
+            // using Number instead of Long, as the parser uses Integer if all cases fit into Int
+            // TODO: type-test instead of unsafe cast
+            val numberVals = vals.asScala.toList.map(_.asInstanceOf[java.lang.Number])
+            if (numberVals.contains(null))
+              ProtoSchema.Unsupported(s"null not supported as an enum case of 64-bit integers. Got: ${numberVals.mkString(",")}")
+            else
+              numberVals.map(_.longValue()) match
+                case Nil                 => ProtoSchema.Unsupported("empty enum")
+                case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
+      case other =>
+        ProtoSchema.Unsupported(s"integer format $other not (yet) supported")
+
+  private def protoSchemaBoolean(
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+  ): ProtoSchema =
+    (`enum`, format) match
+      case (null, null) => ProtoSchema.bool
+      case (_, null) => ProtoSchema.Unsupported("enum not yet supported for type boolean")
+      case (_, fmt) => ProtoSchema.Unsupported(s"format not supported for type boolean (got $fmt)")
 
   extension [A](as: NonEmptyList[(String, A)]) {
 

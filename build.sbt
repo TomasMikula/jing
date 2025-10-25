@@ -52,6 +52,7 @@ releaseProcess := Seq[ReleaseStep](
 val scalacOptionsCommon =
   Seq(
     "-deprecation",
+    "-Wunused:all",
     "-Xkind-projector:underscores",
   )
 
