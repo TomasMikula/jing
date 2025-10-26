@@ -163,6 +163,30 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
     api.schemas.Foo.from : (Value[Enum[Bool, Void || true || false || true || false]] => Value[api.schemas.Foo])
   }
 
+  test("object with empty or missing property list") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: object with empty property list
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: object
+            properties: {}
+          Bar:
+            type: object
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time checks that schemas have the expected definitions
+    api.schemas.Foo.from : (Value[Obj[Void]] => Value[api.schemas.Foo])
+    api.schemas.Bar.from : (Value[Obj[Void]] => Value[api.schemas.Bar])
+  }
+
   test("nullable enums") {
     inline val openapiYaml =
       """

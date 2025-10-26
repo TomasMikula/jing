@@ -1138,17 +1138,15 @@ private[openapi] object SwaggerToScalaAst {
     properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
     required: java.util.List[String] | Null,
   ): ProtoSchema =
+    val requiredProps: Set[String] =
+      required match
+        case null => Set.empty[String]
+        case props => (Set.newBuilder[String] ++= props.iterator.asScala).result()
+    val b = List.newBuilder[(String, Boolean, ProtoSchema)]
     properties match
-      case null =>
-        ProtoSchema.Unsupported("Missing properties field in schema of type 'object'")
-      case props =>
-        val requiredProps: Set[String] =
-          required match
-            case null => Set.empty[String]
-            case props => (Set.newBuilder[String] ++= props.iterator.asScala).result()
-        val b = List.newBuilder[(String, Boolean, ProtoSchema)]
-        props.forEach { (name, s) => b += ((name, requiredProps.contains(name), protoSchema(s))) }
-        ProtoSchema.obj(b.result())
+      case null => // do nothing
+      case props => props.forEach { (name, s) => b += ((name, requiredProps.contains(name), protoSchema(s))) }
+    ProtoSchema.obj(b.result())
 
   private def protoSchemaArray(
     items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
