@@ -24,6 +24,94 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
     api.endpointList : EndpointList[Void, NamedTuple[EmptyTuple, EmptyTuple]]
   }
 
+  test("int64 enum with int32 literals") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: int64 enum with int32 literals
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: integer
+            format: int64
+            enum: [1, 2, 3]
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time check that Foo has the expected definition
+    api.schemas.Foo.from : (Value[Enum[Int64, Void || 1L || 2L || 3L]] => Value[api.schemas.Foo])
+  }
+
+  test("int32 enum with int64 literals fails gracefully") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: int32 enum with int64 literals fails gracefully
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: integer
+            format: int32
+            enum: [9223372036854775807, -9223372036854775808]
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time check that Foo has the expected definition
+    api.schemas.Foo.from : (Value[Oops["9223372036854775807 of type Long not supported as an enum case of 32-bit integers. Got: 9223372036854775807,-9223372036854775808"]] => Value[api.schemas.Foo])
+  }
+
+  test("int64 enum with string literals fails gracefully") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: int64 enum with string literals fails gracefully
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: integer
+            format: int64
+            enum: [9223372036854775807, "abcd", -9223372036854775808]
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time check that Foo has the expected definition
+    // Note: The "null" in the error message is not ideal, but that's what the Swagger parser gives us instead of "abcd".
+    api.schemas.Foo.from : (Value[Oops["null not supported as an enum case of 64-bit integers. Got: 9223372036854775807,null,-9223372036854775808"]] => Value[api.schemas.Foo])
+  }
+
+  test("string enum with integer and boolean literals") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: string enum with integer and boolean literals
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: string
+            enum: [abcd, 1, true, 9223372036854775807]
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time check that Foo has the expected definition
+    api.schemas.Foo.from : (Value[Enum[Str, Void || "abcd" || "1" || "true" || "9223372036854775807"]] => Value[api.schemas.Foo])
+  }
+
   test("nullable enums") {
     inline val openapiYaml =
       """

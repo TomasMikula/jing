@@ -1190,7 +1190,8 @@ private[openapi] object SwaggerToScalaAst {
           case NonEmptyList(null, _) =>
             ProtoSchema.Unsupported(s"null not supported as an enum case of strings. Got: ${list.mkString(",")}")
           case NonEmptyList(x, _) =>
-            ProtoSchema.Unsupported(s"${x.getClass.getSimpleName} not supported as an enum case of strings. Got: ${list.mkString(",")}")
+            val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
+            ProtoSchema.Unsupported(s"$xStr not supported as an enum case of strings. Got: ${list.mkString(",")}")
 
   private def protoSchemaInteger(
     `enum`: java.util.List[? <: Object] | Null,
@@ -1205,28 +1206,36 @@ private[openapi] object SwaggerToScalaAst {
           case null =>
             ProtoSchema.i32
           case vals =>
-            // TODO: type-test instead of unsafe cast
-            val integerVals = vals.asScala.toList.map(_.asInstanceOf[Integer])
-            if (integerVals.contains(null))
-              ProtoSchema.Unsupported(s"null not supported as an enum case of 32-bit integers. Got: ${integerVals.mkString(",")}")
-            else
-              integerVals.map(_.toInt) match
-                case Nil                 => ProtoSchema.Unsupported("empty enum")
-                case NonEmptyList(v, vs) => ProtoSchema.int32Enum(v, vs*)
+            val list = vals.asScala.toList
+            val (intVals, others) = list.partitionMap:
+              case i: Integer => Left(i.toInt)
+              case x => Right(x)
+            others match
+              case Nil =>
+                intVals match
+                  case Nil => ProtoSchema.Unsupported("empty enum")
+                  case NonEmptyList(i, is) => ProtoSchema.int32Enum(i, is*)
+              case NonEmptyList(x, _) =>
+                val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
+                ProtoSchema.Unsupported(s"$xStr not supported as an enum case of 32-bit integers. Got: ${list.mkString(",")}")
       case "int64" =>
         `enum` match
           case null =>
             ProtoSchema.i64
           case vals =>
-            // using Number instead of Long, as the parser uses Integer if all cases fit into Int
-            // TODO: type-test instead of unsafe cast
-            val numberVals = vals.asScala.toList.map(_.asInstanceOf[java.lang.Number])
-            if (numberVals.contains(null))
-              ProtoSchema.Unsupported(s"null not supported as an enum case of 64-bit integers. Got: ${numberVals.mkString(",")}")
-            else
-              numberVals.map(_.longValue()) match
-                case Nil                 => ProtoSchema.Unsupported("empty enum")
-                case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
+            val list = vals.asScala.toList
+            val (longVals, others) = list.partitionMap:
+              case i: Integer => Left(i.toLong)
+              case l: Long => Left(l.toLong)
+              case x => Right(x)
+            others match
+              case Nil =>
+                longVals match
+                  case Nil                 => ProtoSchema.Unsupported("empty enum")
+                  case NonEmptyList(v, vs) => ProtoSchema.int64Enum(v, vs*)
+              case NonEmptyList(x, _) =>
+                val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
+                ProtoSchema.Unsupported(s"$xStr not supported as an enum case of 64-bit integers. Got: ${list.mkString(",")}")
       case other =>
         ProtoSchema.Unsupported(s"integer format $other not (yet) supported")
 
