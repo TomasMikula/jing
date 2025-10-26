@@ -1244,9 +1244,23 @@ private[openapi] object SwaggerToScalaAst {
     format: String | Null,
   ): ProtoSchema =
     (`enum`, format) match
-      case (null, null) => ProtoSchema.bool
-      case (_, null) => ProtoSchema.Unsupported("enum not yet supported for type boolean")
-      case (_, fmt) => ProtoSchema.Unsupported(s"format not supported for type boolean (got $fmt)")
+      case (null, null) =>
+        ProtoSchema.bool
+      case (vals, null) =>
+        val list = vals.asScala.toList
+        val (boolVals, others) = list.partitionMap:
+          case b: java.lang.Boolean => Left(b.booleanValue())
+          case x => Right(x)
+        others match
+          case Nil =>
+            boolVals match
+              case Nil                 => ProtoSchema.Unsupported("empty enum")
+              case NonEmptyList(v, vs) => ProtoSchema.boolEnum(v, vs*)
+          case NonEmptyList(x, _) =>
+            val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
+            ProtoSchema.Unsupported(s"$xStr not supported as an enum case of booleans. Got: ${list.mkString(",")}")
+      case (_, fmt) =>
+        ProtoSchema.Unsupported(s"format not supported for type boolean (got $fmt)")
 
   extension [A](as: NonEmptyList[(String, A)]) {
 

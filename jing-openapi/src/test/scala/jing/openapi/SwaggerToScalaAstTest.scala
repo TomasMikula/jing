@@ -112,6 +112,57 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
     api.schemas.Foo.from : (Value[Enum[Str, Void || "abcd" || "1" || "true" || "9223372036854775807"]] => Value[api.schemas.Foo])
   }
 
+  test("boolean enums") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: boolean enums
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          TrueType:
+            type: boolean
+            enum: [true]
+          FalseType:
+            type: boolean
+            enum: [false]
+          BooleanType:
+            type: boolean
+            enum: [true, false]
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time checks that schemas have the expected definitions
+    api.schemas.TrueType.from : (Value[Enum[Bool, Void || true]] => Value[api.schemas.TrueType])
+    api.schemas.FalseType.from : (Value[Enum[Bool, Void || false]] => Value[api.schemas.FalseType])
+    api.schemas.BooleanType.from : (Value[Enum[Bool, Void || true || false]] => Value[api.schemas.BooleanType])
+  }
+
+  test("boolean enum with non-boolean literals fails gracefully") {
+    inline val openapiYaml =
+      """
+      openapi: 3.0.0
+      info:
+        title: boolean enum with non-boolean literals fails gracefully
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: boolean
+            enum: [true, abcd, "true", 123]
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time check that Foo has the expected definition
+    // Note: The Swagger parser is just plain stupid: gives us false in place of "abcd" and 123
+    api.schemas.Foo.from : (Value[Enum[Bool, Void || true || false || true || false]] => Value[api.schemas.Foo])
+  }
+
   test("nullable enums") {
     inline val openapiYaml =
       """
