@@ -4,8 +4,6 @@ import libretto.lambda.Items1Named.Member
 import libretto.lambda.util.TypeEq.Refl
 import libretto.lambda.util.{BiInjective, TypeEq}
 
-import scala.NamedTuple.AnyNamedTuple
-
 sealed trait Int32
 sealed trait Int64
 sealed trait Str
@@ -17,6 +15,7 @@ sealed trait ::[A, B]
 sealed trait :?[A, B]
 sealed trait DiscriminatedUnion[Variants]
 sealed trait Enum[Base, Cases]
+sealed trait Const[A]
 sealed trait Oops[Reason]
 
 type ScalaReprOf[T] =

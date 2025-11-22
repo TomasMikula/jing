@@ -2,7 +2,7 @@ package jing.openapi.model
 
 import libretto.lambda.util.SingletonType
 
-sealed trait ScalaValueOf[V, T] {
+sealed infix trait ScalaValueOf[V, T] {
   import ScalaValueOf.*
 
   def get: V & ScalaReprOf[T] =

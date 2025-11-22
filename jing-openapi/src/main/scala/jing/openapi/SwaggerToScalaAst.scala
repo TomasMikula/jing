@@ -994,10 +994,10 @@ private[openapi] object SwaggerToScalaAst {
       allOf = schema.getAllOf(),
       anyOf = schema.getAnyOf(),
       discriminator = schema.getDiscriminator(),
+      const = schema.getConst(),
       `type` = schema.getType(),
       `enum` = schema.getEnum(),
       nullable = schema.getNullable(),
-      const = schema.getConst(),
       format = schema.getFormat(),
       items = schema.getItems(),
       properties = schema.getProperties(),
@@ -1010,10 +1010,10 @@ private[openapi] object SwaggerToScalaAst {
     anyOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
     allOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
     discriminator: io.swagger.v3.oas.models.media.Discriminator | Null,
+    const: Object | Null,
     `type`: String | Null,
     `enum`: java.util.List[? <: Object] | Null,
     nullable: Boolean | Null,
-    const: Object | Null,
     format: String | Null,
     items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
     properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
@@ -1024,11 +1024,10 @@ private[openapi] object SwaggerToScalaAst {
         when(anyOf != null)("anyOf not (yet) supported by JING"),
         when(allOf != null)("allOf not (yet) supported by JING"),
         when(nullable != null && nullable == true)("nullable not (yet) supported by JING"),
-        when(const != null)("const not (yet) supported by JING"),
       )
     problems.collectFirst { case Some(e) => e } match
       case Some(e) => ProtoSchema.Unsupported(e)
-      case None => protoSchema($ref, oneOf, discriminator, `type`, `enum`, format, items, properties, required)
+      case None => protoSchema($ref, oneOf, discriminator, const, `type`, `enum`, format, items, properties, required)
 
   private val LocalSchema =
     "#/components/schemas/(.*)".r
@@ -1037,6 +1036,7 @@ private[openapi] object SwaggerToScalaAst {
     $ref: String | Null,
     oneOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
     discriminator: io.swagger.v3.oas.models.media.Discriminator | Null,
+    const: Object | Null,
     `type`: String | Null,
     `enum`: java.util.List[? <: Object] | Null,
     format: String | Null,
@@ -1046,7 +1046,7 @@ private[openapi] object SwaggerToScalaAst {
   ): ProtoSchema =
     $ref match
       case null =>
-        protoSchema(oneOf, discriminator, `type`, `enum`, format, items, properties, required)
+        protoSchema(oneOf, discriminator, const, `type`, `enum`, format, items, properties, required)
       case LocalSchema(schemaName) =>
         val problems =
           List(
@@ -1054,6 +1054,7 @@ private[openapi] object SwaggerToScalaAst {
             when(oneOf != null)("combination of $ref and oneOf not supported"),
             when(discriminator != null)("combination of $ref and discriminator not supported"),
             when(`enum` != null)("combination of $ref and enum not supported"),
+            when(const != null)("combination of $ref and const not supported"),
             when(format != null)("combination of $ref and format not supported"),
             when(items != null)("combination of $ref and items not supported"),
             when(properties != null)("combination of $ref and properties not supported"),
@@ -1068,6 +1069,7 @@ private[openapi] object SwaggerToScalaAst {
   private def protoSchema(
     oneOf: java.util.List[io.swagger.v3.oas.models.media.Schema[?]] | Null,
     discriminator: io.swagger.v3.oas.models.media.Discriminator | Null,
+    const: Object | Null,
     `type`: String | Null,
     `enum`: java.util.List[? <: Object] | Null,
     format: String | Null,
@@ -1076,7 +1078,7 @@ private[openapi] object SwaggerToScalaAst {
     required: java.util.List[String] | Null,
   ): ProtoSchema =
     (oneOf, discriminator) match
-      case (null, null) => protoSchema(`type`, `enum`, format, items, properties, required)
+      case (null, null) => protoSchema(const, `type`, `enum`, format, items, properties, required)
       case (null, _) => ProtoSchema.Unsupported("discriminator without oneOf or anyOf is not allowed")
       case (_, null) => ProtoSchema.Unsupported("oneOf requires discriminator (for now)")
       case (schemas, d) =>
@@ -1088,6 +1090,7 @@ private[openapi] object SwaggerToScalaAst {
               List(
                 when(`type` != null && `type` != "object")(s"combination of oneOf and type ${`type`} not supported"),
                 when(`enum` != null)("combination of oneOf and enum not supported"),
+                when(const != null)("combination of oneOf and const not supported"),
                 when(format != null)("combination of oneOf and format not supported"),
                 when(items != null)("combination of oneOf and items not supported"),
                 when(properties != null)("combination of oneOf and properties not supported"),
@@ -1100,6 +1103,29 @@ private[openapi] object SwaggerToScalaAst {
             ProtoSchema.Unsupported("Discriminator mapping not yet supported by JING")
 
   private def protoSchema(
+    const: Object | Null,
+    `type`: String | Null,
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+    items: io.swagger.v3.oas.models.media.Schema[? <: Object] | Null,
+    properties: java.util.Map[String, io.swagger.v3.oas.models.media.Schema[?]] | Null,
+    required: java.util.List[String] | Null,
+  ): ProtoSchema =
+    const match
+      case null =>
+        protoSchema(`type`, `enum`, format, items, properties, required)
+      case c =>
+        val problems =
+          List(
+            when(items != null)("combination of const and items not supported"),
+            when(properties != null)("combination of const and properties not supported"),
+            when(required != null)("combination of const and required not supported"),
+          )
+        problems.collectFirst { case Some(e) => e } match
+          case Some(e) => ProtoSchema.Unsupported(e)
+          case None => protoSchemaConst(c, `type`, `enum`, format)
+
+  private def protoSchema(
     `type`: String | Null,
     `enum`: java.util.List[? <: Object] | Null,
     format: String | Null,
@@ -1109,7 +1135,7 @@ private[openapi] object SwaggerToScalaAst {
   ): ProtoSchema =
     `type` match
       case null =>
-        ProtoSchema.Unsupported("Schema must define one of type, $ref, oneOf, anyOf, allOf")
+        ProtoSchema.Unsupported(s"Schema must define one of type, const, $$ref, oneOf, anyOf, allOf.")
 
       case "object" =>
         val problems =
@@ -1171,6 +1197,36 @@ private[openapi] object SwaggerToScalaAst {
       case itemSchema =>
         ProtoSchema.arr(protoSchema(itemSchema))
 
+  private def protoSchemaConst(
+    c: Object,
+    `type`: String | Null,
+    `enum`: java.util.List[? <: Object] | Null,
+    format: String | Null,
+  ): ProtoSchema =
+    if (`enum` == null || `enum`.contains(c))
+      protoSchemaConst(c, `type`, format)
+    else
+      ProtoSchema.Unsupported(s"Constant '$c' is not one of the enum cases: ${`enum`.asScala.mkString(",")}")
+
+  private def protoSchemaConst(
+    c: Object,
+    `type`: String | Null,
+    format: String | Null,
+  ): ProtoSchema =
+    `type` match
+      case null =>
+        c match
+          case _: java.lang.String => protoSchemaConstString(c, format)
+          case _: (java.lang.Integer | java.lang.Long) => protoSchemaConstInteger(c, format)
+          case _: java.lang.Boolean => protoSchemaConstBoolean(c, format)
+          case _ => ProtoSchema.Unsupported(s"Constant $c of Scala type ${c.getClass.getSimpleName} not supported")
+      case t =>
+        t match
+          case "string" => protoSchemaConstString(c, format)
+          case "integer" => protoSchemaConstInteger(c, format)
+          case "boolean" => protoSchemaConstBoolean(c, format)
+          case other => ProtoSchema.Unsupported(s"Constants of type '$other' not supported.")
+
   private def protoSchemaScalar(
     `type`: "string" | "integer" | "boolean",
     `enum`: java.util.List[? <: Object] | Null,
@@ -1180,6 +1236,15 @@ private[openapi] object SwaggerToScalaAst {
       case "string" => protoSchemaString(`enum`, format)
       case "integer" => protoSchemaInteger(`enum`, format)
       case "boolean" => protoSchemaBoolean(`enum`, format)
+
+  private def protoSchemaConstString(
+    c: Object,
+    format: String | Null,
+  ): ProtoSchema =
+    // TODO: handle format
+    c match
+      case s: String => ProtoSchema.strConst(s)
+      case x => ProtoSchema.Unsupported(s"$x of type ${x.getClass.getSimpleName} not supported as a string constant")
 
   private def protoSchemaString(
     `enum`: java.util.List[? <: Object] | Null,
@@ -1199,11 +1264,31 @@ private[openapi] object SwaggerToScalaAst {
             stringVals match
               case Nil                 => ProtoSchema.Unsupported("empty enum")
               case NonEmptyList(v, vs) => ProtoSchema.strEnum(v, vs*)
-          case NonEmptyList(null, _) =>
-            ProtoSchema.Unsupported(s"null not supported as an enum case of strings. Got: ${list.mkString(",")}")
           case NonEmptyList(x, _) =>
             val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
             ProtoSchema.Unsupported(s"$xStr not supported as an enum case of strings. Got: ${list.mkString(",")}")
+
+  private def protoSchemaConstInteger(
+    c: Object,
+    format: String | Null,
+  ): ProtoSchema =
+    format match
+      case null =>
+        c match
+          case i: java.lang.Integer => ProtoSchema.int32Const(i)
+          case l: java.lang.Long => ProtoSchema.int64Const(l)
+          case x => ProtoSchema.Unsupported(s"$x of type ${x.getClass.getSimpleName} not supported as an integer constant")
+      case "int32" =>
+        c match
+          case i: Integer => ProtoSchema.int32Const(i)
+          case x => ProtoSchema.Unsupported(s"$x of type ${x.getClass.getSimpleName} not supported as a 32-bit integer constant")
+      case "int64" =>
+        c match
+          case i: Integer => ProtoSchema.int64Const(i.toLong)
+          case l: java.lang.Long => ProtoSchema.int64Const(l)
+          case x => ProtoSchema.Unsupported(s"$x of type ${x.getClass.getSimpleName} not supported as a 64-bit integer constant")
+      case other =>
+        ProtoSchema.Unsupported(s"integer format $other not (yet) supported")
 
   private def protoSchemaInteger(
     `enum`: java.util.List[? <: Object] | Null,
@@ -1238,7 +1323,7 @@ private[openapi] object SwaggerToScalaAst {
             val list = vals.asScala.toList
             val (longVals, others) = list.partitionMap:
               case i: Integer => Left(i.toLong)
-              case l: Long => Left(l.toLong)
+              case l: java.lang.Long => Left(l.toLong)
               case x => Right(x)
             others match
               case Nil =>
@@ -1251,27 +1336,41 @@ private[openapi] object SwaggerToScalaAst {
       case other =>
         ProtoSchema.Unsupported(s"integer format $other not (yet) supported")
 
+  private def protoSchemaConstBoolean(
+    c: Object,
+    format: String | Null,
+  ): ProtoSchema =
+    format match
+      case null =>
+        c match
+          case b: java.lang.Boolean => ProtoSchema.boolConst(b)
+          case x => ProtoSchema.Unsupported(s"$x of type ${x.getClass.getSimpleName} not supported as a boolean constant")
+      case fmt =>
+        ProtoSchema.Unsupported(s"format not supported for type boolean (got $fmt)")
+
   private def protoSchemaBoolean(
     `enum`: java.util.List[? <: Object] | Null,
     format: String | Null,
   ): ProtoSchema =
-    (`enum`, format) match
-      case (null, null) =>
-        ProtoSchema.bool
-      case (vals, null) =>
-        val list = vals.asScala.toList
-        val (boolVals, others) = list.partitionMap:
-          case b: java.lang.Boolean => Left(b.booleanValue())
-          case x => Right(x)
-        others match
-          case Nil =>
-            boolVals match
-              case Nil                 => ProtoSchema.Unsupported("empty enum")
-              case NonEmptyList(v, vs) => ProtoSchema.boolEnum(v, vs*)
-          case NonEmptyList(x, _) =>
-            val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
-            ProtoSchema.Unsupported(s"$xStr not supported as an enum case of booleans. Got: ${list.mkString(",")}")
-      case (_, fmt) =>
+    format match
+      case null =>
+        `enum` match
+          case null =>
+            ProtoSchema.bool
+          case vals =>
+            val list = vals.asScala.toList
+            val (boolVals, others) = list.partitionMap:
+              case b: java.lang.Boolean => Left(b.booleanValue())
+              case x => Right(x)
+            others match
+              case Nil =>
+                boolVals match
+                  case Nil                 => ProtoSchema.Unsupported("empty enum")
+                  case NonEmptyList(v, vs) => ProtoSchema.boolEnum(v, vs*)
+              case NonEmptyList(x, _) =>
+                val xStr = if (x == null) then "null" else s"$x of type ${x.getClass.getSimpleName}"
+                ProtoSchema.Unsupported(s"$xStr not supported as an enum case of booleans. Got: ${list.mkString(",")}")
+      case fmt =>
         ProtoSchema.Unsupported(s"format not supported for type boolean (got $fmt)")
 
   extension [A](as: NonEmptyList[(String, A)]) {

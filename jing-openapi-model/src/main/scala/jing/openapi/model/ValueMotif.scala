@@ -111,6 +111,7 @@ sealed trait ValueMotif[+F[_], T] {
       case i: Int32Value => M.pure(i)
       case i: Int64Value => M.pure(i)
       case b: BoolValue => M.pure(b)
+      case c: Constant[t] => M.pure(c)
       case e @ EnumValue(_) => M.pure(e)
       case Array(elems) =>
         Applicative
@@ -136,8 +137,14 @@ object ValueMotif {
   case class Int32Value(i: Int) extends ValueMotif[Nothing, Int32]
   case class Int64Value(i: Long) extends ValueMotif[Nothing, Int64]
   case class BoolValue(b: Boolean) extends ValueMotif[Nothing, Bool]
+  case class Constant[T](value: T ScalaValueOf ?) extends ValueMotif[Nothing, Const[T]]
   case class EnumValue[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]) extends ValueMotif[Nothing, Enum[Base, Cases]]
   case class Array[F[_], T](elems: IArray[F[T]]) extends ValueMotif[F, Arr[T]]
+
+  def constInt32(i: Int): ValueMotif[Nothing, Const[i.type]] = Constant(ScalaValueOf.i32(i))
+  def constInt64(i: Long): ValueMotif[Nothing, Const[i.type]] = Constant(ScalaValueOf.i64(i))
+  def constStr(s: String): ValueMotif[Nothing, Const[s.type]] = Constant(ScalaValueOf.str(s))
+  def constBool(b: Boolean): ValueMotif[Nothing, Const[b.type]] = Constant(ScalaValueOf.bool(b))
 
   case class Object[F[_], Ps](
     value: ObjectMotif[F, Optional[F], Ps],
@@ -259,6 +266,11 @@ object ValueMotif {
   extension [F[_]](value: ValueMotif[F, Bool])
     def booleanValue: Boolean =
       value match { case BoolValue(b) => b }
+
+  extension [F[_], T](value: ValueMotif[F, Const[T]])
+    def scalaValue: ScalaValueOf[T, ?] =
+      value match
+        case Constant(value) => value
 
   extension [F[_], Base, Cases](value: ValueMotif[F, Enum[Base, Cases]]) {
     def scalaValue: ScalaUnionOf[Cases] =

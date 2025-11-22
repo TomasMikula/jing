@@ -15,6 +15,63 @@ class JsonSerializationTest extends AnyFunSuite with Inside {
         inside(decoded.toValue):
           case Validated.Valid(value) => value
 
+  test("serialization of constants") {
+    inline val openapiYaml =
+      """
+      openapi: 3.1.0
+      info:
+        title: const of primitives
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: boolean
+            const: true
+          Bar:
+            type: integer
+            format: int32
+            const: 123
+          Baz:
+            type: integer
+            format: int64
+            const: 456
+          Qux:
+            type: string
+            const: "qux"
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+    import api.schemas.{Foo, Bar, Baz, Qux}
+
+    val foo = Foo.from(Value.constBool(true))
+    val bar = Bar.from(Value.constI32(123))
+    val baz = Baz.from(Value.constI64(456L))
+    val qux = Qux.from(Value.constStr("qux"))
+
+    // encode
+    val fooStr = encode(Foo.schema, foo)
+    val barStr = encode(Bar.schema, bar)
+    val bazStr = encode(Baz.schema, baz)
+    val quxStr = encode(Qux.schema, qux)
+
+    assert(fooStr == "true")
+    assert(barStr == "123")
+    assert(bazStr == "456")
+    assert(quxStr == "\"qux\"")
+
+    // decode
+    val foo1 = assertDecode(Foo.schema, fooStr)
+    val bar1 = assertDecode(Bar.schema, barStr)
+    val baz1 = assertDecode(Baz.schema, bazStr)
+    val qux1 = assertDecode(Qux.schema, quxStr)
+
+    assert(foo1 == foo)
+    assert(bar1 == bar)
+    assert(baz1 == baz)
+    assert(qux1 == qux)
+  }
+
   test("serialization of discriminated oneOf") {
     inline val openapiYaml =
       """

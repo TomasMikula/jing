@@ -57,6 +57,9 @@ object Value extends ValueModule[Value] {
     override def toMotifObj[Ps](v: Lenient[Obj[Ps]]): ValueMotif[Lenient, Obj[Ps]] = v match { case Proper(m) => m }
     override def toMotifStr(v: Lenient[Str]): ValueMotif[Lenient, Str]             = v match { case Proper(m) => m }
 
+    override def toMotifConst[T](v: Lenient[Const[T]]): ValueMotif[Lenient, Const[T]] =
+      v match { case Proper(m) => m }
+
     override def toMotifEnum[Base, Cases](v: Lenient[Enum[Base, Cases]]): ValueMotif[Lenient, Enum[Base, Cases]] =
       v match { case Proper(m) => m }
 
@@ -103,6 +106,9 @@ object Value extends ValueModule[Value] {
   override def toMotifInt64(v: Value[Int64]): ValueMotif[Value, Int64]       = v.underlying
   override def toMotifObj[Ps](v: Value[Obj[Ps]]): ValueMotif[Value, Obj[Ps]] = v.underlying
   override def toMotifStr(v: Value[Str]): ValueMotif[Value, Str]             = v.underlying
+
+  override def toMotifConst[T](v: Value[Const[T]]): ValueMotif[Value, Const[T]] =
+    v.underlying
 
   override def toMotifEnum[Base, Cases](v: Value[Enum[Base, Cases]]): ValueMotif[Value, Enum[Base, Cases]] =
     v.underlying

@@ -285,7 +285,7 @@ object ModelToScalaAst {
         Indeed((tpe, expr.map { expr => '{ Schema.Proper(SchemaMotif.Object($expr)) } }))
     }
 
-  def quotedScalaValueOf[T, U](v: ScalaValueOf[T, U])(using Quotes, Type[U]): (Type[T], Expr[ScalaValueOf[T, U]]) = {
+  def quotedScalaValueOf[T, U](v: ScalaValueOf[T, U])(using Quotes): (Type[T], Expr[ScalaValueOf[T, U]]) = {
     import ScalaValueOf.*
 
     v match
@@ -350,6 +350,19 @@ object ModelToScalaAst {
                 (Type.of[Enum[base, cases]], '{ Enumeration[G, base, cases](${b}, ${cs})})
   }
 
+  def quotedSchemaMotifConstant[F[_], T, G[_]](
+    s: SchemaMotif.Constant[F, T]
+  )(using
+    Quotes,
+    Type[G],
+  ): (Type[T], Expr[SchemaMotif.Constant[G, T]]) =
+    s match
+      case SchemaMotif.Constant.Primitive(value) =>
+        quotedScalaValueOf(value) match
+          case (t, e) =>
+            given Type[T] = t
+            (t, '{ SchemaMotif.Constant.Primitive(${e: Expr[T ScalaValueOf ?]}) })
+
   def quotedSchemaMotif[F[_], T](
     s: SchemaMotif[F, T],
     f: [A] => F[A] => (Type[A], Expr[F[A]]),
@@ -386,6 +399,12 @@ object ModelToScalaAst {
         quotedSchemaMotifPrimitive(p) match
           case (t, p) =>
             M.pure(Indeed(Rel.refl[T], (t, N.pure(p))))
+      case c: SchemaMotif.Constant[F, t] =>
+        summon[T =:= Const[t]]
+        quotedSchemaMotifConstant(c) match
+          case (t, c) =>
+            given Type[t] = t
+            M.pure(Indeed(Rel.refl[T], (Type.of[Const[t]], N.pure(c))))
       case a: SchemaMotif.Array[s, a] =>
         f(a.elem) map:
           case e @ Indeed((rel, (tb, sb))) =>

@@ -2,7 +2,7 @@ package jing.openapi.model
 
 import io.circe.{Json, JsonObject}
 import jing.openapi.model.{||, ::, :?, Arr, Enum, Obj, Oops, ScalaUnionOf, ScalaValueOf, Schema, SchemaMotif, Value, ValueMotif}
-import jing.openapi.model.SchemaMotif.{Array, Enumeration, I32, I64, S, B, Object, OneOf}
+import jing.openapi.model.SchemaMotif.{Array, Constant, Enumeration, I32, I64, S, B, Object, OneOf}
 import libretto.lambda.Items1
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.SingletonType
@@ -74,6 +74,13 @@ object ValueCodecJson {
           case I64() => writeJsonNumber(Value.longValue(value), builder)
           case S()   => writeJsonString(Value.stringValue(value), builder)
           case B()   => writeJsonBoolean(Value.booleanValue(value), builder)
+          case _: Constant[Schema, t] =>
+            summon[T =:= Const[t]]
+            (value: Value[Const[t]]).scalaValue match
+              case ScalaValueOf.I32(i) => writeJsonNumber(i.value, builder)
+              case ScalaValueOf.I64(i) => writeJsonNumber(i.value, builder)
+              case ScalaValueOf.S(s) => writeJsonString(s.value, builder)
+              case ScalaValueOf.B(b) => writeJsonBoolean(b.value, builder)
           case e: Enumeration[Schema, base, cases] =>
             summon[T =:= Enum[base, cases]]
             encode(Schema.Proper(e.baseType), Value.widenEnum(value: Value[Enum[base, cases]]), builder)
@@ -208,6 +215,11 @@ object ValueCodecJson {
               case Some(b) => Succeeded(Value.Lenient.bool(b))
               case None => SchemaViolation(s"Expected JSON boolean, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
+          case c: Constant.Primitive[Schema, t] =>
+            summon[T =:= Const[t]]
+            decodeConstantLenient(c.value, jsonLoc, json)
+            Succeeded(Value.Lenient.const(c.value))
+
           case Enumeration(base, cases) =>
             decodeLenientAt(Schema.Proper(base), jsonLoc, json)
               .flatMapParseSuccess {
@@ -257,6 +269,47 @@ object ValueCodecJson {
       case Schema.Unsupported(message) =>
         Succeeded(Value.Lenient.oops(message, details = Some(json.printWith(io.circe.Printer.spaces4))))
     }
+
+  private def decodeConstantLenient[F[_], T](
+    schema: T ScalaValueOf ?,
+    jsonLoc: Stack[String],
+    json: Json,
+  ): DecodeResult.ParseSuccess[Value.Lenient[Const[T]]] =
+    schema match
+      case ScalaValueOf.S(value) =>
+        json.asString match
+          case Some(value.value) => Succeeded(Value.Lenient.const(schema))
+          case Some(other) => SchemaViolation(s"Expected constant string \"${value.value}\", got \"$other\". At ${jsonLoc.printLoc}")
+          case None => SchemaViolation(s"Expected constant string \"${value.value}\", got JSON ${json.name} ${json.noSpaces}. At ${jsonLoc.printLoc}")
+      case ScalaValueOf.I32(value) =>
+        json.asNumber match
+          case Some(jsonNumber) =>
+            jsonNumber.toInt match
+              case Some(value.value) => Succeeded(Value.Lenient.const(schema))
+              case Some(other) => SchemaViolation(s"Expected constant integer ${value.value}, got $other. At ${jsonLoc.printLoc}")
+              case None => SchemaViolation(s"Expected constant integer ${value.value}, got JSON number ${json.noSpaces}. At ${jsonLoc.printLoc}")
+          case None =>
+            SchemaViolation(s"Expected constant integer ${value.value}, got JSON ${json.name} ${json.noSpaces}. At ${jsonLoc.printLoc}")
+      case ScalaValueOf.I64(value) =>
+        def fromOptionalLong(v: Option[Long]): DecodeResult.ParseSuccess[Value.Lenient[Const[T]]] =
+          v match
+            case Some(value.value) => Succeeded(Value.Lenient.const(schema))
+            case Some(other) => SchemaViolation(s"Expected constant 64-bit integer ${value.value}, got $other. At ${jsonLoc.printLoc}")
+            case None => SchemaViolation(s"Expected constant 64-bit integer ${value.value}, got JSON number ${json.noSpaces}. At ${jsonLoc.printLoc}")
+        json.asNumber match
+          case Some(jsonNumber) =>
+            fromOptionalLong(jsonNumber.toLong)
+          case None =>
+            json.asString match
+              case Some(s) =>
+                fromOptionalLong(s.toLongOption)
+              case _ =>
+                SchemaViolation(s"Expected constant 64-bit integer ${value.value}, got JSON ${json.name} ${json.noSpaces}. At ${jsonLoc.printLoc}")
+      case ScalaValueOf.B(value) =>
+        json.asBoolean match
+          case Some(value.value) => Succeeded(Value.Lenient.const(schema))
+          case Some(other) => SchemaViolation(s"Expected constant boolean ${value.value}, got $other. At ${jsonLoc.printLoc}")
+          case None => SchemaViolation(s"Expected constant boolean ${value.value}, got JSON number ${json.noSpaces}. At ${jsonLoc.printLoc}")
 
   private def decodeEnumValueLenient[F[_], Base, Cases](
     cases: Items1.Product[||, Void, ScalaValueOf[_, Base], Cases],

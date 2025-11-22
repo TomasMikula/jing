@@ -70,6 +70,18 @@ private[openapi] object ProtoSchema {
   def boolEnum(value: Boolean, values: Boolean*): ProtoSchema =
     Proper(SchemaMotif.Enumeration.bool(value, values*))
 
+  def strConst(value: String): ProtoSchema =
+    Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.str(value)))
+
+  def int32Const(value: Int): ProtoSchema =
+    Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.i32(value)))
+
+  def int64Const(value: Long): ProtoSchema =
+    Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.i64(value)))
+
+  def boolConst(value: Boolean): ProtoSchema =
+    Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.bool(value)))
+
   def arr(elemSchema: ProtoSchema): ProtoSchema =
     Proper(motif.Array(elemSchema))
 

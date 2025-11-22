@@ -2,7 +2,6 @@ package jing.openapi.model
 
 import libretto.lambda.Items1
 import libretto.lambda.util.{Applicative, Exists, SingletonType}
-import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.Items1Named
 
 /** Schema structure parametric in the type of nested schemas.
@@ -16,6 +15,7 @@ sealed trait SchemaMotif[F[_], A] {
   def translate[G[_]](h: [X] => F[X] => G[X]): SchemaMotif[G, A] =
     this match
       case p: Primitive[G, A] => p.recast[G]
+      case Constant.Primitive(v) => Constant.Primitive(v)
       case Array(elem) => Array(h(elem))
       case Object(value) => Object:
         value.translate[G, G](
@@ -28,6 +28,7 @@ sealed trait SchemaMotif[F[_], A] {
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
       case p: Primitive[F, A] => p.recast[G]
+      case Constant.Primitive(v) => Constant.Primitive(v)
       case Array(elem) => Array(h(elem).value)
       case Object(value) => Object:
         value.wipeTranslate[G, G](
@@ -40,6 +41,7 @@ sealed trait SchemaMotif[F[_], A] {
   def wipeTranslateA[M[_], G[_]](h: [X] => F[X] => M[Exists[G]])(using M: Applicative[M]): M[SchemaMotif[G, ?]] =
     this match
       case p: Primitive[F, A] => M.pure(p.recast[G])
+      case Constant.Primitive(v) => M.pure(Constant.Primitive(v))
       case Array(elem) => h(elem).map(el => Array(el.value))
       case Object(value) =>
         value.wipeTranslateA[M, G, G](
@@ -140,6 +142,12 @@ object SchemaMotif {
 
       SchemaMotif.Enumeration(s, values1)
     }
+  }
+
+  sealed trait Constant[F[_], T] extends SchemaMotif[F, Const[T]]
+
+  object Constant {
+    case class Primitive[F[_], T](value: T ScalaValueOf ?) extends Constant[F, T]
   }
 
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]

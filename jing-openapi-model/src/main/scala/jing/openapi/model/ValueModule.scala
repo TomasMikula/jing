@@ -19,6 +19,7 @@ trait ValueModule[Value[_]] {
   def toMotifInt32(v: Value[Int32]): ValueMotif[Value, Int32]
   def toMotifInt64(v: Value[Int64]): ValueMotif[Value, Int64]
   def toMotifBool(v: Value[Bool]): ValueMotif[Value, Bool]
+  def toMotifConst[T](v: Value[Const[T]]): ValueMotif[Value, Const[T]]
   def toMotifEnum[Base, Cases](v: Value[Enum[Base, Cases]]): ValueMotif[Value, Enum[Base, Cases]]
   def toMotifArr[T](v: Value[Arr[T]]): ValueMotif[Value, Arr[T]]
   def toMotifObj[Ps](v: Value[Obj[Ps]]): ValueMotif[Value, Obj[Ps]]
@@ -61,6 +62,16 @@ trait ValueModule[Value[_]] {
 
   given Conversion[String, Value[Str]] =
     str(_)
+
+  def constI32(i: Int): Value[Const[i.type]] = fromMotif(ValueMotif.constInt32(i))
+
+  def constI64(i: Long): Value[Const[i.type]] = fromMotif(ValueMotif.constInt64(i))
+
+  def constStr(s: String): Value[Const[s.type]] = fromMotif(ValueMotif.constStr(s))
+
+  def constBool(b: Boolean): Value[Const[b.type]] = fromMotif(ValueMotif.constBool(b))
+
+  def const[T](v: T ScalaValueOf ?): Value[Const[T]] = fromMotif(ValueMotif.Constant(v))
 
   def mkEnum[Base, Cases, T <: ScalaUnionOf[Cases]](value: ScalaValueOf[T, Base]): Value[Enum[Base, Cases]] =
     fromMotif(ValueMotif.EnumValue[Base, Cases, T](value))
@@ -246,6 +257,10 @@ trait ValueModule[Value[_]] {
   extension (value: Value[Bool])
     def booleanValue: Boolean =
       toMotifBool(value).booleanValue
+
+  extension [T](value: Value[Const[T]])
+    def scalaValue: ScalaValueOf[T, ?] =
+      toMotifConst(value).scalaValue
 
   extension [Base, Cases](value: Value[Enum[Base, Cases]]) {
     def widenEnum: Value[Base] =

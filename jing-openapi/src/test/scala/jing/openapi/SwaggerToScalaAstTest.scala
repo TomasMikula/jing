@@ -163,6 +163,69 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
     api.schemas.Foo.from : (Value[Enum[Bool, Void || true || false || true || false]] => Value[api.schemas.Foo])
   }
 
+  test("const of primitives") {
+    inline val openapiYaml =
+      """
+      openapi: 3.1.0
+      info:
+        title: const of primitives
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: boolean
+            const: true
+          Bar:
+            type: integer
+            format: int32
+            const: 123
+          Baz:
+            type: integer
+            format: int64
+            const: 456
+          Qux:
+            type: string
+            const: "qux"
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time checks that schemas have the expected definitions
+    api.schemas.Foo.from : (Value[Const[true]] => Value[api.schemas.Foo])
+    api.schemas.Bar.from : (Value[Const[123]] => Value[api.schemas.Bar])
+    api.schemas.Baz.from : (Value[Const[456L]] => Value[api.schemas.Baz])
+    api.schemas.Qux.from : (Value[Const["qux"]] => Value[api.schemas.Qux])
+  }
+
+  test("combination of const and enum") {
+    inline val openapiYaml =
+      """
+      openapi: 3.1.0
+      info:
+        title: combination of const and enum
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Foo:
+            type: integer
+            format: int32
+            const: 2
+            enum: [1, 2, 3]
+          Bar:
+            type: string
+            enum: ["foo", "baz"]
+            const: "bar"
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    // compile-time checks that schemas have the expected definitions
+    api.schemas.Foo.from : (Value[Const[2]] => Value[api.schemas.Foo])
+    api.schemas.Bar.from : (Value[Oops["Constant 'bar' is not one of the enum cases: foo,baz"]] => Value[api.schemas.Bar])
+  }
+
   test("object with empty or missing property list") {
     inline val openapiYaml =
       """
