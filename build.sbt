@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "3.7.3"
+ThisBuild / scalaVersion := "3.7.4"
 
 ThisBuild / organization := "dev.continuously.jing"
 
@@ -59,7 +59,7 @@ val scalacOptionsCommon =
 // ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
 val LibrettoVersion = "0.3.7"
-val Http4sVersion = "0.23.32"
+val Http4sVersion = "0.23.33"
 val ScalatestVersion = "3.2.19"
 
 lazy val macroUtil = project
@@ -83,7 +83,7 @@ lazy val jingOpenApiModel = project
     scalacOptions ++= scalacOptionsCommon,
     libraryDependencies ++= Seq(
       "dev.continuously.libretto" %% "libretto-lambda" % LibrettoVersion,
-      "io.circe" %% "circe-parser" % "0.14.12",
+      "io.circe" %% "circe-parser" % "0.14.14",
     ),
   )
 
@@ -96,7 +96,7 @@ lazy val jingOpenApi = project
   .settings(
     name := "jing-openapi",
     libraryDependencies ++= Seq(
-      "io.swagger.parser.v3" % "swagger-parser" % "2.1.26",
+      "io.swagger.parser.v3" % "swagger-parser" % "2.1.35",
       "org.scalatest" %% "scalatest" % ScalatestVersion % "test",
     ),
     scalacOptions ++=
