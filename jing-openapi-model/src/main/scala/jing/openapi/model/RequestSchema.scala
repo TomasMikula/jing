@@ -1,6 +1,7 @@
 package jing.openapi.model
 
 import libretto.lambda.util.SingletonType
+import scala.NamedTuple.NamedTuple
 
 /** Schema of request data, i.e. request parameters and request body.
  *
@@ -102,12 +103,15 @@ object RequestSchema {
   }
 
   sealed trait Path[Ps] {
-    def instantiate(args: Value[Obj[Ps]]): String
+    def print(args: Value[Obj[Ps]]): String
+
+    def instantiate: Path.PendingParams[Ps, PropNamesTuple[Ps], PropTypesTupleU[Value, Ps]] =
+      new Path.PendingParams(this)
   }
 
   object Path {
     case class Constant(value: String) extends Path[Void] {
-      override def instantiate(args: Value[Obj[Void]]): String = value
+      override def print(args: Value[Obj[Void]]): String = value
     }
 
     sealed trait Parameterized[Ps] extends Path[Ps]
@@ -118,10 +122,20 @@ object RequestSchema {
       pSchema: ParamSchema[ParamType],
       suffix: String,
     ) extends Parameterized[Init || ParamName :: ParamType] {
-      override def instantiate(args: Value[Obj[Init || ParamName :: ParamType]]): String =
+      override def print(args: Value[Obj[Init || ParamName :: ParamType]]): String =
         import Value.*
         val (initArgs, lastArg) = args.unsnoc
-        prefix.instantiate(initArgs) + pSchema.printArg(lastArg) + suffix
+        prefix.print(initArgs) + pSchema.printArg(lastArg) + suffix
+    }
+
+    class PendingParams[Ps, PNames <: PropNamesTuple[Ps], PTypes <: PropTypesTupleU[Value, Ps]](
+      path: Path[Ps],
+    ) {
+      def fromValue(params: Value[Obj[Ps]]): String =
+        path.print(params)
+
+      def apply(t: NamedTuple[PNames, PTypes])(using PropertyList[Ps]): String =
+        fromValue(Value.Obj(_(t.toTuple)))
     }
 
     sealed trait ParamSchema[T] {

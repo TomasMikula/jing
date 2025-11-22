@@ -496,7 +496,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
 
         inside(params):
           case RequestSchema.Params.ParameterizedPath(pathTemplate) =>
-            val path = pathTemplate.instantiate(Value.Obj(_((major = 2, minor = 6))))
+            val path = pathTemplate.instantiate((major = 2, minor = 6))
             assert(path == "/a/v2.6/c")
   }
 
