@@ -75,7 +75,7 @@ class JsonSerializationTest extends AnyFunSuite with Inside {
   test("serialization of discriminated oneOf") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: oneOf with discriminator
         version: 1.0.0
@@ -94,7 +94,7 @@ class JsonSerializationTest extends AnyFunSuite with Inside {
             properties:
               species:
                 type: string
-                enum: ["Cat"]
+                const: "Cat"
               name:
                 type: string
             required:

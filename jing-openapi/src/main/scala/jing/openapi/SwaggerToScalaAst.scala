@@ -997,7 +997,15 @@ private[openapi] object SwaggerToScalaAst {
       discriminator = schema.getDiscriminator(),
       const = schema.getConst(),
       `enum` = schema.getEnum(),
-      `type` = schema.getType(),
+      `type` = {
+        schema.getType() match
+          case null =>
+            schema.getTypes() match
+              case null => null
+              case types => if (types.isEmpty) null else types.iterator.next
+          case t =>
+            t
+      },
       nullable = schema.getNullable(),
       format = schema.getFormat(),
       items = schema.getItems(),

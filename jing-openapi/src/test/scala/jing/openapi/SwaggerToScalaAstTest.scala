@@ -229,7 +229,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("object with empty or missing property list") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: object with empty property list
         version: 1.0.0
@@ -291,25 +291,25 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
       case Schema.Proper(value) =>
         fail("expected unsupported null in string enum")
       case Schema.Unsupported(message) =>
-        assert(message.value == "Enum case null not supported")
+        assert(message.value == "null not supported as an enum case of strings. Got: Foo,Bar,null")
 
     api.schemas.OneTwo.schema match
       case Schema.Proper(value) =>
         fail("expected unsupported null in int32 enum")
       case Schema.Unsupported(message) =>
-        assert(message.value == "Enum case null not supported")
+        assert(message.value == "null not supported as an enum case of 32-bit integers. Got: 1,2,null")
 
     api.schemas.OneTwo64.schema match
       case Schema.Proper(value) =>
         fail("expected unsupported null in int64 enum")
       case Schema.Unsupported(message) =>
-        assert(message.value == "Enum case null not supported")
+        assert(message.value == "null not supported as an enum case of 64-bit integers. Got: 1,2,null")
   }
 
   test("parameter $ref") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: Parameter references
         version: 2.0.0
@@ -341,7 +341,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("recursive schemas report a cycle") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: Mutually recursive schemas
         version: 1.0
@@ -394,7 +394,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("oneOf with discriminator") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: oneOf with discriminator
         version: 1.0.0
@@ -424,7 +424,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
             properties:
               species:
                 type: string
-                enum: ["Dog"]
+                const: "Dog"
               name:
                 type: string
             required:

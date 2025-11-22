@@ -276,8 +276,10 @@ private[openapi] object ProtoSchema {
         schema match
           case enm @ motif.Enumeration(_, _) =>
             asConstantString(enm)
+          case motif.Constant.Primitive(ScalaValueOf.S(s)) =>
+            Right(s.value)
           case motif.S() =>
-            Left(s"unrestricted string")
+            Left(s"unconstrained string")
           case other =>
             Left(shortTypeName(other))
       case Schema.Labeled.Unsupported(message) =>
@@ -308,4 +310,5 @@ private[openapi] object ProtoSchema {
       case motif.Array(_) => "array"
       case motif.OneOf(_, _) => "oneOf"
       case motif.Object(_) => "object"
+      case motif.Constant.Primitive(value) => s"const ${value.show}"
 }
