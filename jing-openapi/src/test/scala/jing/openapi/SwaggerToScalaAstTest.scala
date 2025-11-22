@@ -11,7 +11,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("empty spec") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: Empty API
         version: 2.0.0
@@ -27,7 +27,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("int64 enum with int32 literals") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: int64 enum with int32 literals
         version: 1.0.0
@@ -49,7 +49,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("int32 enum with int64 literals fails gracefully") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: int32 enum with int64 literals fails gracefully
         version: 1.0.0
@@ -71,7 +71,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("int64 enum with string literals fails gracefully") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: int64 enum with string literals fails gracefully
         version: 1.0.0
@@ -88,13 +88,13 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
 
     // compile-time check that Foo has the expected definition
     // Note: The "null" in the error message is not ideal, but that's what the Swagger parser gives us instead of "abcd".
-    api.schemas.Foo.from : (Value[Oops["null not supported as an enum case of 64-bit integers. Got: 9223372036854775807,null,-9223372036854775808"]] => Value[api.schemas.Foo])
+    api.schemas.Foo.from : (Value[Oops["abcd of type String not supported as an enum case of 64-bit integers. Got: 9223372036854775807,abcd,-9223372036854775808"]] => Value[api.schemas.Foo])
   }
 
   test("string enum with integer and boolean literals") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: string enum with integer and boolean literals
         version: 1.0.0
@@ -115,7 +115,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("boolean enums") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: boolean enums
         version: 1.0.0
@@ -144,7 +144,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("boolean enum with non-boolean literals fails gracefully") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: boolean enum with non-boolean literals fails gracefully
         version: 1.0.0
@@ -159,8 +159,8 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
     val api = jing.openapi.inlineYaml(openapiYaml)
 
     // compile-time check that Foo has the expected definition
-    // Note: The Swagger parser is just plain stupid: gives us false in place of "abcd" and 123
-    api.schemas.Foo.from : (Value[Enum[Bool, Void || true || false || true || false]] => Value[api.schemas.Foo])
+    // Note: The Swagger parser is just plain stupid: gives us false in place of "abcd"
+    api.schemas.Foo.from : (Value[Oops["123 of type Integer not supported as an enum case of booleans. Got: true,false,true,123"]] => Value[api.schemas.Foo])
   }
 
   test("const of primitives") {
@@ -253,7 +253,7 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
   test("nullable enums") {
     inline val openapiYaml =
       """
-      openapi: 3.0.0
+      openapi: 3.1.0
       info:
         title: Nullable enums
         version: 2.0.0
@@ -291,19 +291,19 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
       case Schema.Proper(value) =>
         fail("expected unsupported null in string enum")
       case Schema.Unsupported(message) =>
-        assert(message.value == "null not supported as an enum case of strings. Got: Foo,Bar,null")
+        assert(message.value == "Enum case null not supported")
 
     api.schemas.OneTwo.schema match
       case Schema.Proper(value) =>
         fail("expected unsupported null in int32 enum")
       case Schema.Unsupported(message) =>
-        assert(message.value == "null not supported as an enum case of 32-bit integers. Got: 1,2,null")
+        assert(message.value == "Enum case null not supported")
 
     api.schemas.OneTwo64.schema match
       case Schema.Proper(value) =>
         fail("expected unsupported null in int64 enum")
       case Schema.Unsupported(message) =>
-        assert(message.value == "null not supported as an enum case of 64-bit integers. Got: 1,2,null")
+        assert(message.value == "Enum case null not supported")
   }
 
   test("parameter $ref") {
