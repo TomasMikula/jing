@@ -458,4 +458,46 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
 
   }
 
+
+  test("path with a param strictly inside a segment") {
+    inline val openapiYaml =
+      """
+      openapi: 3.1.0
+      info:
+        title: sub-segment path parameter
+        version: 2.0.0
+      paths:
+        /a/v{major}.{minor}/c:
+          get:
+            parameters:
+              - name: major
+                in: path
+                required: true
+                schema:
+                  type: integer
+                  format: int32
+              - name: minor
+                in: path
+                required: true
+                schema:
+                  type: integer
+                  format: int32
+            responses:
+              "204":
+                description: No Content
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    api.paths.`/a/v{major}.{minor}/c`.Get.requestSchema match
+      case RequestSchema.Parameterized(params) =>
+        // check that `params` has the expected type
+        params : RequestSchema.Params.Proper[Void || "major" :: Int32 || "minor" :: Int32]
+
+        inside(params):
+          case RequestSchema.Params.ParameterizedPath(pathTemplate) =>
+            val path = pathTemplate.instantiate(Value.Obj(_((major = 2, minor = 6))))
+            assert(path == "/a/v2.6/c")
+  }
+
 }

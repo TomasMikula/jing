@@ -101,10 +101,14 @@ object RequestSchema {
     }
   }
 
-  sealed trait Path[Ps]
+  sealed trait Path[Ps] {
+    def instantiate(args: Value[Obj[Ps]]): String
+  }
 
   object Path {
-    case class Constant(value: String) extends Path[Void]
+    case class Constant(value: String) extends Path[Void] {
+      override def instantiate(args: Value[Obj[Void]]): String = value
+    }
 
     sealed trait Parameterized[Ps] extends Path[Ps]
 
@@ -113,16 +117,45 @@ object RequestSchema {
       pName: SingletonType[ParamName],
       pSchema: ParamSchema[ParamType],
       suffix: String,
-    ) extends Parameterized[Init || ParamName :: ParamType]
+    ) extends Parameterized[Init || ParamName :: ParamType] {
+      override def instantiate(args: Value[Obj[Init || ParamName :: ParamType]]): String =
+        import Value.*
+        val (initArgs, lastArg) = args.unsnoc
+        prefix.instantiate(initArgs) + pSchema.printArg(lastArg) + suffix
+    }
 
-    sealed trait ParamSchema[T]
+    sealed trait ParamSchema[T] {
+      def printArg(arg: Value[T]): String
+    }
 
     object ParamSchema {
-      case class Primitive[T](value: SchemaMotif.Primitive[Nothing, T], format: Format) extends ParamSchema[T]
-      case class Unsupported[S <: String](msg: SingletonType[S]) extends ParamSchema[Oops[S]]
+      case class Primitive[T](
+        value: SchemaMotif.Primitive[Nothing, T],
+        format: Format,
+      ) extends ParamSchema[T] {
+        override def printArg(arg: Value[T]): String =
+          printPrimitive(value, arg)
+      }
+
+      case class Unsupported[S <: String](msg: SingletonType[S]) extends ParamSchema[Oops[S]] {
+        override def printArg(arg: Value[Oops[S]]): String =
+          arg.isNotOops
+      }
 
       def unsupported(msg: String): ParamSchema[Oops[msg.type]] =
         Unsupported(SingletonType(msg))
+
+      private def printPrimitive[T](
+        schema: SchemaMotif.Primitive[Nothing, T],
+        arg: Value[T],
+      ): String =
+        schema match
+          case SchemaMotif.I32() => (arg: Value[Int32]).intValue.toString
+          case SchemaMotif.I64() => (arg: Value[Int64]).longValue.toString
+          case SchemaMotif.S() => (arg: Value[Str]).stringValue
+          case SchemaMotif.B() => (arg: Value[Bool]).booleanValue.toString
+          case e: SchemaMotif.Enumeration[Nothing, t, cases] =>
+            printPrimitive[t](e.baseType, (arg: Value[Enum[t, cases]]).widenEnum)
 
       case class Format(style: Style, explode: Explode)
       object Format {
