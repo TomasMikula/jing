@@ -1091,10 +1091,10 @@ private[openapi] object SwaggerToScalaAst {
       case (null, _) => ProtoSchema.Unsupported("discriminator without oneOf or anyOf is not allowed")
       case (_, null) => ProtoSchema.Unsupported("oneOf requires discriminator (for now)")
       case (schemas, d) =>
-        (d.getPropertyName(), d.getMapping) match
-          case (null, _) =>
+        d.getPropertyName() match
+          case null =>
             ProtoSchema.Unsupported("Discriminator must have propertyName defined")
-          case (propertyName, null) =>
+          case propertyName =>
             val problems =
               List(
                 when(`type` != null && `type` != "object")(s"combination of oneOf and type ${`type`} not supported"),
@@ -1106,10 +1106,25 @@ private[openapi] object SwaggerToScalaAst {
                 when(required != null)("combination of oneOf and required not supported"),
               )
             problems.collectFirst { case Some(e) => e } match
-              case Some(e) => ProtoSchema.Unsupported(e)
-              case None => ProtoSchema.OneOf(propertyName, schemas.asScala.map(protoSchema(_)).toList)
-          case (_, _) =>
-            ProtoSchema.Unsupported("Discriminator mapping not yet supported by JING")
+              case Some(e) =>
+                ProtoSchema.Unsupported(e)
+              case None =>
+                val cases = schemas.asScala.map(protoSchema(_)).toList
+                val mappingOpt: Option[Map[String, String]] =
+                  Option(d.getMapping()).map(_.asScala.toMap)
+                mappingOpt match
+                  case None =>
+                    ProtoSchema.OneOf(propertyName, cases, declaredMapping = None)
+                  case Some(mapping) =>
+                    val mappingToLocalSchemas: Map[String, String] =
+                      mapping.collect:
+                        case (value, LocalSchema(schemaName)) => (value, schemaName)
+                    if (mappingToLocalSchemas.size < mapping.size)
+                      val nonLocalRefs = mapping -- mappingToLocalSchemas.keys
+                      val (_, ref) = nonLocalRefs.head
+                      ProtoSchema.Unsupported(s"'$ref' does not match the pattern ${LocalSchema.regex}")
+                    else
+                      ProtoSchema.OneOf(propertyName, cases, declaredMapping = Some(mappingToLocalSchemas))
 
   private def protoSchema(
     const: Object | Null,

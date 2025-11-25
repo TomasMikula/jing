@@ -58,7 +58,7 @@ val scalacOptionsCommon =
 
 // ThisBuild / resolvers += Resolver.sonatypeCentralSnapshots
 
-val LibrettoVersion = "0.3.7"
+val LibrettoVersion = "0.3.8"
 val Http4sVersion = "0.23.33"
 val ScalatestVersion = "3.2.19"
 

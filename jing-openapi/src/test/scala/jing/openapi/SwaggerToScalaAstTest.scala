@@ -455,9 +455,128 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
               case Some(found) =>
                 val dogSchema = found.value._2
                 assert(dogSchema == Dog.schema)
-
   }
 
+  test("oneOf with discriminator mapping") {
+    inline val openapiYaml =
+      """
+      openapi: 3.1.0
+      info:
+        title: oneOf with discriminator
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Animal:
+            title: Animal
+            oneOf:
+              - $ref: "#/components/schemas/Cat"
+              - $ref: "#/components/schemas/Dog"
+            discriminator:
+              propertyName: species
+              mapping:
+                cat: "#/components/schemas/Cat"
+                dog: "#/components/schemas/Dog"
+          Cat:
+            type: object
+            properties:
+              species:
+                type: string
+                enum: [cat]
+              name:
+                type: string
+            required:
+              - species
+              - name
+          Dog:
+            type: object
+            properties:
+              species:
+                type: string
+                const: dog
+              name:
+                type: string
+            required:
+              - species
+              - name
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    import api.schemas.{Animal, Cat, Dog}
+
+    // check that Animal constructor and deconstructor have the expected types
+    Animal.from        : (Value[DiscriminatedUnion["cat" :: Cat || "dog" :: Dog]] => Value[Animal])
+    Animal.deconstruct : (Value[Animal] => Value[DiscriminatedUnion["cat" :: Cat || "dog" :: Dog]])
+
+    inside(Animal.schema):
+      case Schema.Proper(value) =>
+        inside(value):
+          case SchemaMotif.OneOf(discriminatorProperty, schemas) =>
+            assert(discriminatorProperty == "species")
+
+            inside(schemas.getOption("cat")):
+              case Some(found) =>
+                val catSchema = found.value._2
+                assert(catSchema == Cat.schema)
+
+            inside(schemas.getOption("dog")):
+              case Some(found) =>
+                val dogSchema = found.value._2
+                assert(dogSchema == Dog.schema)
+  }
+
+  test("oneOf with discriminator mapping not matching reality fails gracefully") {
+    inline val openapiYaml =
+      """
+      openapi: 3.1.0
+      info:
+        title: oneOf with discriminator
+        version: 1.0.0
+      paths: {}
+      components:
+        schemas:
+          Animal:
+            title: Animal
+            oneOf:
+              - $ref: "#/components/schemas/Cat"
+              - $ref: "#/components/schemas/Dog"
+            discriminator:
+              propertyName: species
+              mapping:
+                kitten: "#/components/schemas/Cat"
+                puppy: "#/components/schemas/Dog"
+          Cat:
+            type: object
+            properties:
+              species:
+                type: string
+                enum: [cat]
+              name:
+                type: string
+            required:
+              - species
+              - name
+          Dog:
+            type: object
+            properties:
+              species:
+                type: string
+                const: dog
+              name:
+                type: string
+            required:
+              - species
+              - name
+      """
+
+    val api = jing.openapi.inlineYaml(openapiYaml)
+
+    import api.schemas.{Animal, Cat, Dog}
+
+    // check that Animal constructor and deconstructor have the expected types
+    Animal.from : (Value[Oops["Mapping of \"species\": \"kitten\" refers to schema Cat, which, however, defines \"species\": \"cat\". Mapping of \"species\": \"puppy\" refers to schema Dog, which, however, defines \"species\": \"dog\". Mapping is missing entry for \"species\": \"cat\", defined by oneOf case 1 (Cat). Mapping is missing entry for \"species\": \"dog\", defined by oneOf case 2 (Dog)."]] => Value[Animal])
+  }
 
   test("path with a param strictly inside a segment") {
     inline val openapiYaml =

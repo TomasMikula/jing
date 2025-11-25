@@ -4,13 +4,20 @@ import jing.openapi.model.{||, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
 import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Applicative, Exists, SingletonType, Validated}
+import libretto.lambda.util.Applicative.traverseList
 import libretto.lambda.util.Exists.Indeed
+import libretto.lambda.util.NonEmptyList
+import libretto.lambda.util.Validated.{Invalid, Valid, invalid, valid}
 import scala.annotation.tailrec
 
 /** Schema with unresolved references to other schemas. */
 private[openapi] enum ProtoSchema {
   case Proper(value: SchemaMotif[[A] =>> ProtoSchema, ?])
-  case OneOf(discriminatorProperty: String, schemas: List[ProtoSchema])
+  case OneOf(
+    discriminatorProperty: String,
+    schemas: List[ProtoSchema],
+    declaredMapping: Option[Map[String, String]],
+  )
   case Ref(schemaName: String)
   case Unsupported(details: String)
 
@@ -32,10 +39,10 @@ private[openapi] enum ProtoSchema {
         value
           .wipeTranslateA[F, Schema.Labeled[String, _]]([X] => ps => ps.resolveA[F].map(Exists(_)))
           .map(Schema.Labeled.Unlabeled(_))
-      case OneOf(discriminatorProperty, protoSchemas) =>
+      case OneOf(discriminatorProperty, protoSchemas, declaredMapping) =>
         Applicative
           .traverseList(protoSchemas)(_.resolveA[F])
-          .map(resolveOneOf(discriminatorProperty, _))
+          .map(resolveOneOf(discriminatorProperty, _, declaredMapping))
       case Ref(schemaName) =>
         r.resolve(schemaName) map:
           case Right(schema) =>
@@ -182,46 +189,75 @@ private[openapi] object ProtoSchema {
   private def resolveOneOf(
     discriminatorProperty: String,
     cases: List[Schema.Labeled[String, ?]],
+    declaredMapping: Option[Map[String, String]], // TODO: check against reality
   ): Schema.Labeled[String, ?] = {
-    val schemasWithDiscriminatorValues: List[Either[String, (String, Schema.Labeled[String, ?])]] =
-      cases.map(s => extractDiscriminatorValue(discriminatorProperty, s).map(_.value._3 -> s))
-    val discriminatorValues: List[(String, Int)] =
-      schemasWithDiscriminatorValues.zipWithIndex.collect { case (Right((value, _)), i) => (value, i) }
-    val discrValueOccurences: Map[String, List[Int]] =
-      discriminatorValues.groupMap(_._1)(_._2)
-    discrValueOccurences.collectFirst { case x @ (_, _ :: _ :: _) => x } match
-      case Some((value, occurrences)) =>
-        Schema.Labeled.unsupported(s"Ambiguous oneOf schema: \"$discriminatorProperty\" = \"$value\" occurs in cases ${occurrences.mkString(", ")} (0-based).")
-      case None =>
-        assert(discrValueOccurences.size == discriminatorValues.size)
-        val discrValues = discrValueOccurences.keySet
-        val discriminatedSchemas: List[(String, Schema.Labeled[String, ?])] =
-          schemasWithDiscriminatorValues
-            .zipWithIndex
-            .foldRight((List.empty[(String, Schema.Labeled[String, ?])], discrValues)) {
-              case ((Right(kv), _), (acc, discrValues)) => (kv :: acc, discrValues)
-              case ((Left(msg), i), (acc, discrValues)) =>
-                // Redeem failure to determine discriminator value - turn it into a oneOf case of type Oops.
-                // Note: Can afford that only because SchemaMotif.OneOf does not (yet) require Obj-typed schemas only.
-                val k =
-                  LazyList
-                    .iterate(s"oops_$i")("o" + _)
-                    .find(k => !discrValues.contains(k))
-                    .get
-                ((k -> Schema.Labeled.unsupported(msg)) :: acc, discrValues + k)
-            }
-            ._1
-        discriminatedSchemas match
-          case nel @ scala.::(_, _) =>
-            Schema.Labeled.Unlabeled(
-              SchemaMotif.OneOf(
-                discriminatorProperty,
-                Items1Named.Product.fromList(nel)[Schema.Labeled[String, _]]([R] => (s, f) => f(s))[||, model.::],
-              )
-            )
-          case Nil =>
-            Schema.Labeled.unsupported("oneOf with 0 cases is not supported")
+    val schemasByDiscriminatorValues: Validated[String, List[(String, Schema.Labeled[String, ?], Int)]] =
+      traverseList(cases.zipWithIndex):
+        case (s, i) =>
+          Validated.fromEither:
+            extractDiscriminatorValue(discriminatorProperty, s)
+              .map(r => (r.value._3, s, i))
+              .left.map(err => s"Case ${i+1}: $err")
+    schemasByDiscriminatorValues match
+      case Invalid(errors) =>
+        val msg = errors.toList.map(e => if (e.last == '.') e else s"$e.").mkString(" ")
+        Schema.Labeled.unsupported(msg)
+      case Valid(schemasByDiscriminatorValues) =>
+        val discriminatorOccurrences: Map[String, List[Int]] =
+          schemasByDiscriminatorValues.groupMap(_._1)(_._3)
+        discriminatorOccurrences.collectFirst { case x @ (_, _ :: _ :: _) => x } match
+          case Some((value, occurrences)) =>
+            Schema.Labeled.unsupported(s"Ambiguous oneOf schema: \"$discriminatorProperty\" = \"$value\" occurs in cases ${occurrences.map(_ + 1).mkString(", ")}.")
+          case None =>
+            assert(discriminatorOccurrences.size == schemasByDiscriminatorValues.size)
+            NonEmptyList.fromList(schemasByDiscriminatorValues) match
+              case None =>
+                Schema.Labeled.unsupported("oneOf with 0 cases is not supported")
+              case Some(nel) =>
+                validateDiscriminatorMapping(discriminatorProperty, nel, declaredMapping) match
+                  case Left(err) => Schema.Labeled.unsupported(err)
+                  case Right(()) =>
+                    Schema.Labeled.Unlabeled(
+                      SchemaMotif.OneOf(
+                        discriminatorProperty,
+                        Items1Named.Product.fromList(nel.map { case (k, v, _) => (k, v) }.toList)[Schema.Labeled[String, _]]([R] => (s, f) => f(s))[||, model.::],
+                      )
+                    )
   }
+
+  private def validateDiscriminatorMapping(
+    discriminatorProperty: String,
+    schemasByDiscriminatorValues: NonEmptyList[(String, Schema.Labeled[String, ?], Int)],
+    mapping: Option[Map[String, String]],
+  ): Either[String, Unit] =
+    mapping match {
+      case None =>
+        Right(())
+
+      case Some(mapping) =>
+        val mappingValid: Validated[String, ?] =
+          traverseList(mapping.toList)[Validated[String, _], Unit]:
+            case (discriminatorValue, schemaName) =>
+              schemasByDiscriminatorValues.toList.find(_._2.labelOpt.contains(schemaName)) match
+                case None =>
+                  invalid(s"Mapping of \"$discriminatorProperty\": \"$discriminatorValue\" refers to schema $schemaName, which is not among the oneOf cases.")
+                case Some((targetDiscriminatorValue, _, _)) =>
+                  if (targetDiscriminatorValue != discriminatorValue)
+                    invalid(s"Mapping of \"$discriminatorProperty\": \"$discriminatorValue\" refers to schema $schemaName, which, however, defines \"$discriminatorProperty\": \"$targetDiscriminatorValue\".")
+                  else
+                    valid(())
+        val mappingComplete: Validated[String, ?] =
+          schemasByDiscriminatorValues.traverse:
+            case (discriminatorValue, schema, idx) =>
+              if (mapping.contains(discriminatorValue))
+                valid(())
+              else
+                val schemaNameStr = schema.labelOpt.map(schemaName => s" ($schemaName)").getOrElse("")
+                invalid(s"Mapping is missing entry for \"$discriminatorProperty\": \"$discriminatorValue\", defined by oneOf case ${idx+1}$schemaNameStr.")
+        (mappingValid zip mappingComplete) match
+          case Invalid(errors) => Left(errors.toList.mkString(" "))
+          case Valid(_) => Right(())
+    }
 
   private def extractDiscriminatorValue[A](
     discriminatorProperty: String,
@@ -243,6 +279,8 @@ private[openapi] object ProtoSchema {
 
       case Schema.Labeled.WithLabel(label, schema) =>
         extractDiscriminatorValue(discriminatorProperty, schema)
+          .left
+          .map(err => s"$label: $err")
 
       case Schema.Labeled.Unsupported(message) =>
         Left(message.value)

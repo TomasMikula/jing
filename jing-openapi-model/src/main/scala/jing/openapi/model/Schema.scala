@@ -51,6 +51,13 @@ object Schema {
     case Unlabeled(value: SchemaMotif[Schema.Labeled[L, _], A])
 
     case Unsupported[L, S <: String](message: SingletonType[S]) extends Schema.Labeled[L, Oops[S]]
+
+    def labelOpt: Option[L] =
+      this match
+        case WithLabel(label, schema) => Some(label)
+        case Unlabeled(value) => None
+        case Labeled.Unsupported(message) => None
+
   }
 
   object Labeled {
