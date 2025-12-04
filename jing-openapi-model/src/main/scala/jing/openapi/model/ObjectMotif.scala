@@ -3,9 +3,9 @@ package jing.openapi.model
 import jing.openapi.model.IsPropertyOf.{IsOptionalPropertyOf, IsRequiredPropertyOf}
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.util.TypeEq.Refl
-import libretto.lambda.util.{Applicative, BiInjective, Exists, SingletonType, TypeEq, TypeEqK}
+import libretto.lambda.util.{Applicative, BiInjective, ClampEq, Exists, SingletonType, TypeEq, TypeEqK}
 
-import scala.NamedTuple.{AnyNamedTuple, DropNames, NamedTuple, Names}
+import scala.NamedTuple.NamedTuple
 
 sealed trait ObjectMotif[Req[_], Opt[_], Props] {
   import ObjectMotif.*
@@ -20,6 +20,11 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
       (IsOptionalPropertyOf.Aux[k.type, Props, A], Opt[A]),
     ]
   ]]
+
+  infix def isEqualTo[Qrops](that: ObjectMotif[Req, Opt, Qrops])(using
+    ClampEq[Req],
+    ClampEq[Opt],
+  ): Option[Props =:= Qrops]
 
   def traverse[M[_], G[_], H[_]](
     g: [A] => Req[A] => M[G[A]],
@@ -98,6 +103,14 @@ object ObjectMotif {
       ]
     ]] =
       None
+
+    override def isEqualTo[Qrops](that: ObjectMotif[Req, Opt, Qrops])(using
+      ClampEq[Req],
+      ClampEq[Opt],
+    ): Option[Void =:= Qrops] =
+      that match
+        case Empty() => Some(summon[Void =:= Void])
+        case _ => None
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
@@ -197,6 +210,23 @@ object ObjectMotif {
             case Indeed(Left((i, v))) => Indeed(Left((i.inInit, v)))
             case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
           }
+
+    override def isEqualTo[Qrops](that: ObjectMotif[Req, Opt, Qrops])(using
+      Req: ClampEq[Req],
+      Opt: ClampEq[Opt],
+    ): Option[(Init || PropName :: PropType) =:= Qrops] =
+      that match
+        case that: Snoc[req, opt, init, p, t] =>
+          for
+            ev1 <- this.init isEqualTo that.init
+            ev2 <- SingletonType.testEqualString(this.pname, that.pname)
+            ev3 <- Req.testEqual(this.pval, that.pval)
+          yield
+            ev1.liftCo[[i] =>> i || PropName :: PropType]
+              .andThen(ev2.liftCo[[p] =>> init || p :: PropType])
+              .andThen(ev3.liftCo[[t] =>> init || p :: t])
+        case _ =>
+          None
 
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
@@ -323,6 +353,23 @@ object ObjectMotif {
             case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
           }
 
+    override def isEqualTo[Qrops](that: ObjectMotif[Req, Opt, Qrops])(using
+      Req: ClampEq[Req],
+      Opt: ClampEq[Opt],
+    ): Option[(Init || PropName :? PropType) =:= Qrops] =
+      that match
+        case that: SnocOpt[req, opt, init, p, t] =>
+          for
+            ev1 <- this.init isEqualTo that.init
+            ev2 <- SingletonType.testEqualString(this.pname, that.pname)
+            ev3 <- Opt.testEqual(this.pval, that.pval)
+          yield
+            ev1.liftCo[[i] =>> i || PropName :? PropType]
+              .andThen(ev2.liftCo[[p] =>> init || p :? PropType])
+              .andThen(ev3.liftCo[[t] =>> init || p :? t])
+        case _ =>
+          None
+
     override def traverse[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[G[A]],
       h: [A] => Opt[A] => M[H[A]],
@@ -376,4 +423,9 @@ object ObjectMotif {
       init.toTupleAcc[G, H, H[PropType] *: TAcc](g, h, h(pval) *: acc)
 
   }
+
+  given [Req[_], Opt[_]] => (ClampEq[Req], ClampEq[Opt]) => ClampEq[ObjectMotif[Req, Opt, _]] =
+    new ClampEq[ObjectMotif[Req, Opt, _]]:
+      override def testEqual[A, B](a: ObjectMotif[Req, Opt, A], b: ObjectMotif[Req, Opt, B]): Option[A =:= B] =
+        a isEqualTo b
 }

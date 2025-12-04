@@ -1,8 +1,8 @@
 package jing.openapi.model
 
-import libretto.lambda.Items1
-import libretto.lambda.util.{Applicative, Exists, SingletonType}
-import libretto.lambda.Items1Named
+import libretto.lambda.util.TypeEq.Refl
+import libretto.lambda.util.{Applicative, ClampEq, Exists, SingletonType, TypeEq}
+import libretto.lambda.{Items1, Items1Named}
 
 /** Schema structure parametric in the type of nested schemas.
  *
@@ -56,6 +56,36 @@ sealed trait SchemaMotif[F[_], A] {
 
   def isNotOops[S](using A =:= Oops[S]): Nothing =
     throw AssertionError("Impossible: Schemas for type Oops[S] are not representable by SchemaMotif")
+
+  infix def isEqualTo[B](that: SchemaMotif[F, B])(using F: ClampEq[F]): Option[A =:= B] =
+    (this, that) match
+      case (I32(), I32()) =>
+        Some(summon)
+      case (I64(), I64()) =>
+        Some(summon)
+      case (S(), S()) =>
+        Some(summon)
+      case (B(), B()) =>
+        Some(summon)
+      case (x: Enumeration[f, t, as], y: Enumeration[g, u, bs]) =>
+        (x.baseType isEqualTo y.baseType) flatMap:
+          case TypeEq(Refl()) =>
+            (x.cases isEqualTo y.cases) map:
+              case TypeEq(Refl()) =>
+                summon[Enum[t, as] =:= Enum[u, bs]]
+      case (Constant.Primitive(x), Constant.Primitive(y)) =>
+        (x isEqualTo y).map(_._1.liftCo[Const])
+      case (Array(x), Array(y)) =>
+        F.testEqual(x, y).map(_.liftCo[Arr])
+      case (Object(x), Object(y)) =>
+        (x isEqualTo y).map(_.liftCo[Obj])
+      case (OneOf(p, xs), OneOf(q, ys)) =>
+        Option
+          .when(p == q) { xs isEqualTo ys }
+          .flatten
+          .map(_.liftCo[DiscriminatedUnion])
+      case _ =>
+        None
 }
 
 object SchemaMotif {
@@ -204,4 +234,9 @@ object SchemaMotif {
     discriminatorProperty: String,
     schemas: Items1Named.Product[||, ::, F, Cases],
   ) extends SchemaMotif[F, DiscriminatedUnion[Cases]]
+
+  given [F[_]] => ClampEq[F] => ClampEq[SchemaMotif[F, _]] =
+    new ClampEq[SchemaMotif[F, _]]:
+      override def testEqual[A, B](a: SchemaMotif[F, A], b: SchemaMotif[F, B]): Option[A =:= B] =
+        a isEqualTo b
 }

@@ -1,6 +1,6 @@
 package jing.openapi.model
 
-import libretto.lambda.util.SingletonType
+import libretto.lambda.util.{ClampEq, SingletonType}
 
 sealed infix trait ScalaValueOf[V, T] {
   import ScalaValueOf.*
@@ -37,6 +37,14 @@ sealed infix trait ScalaValueOf[V, T] {
       case I64(value) => (value.value: Long).toString
       case S(value) => value.value
       case B(value) => (value.value: Boolean).toString
+
+  infix def isEqualTo[W, U](that: ScalaValueOf[W, U]): Option[(V =:= W, T =:= U)] =
+    (this, that) match
+      case (I32(a), I32(b)) => SingletonType.testEqualInt    (a, b).map((_, summon[Int32 =:= Int32]))
+      case (I64(a), I64(b)) => SingletonType.testEqualLong   (a, b).map((_, summon[Int64 =:= Int64]))
+      case (S(a), S(b))     => SingletonType.testEqualString (a, b).map((_, summon[Str   =:= Str  ]))
+      case (B(a), B(b))     => SingletonType.testEqualBoolean(a, b).map((_, summon[Bool  =:= Bool ]))
+      case _ => None
 }
 
 object ScalaValueOf {
@@ -75,4 +83,12 @@ object ScalaValueOf {
 
   given [S <: String] => (ev: SingletonType[S]) => ScalaValueOf[S, Str] =
     S(ev)
+
+  given [T] => ClampEq[ScalaValueOf[_, T]] =
+    new ClampEq[ScalaValueOf[_, T]]:
+      override def testEqual[A, B](
+        a: A ScalaValueOf T,
+        b: B ScalaValueOf T,
+      ): Option[A =:= B] =
+        (a isEqualTo b).map(_._1)
 }

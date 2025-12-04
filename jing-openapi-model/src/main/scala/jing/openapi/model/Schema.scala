@@ -1,11 +1,14 @@
 package jing.openapi.model
 
-import libretto.lambda.util.SingletonType
+import libretto.lambda.util.{ClampEq, SingletonType}
 
 enum Schema[A] {
   case Proper(value: SchemaMotif[Schema, A])
 
   case Unsupported[S <: String](message: SingletonType[S]) extends Schema[Oops[S]]
+
+  def isEqualTo[B](that: Schema[B]): Option[A =:= B] =
+    summon[ClampEq[Schema]].testEqual(this, that)
 }
 
 object Schema {
@@ -63,5 +66,18 @@ object Schema {
   object Labeled {
     def unsupported[L](message: String): Schema.Labeled[L, Oops[message.type]] =
       Labeled.Unsupported(SingletonType(message))
+  }
+
+  given ClampEq[Schema] with { self =>
+
+    override def testEqual[A, B](a: Schema[A], b: Schema[B]): Option[A =:= B] =
+      (a, b) match
+        case (Proper(a), Proper(b)) =>
+          (a isEqualTo b)(using self)
+        case (Unsupported(a), Unsupported(b)) =>
+          SingletonType.testEqualString(a, b).map(_.liftCo[Oops])
+        case _ =>
+          None
+
   }
 }
