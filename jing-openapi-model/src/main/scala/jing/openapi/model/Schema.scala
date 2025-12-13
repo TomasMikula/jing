@@ -7,7 +7,7 @@ enum Schema[A] {
 
   case Unsupported[S <: String](message: SingletonType[S]) extends Schema[Oops[S]]
 
-  def isEqualTo[B](that: Schema[B]): Option[A =:= B] =
+  infix def isEqualTo[B](that: Schema[B]): Option[A =:= B] =
     summon[ClampEq[Schema]].testEqual(this, that)
 }
 
@@ -61,11 +61,36 @@ object Schema {
         case Unlabeled(value) => None
         case Labeled.Unsupported(message) => None
 
+    infix def isEqualTo[B](that: Schema.Labeled[L, B]): Option[A =:= B] =
+      summon[ClampEq[Schema.Labeled[L, _]]].testEqual(this, that)
+
+    def stripLabels: Schema[A] =
+      this match
+        case WithLabel(label, schema) => schema.stripLabels
+        case Unlabeled(value) => Schema.Proper(value.translate([X] => _.stripLabels))
+        case Labeled.Unsupported(message) => Schema.Unsupported(message)
+
   }
 
   object Labeled {
     def unsupported[L](message: String): Schema.Labeled[L, Oops[message.type]] =
       Labeled.Unsupported(SingletonType(message))
+
+    given [L] => ClampEq[Schema.Labeled[L, _]] =
+      new ClampEq[Schema.Labeled[L, _]] { self =>
+        override def testEqual[A, B](a: Labeled[L, A], b: Labeled[L, B]): Option[A =:= B] =
+          (a, b) match
+            case (Unlabeled(a), Unlabeled(b)) =>
+              (a isEqualTo b)(using self)
+            case (WithLabel(la, a), WithLabel(lb, b)) =>
+              if (la == lb)
+                then testEqual(a, b)
+                else None
+            case (Unsupported(a), Unsupported(b)) =>
+              SingletonType.testEqualString(a, b).map(_.liftCo[Oops])
+            case _ =>
+              None
+      }
   }
 
   given ClampEq[Schema] with { self =>

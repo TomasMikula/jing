@@ -239,53 +239,80 @@ object ModelToScalaAst {
    *
    * Since the looked up type may potentially be different from the one next to the label, the result type is existential.
    */
-  def quotedSchemaWithReferences[F[_]](
+  def quotedSchemaWithReferences[Rel[_, _], F[_]](
     schema: Schema.Labeled[String, ?],
+    schemaLookup: SchemaLookup[Rel, F],
+  )(using
+    Quotes,
+    Compatible[Rel],
+    ExprIso[Rel],
+    Applicative[F],
+  ): Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])] =
+    quotedSchemaWithReferencesRel(schema, schemaLookup)
+      match
+        case Indeed((_, (t, e))) => Indeed((t, e))
+
+  def quotedSchemaWithReferencesRel[A, Rel[_, _], F[_]](
+    schema: Schema.Labeled[String, A],
+    schemaLookup: SchemaLookup[Rel, F],
   )(using
     q: Quotes,
+    Rel: Compatible[Rel],
+    Iso: ExprIso[Rel],
     F: Applicative[F],
-  ): Reader[SchemaLookup[F], Exists[[T] =>> (Type[T], F[Expr[Schema[T]]])]] = {
-    import quotes.reflect.*
-
+  ): Exists[[B] =>> (Rel[A, B], (Type[B], F[Expr[Schema[B]]]))] = {
     schema match
       case Schema.Labeled.Unlabeled(value) =>
         quotedSchemaMotifRelAA(
           value,
-          [A] => ps => quotedSchemaWithReferences(ps) map {
-            case Indeed(te) => Indeed((Unrelated(), te))
-          },
-        ) map {
-          case ex @ Indeed(_, (tpe, expr)) =>
+          [A] => ps => Reader(quotedSchemaWithReferencesRel[A, Rel, F](ps, _)),
+        ).run(schemaLookup) match {
+          case ex @ Indeed(rel, (tpe, expr)) =>
             given Type[ex.T] = tpe
-            Indeed((tpe, expr.map { expr => '{ Schema.Proper($expr) } }))
+            Indeed((rel, (tpe, expr.map { expr => '{ Schema.Proper($expr) } })))
           }
 
-      case Schema.Labeled.WithLabel(schemaName, _) =>
-        Reader(_.lookup(schemaName))
+      case Schema.Labeled.WithLabel(schemaName, schema) =>
+        schemaLookup.lookupEntry(schemaName, schema) match
+          case Indeed((rel, t, e)) =>
+            val sRel = rel.lift[Schema]
+            Indeed((rel, (t, e.map(e => sRel.apply(sRel.unapply(e)))))) // TODO: the back-and-forth conversion is just pro forma for now, to check it works
 
-      case Schema.Labeled.Unsupported(details) =>
-        val (tpe, trm) = quotedSchemaOops(details)
-        Reader.pure( Exists((tpe, F.pure(trm))) )
+      case s: Schema.Labeled.Unsupported[String, msg] =>
+        val (tpe, trm) = quotedSchemaOops(s.message)
+        val rel: Oops[msg] `Rel` Oops[msg] =
+          Rel.lift_singletonString(s.message).lift_oops
+        Exists((rel, (tpe, F.pure(trm))))
   }
 
-  def quotedSchemaObjectWithReferences[F[_]](
+  def quotedSchemaObjectWithReferences[Rel[_, _], F[_]](
     schema: SchemaMotif.Object[Schema.Labeled[String, _], ?],
+    schemaLookup: SchemaLookup[Rel, F],
   )(using
     q: Quotes,
+    Rel: Compatible[Rel],
+    Iso: ExprIso[Rel],
     F: Applicative[F],
-  ): Reader[SchemaLookup[F], Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])]] =
+  ): Exists[[Ps] =>> (Type[Ps], F[Expr[Schema[Obj[Ps]]]])] =
     quotedSchemaMotifObjectRelAA(
       schema.asObject.value,
-      [A] => ps => quotedSchemaWithReferences(ps) map {
-        case Indeed(te) => Indeed((Unrelated(), te))
-      }
-    ) map {
+      [A] => ps => Reader(quotedSchemaWithReferencesRel[A, Rel, F](ps, _))
+    ).run(schemaLookup) match {
       case ex @ Indeed(_, (tpe, expr)) =>
         given Type[ex.T] = tpe
         Indeed((tpe, expr.map { expr => '{ Schema.Proper(SchemaMotif.Object($expr)) } }))
     }
 
-  def quotedScalaValueOf[T, U](v: ScalaValueOf[T, U])(using Quotes): (Type[T], Expr[ScalaValueOf[T, U]]) = {
+  def quotedScalaValueOf[T, U](v: ScalaValueOf[T, U])(using Quotes): (Type[T], Expr[ScalaValueOf[T, U]]) =
+    quotedScalaValueOfRefl(v, summon[Compatible[=:=]])
+      ._2
+
+  def quotedScalaValueOfRefl[T, U, Rel[_, _]](
+    v: ScalaValueOf[T, U],
+    Rel: Compatible[Rel],
+  )(using
+    Quotes,
+  ): (Rel[T, T], (Type[T], Expr[ScalaValueOf[T, U]])) = {
     import ScalaValueOf.*
 
     v match
@@ -293,22 +320,22 @@ object ModelToScalaAst {
         summon[T <:< Int]
         val (tp, exp) = quotedSingletonInt(i)
         given Type[T] = tp
-        (tp, '{ I32($exp) })
+        (Rel.lift_singletonInt(i), (tp, '{ I32($exp) }))
       case I64(l) =>
         summon[T <:< Long]
         val (tp, exp) = quotedSingletonLong(l)
         given Type[T] = tp
-        (tp, '{ I64($exp) })
+        (Rel.lift_singletonLong(l), (tp, '{ I64($exp) }))
       case S(s) =>
         summon[T <:< String]
         val (tp, exp) = quotedSingletonString(s)
         given Type[T] = tp
-        (tp, '{ S($exp) })
+        (Rel.lift_singletonString(s), (tp, '{ S($exp) }))
       case B(b) =>
         summon[T <:< Boolean]
         val (tp, exp) = quotedSingletonBoolean(b)
         given Type[T] = tp
-        (tp, '{ B($exp) })
+        (Rel.lift_singletonBoolean(b), (tp, '{ B($exp) }))
   }
 
   def quotedSchemaMotifBasicPrimitive[F[_], T, G[_]](
@@ -316,14 +343,23 @@ object ModelToScalaAst {
   )(using
     Quotes,
     Type[G],
-  ): (Type[T], Expr[SchemaMotif.BasicPrimitive[G, T]]) = {
+  ): (Type[T], Expr[SchemaMotif.BasicPrimitive[G, T]]) =
+    quotedSchemaMotifBasicPrimitiveRefl(s, summon[Compatible[=:=]])._2
+
+  def quotedSchemaMotifBasicPrimitiveRefl[F[_], T, Rel[_, _], G[_]](
+    s: SchemaMotif.BasicPrimitive[F, T],
+    Rel: Compatible[Rel],
+  )(using
+    Quotes,
+    Type[G],
+  ): (Rel[T, T], (Type[T], Expr[SchemaMotif.BasicPrimitive[G, T]])) = {
     import jing.openapi.model.SchemaMotif.*
 
     s match
-      case I32() => (Type.of[Int32], '{ I32() })
-      case I64() => (Type.of[Int64], '{ I64() })
-      case S()   => (Type.of[Str], '{ S() })
-      case B()   => (Type.of[Bool], '{ B() })
+      case I32() => (Rel.lift_int32, (Type.of[Int32], '{ I32() }))
+      case I64() => (Rel.lift_int64, (Type.of[Int64], '{ I64() }))
+      case S()   => (Rel.lift_str, (Type.of[Str], '{ S() }))
+      case B()   => (Rel.lift_bool, (Type.of[Bool], '{ B() }))
   }
 
   def quotedSchemaMotifPrimitive[F[_], T, G[_]](
@@ -331,23 +367,36 @@ object ModelToScalaAst {
   )(using
     Quotes,
     Type[G],
-  ): (Type[T], Expr[SchemaMotif.Primitive[G, T]]) = {
+  ): (Type[T], Expr[SchemaMotif.Primitive[G, T]]) =
+    quotedSchemaMotifPrimitiveRefl(s, summon[Compatible[=:=]])
+      ._2
+
+  def quotedSchemaMotifPrimitiveRefl[F[_], T, Rel[_, _], G[_]](
+    s: SchemaMotif.Primitive[F, T],
+    Rel: Compatible[Rel],
+  )(using
+    Quotes,
+    Type[G],
+  ): (Rel[T, T], (Type[T], Expr[SchemaMotif.Primitive[G, T]])) = {
     import jing.openapi.model.SchemaMotif.{BasicPrimitive, Enumeration}
 
     s match
       case b: BasicPrimitive[F, T] =>
-        quotedSchemaMotifBasicPrimitive(b)
+        quotedSchemaMotifBasicPrimitiveRefl(b, Rel)
       case e: Enumeration[F, base, cases] =>
-        quotedSchemaMotifBasicPrimitive(e.baseType) match
-          case (tb, b) =>
+        quotedSchemaMotifBasicPrimitiveRefl(e.baseType, Rel) match
+          case (rb, (tb, b)) =>
             given Type[base] = tb
-            quotedProduct(
+            quotedProductRefl(
               e.cases,
-              [A] => (v: ScalaValueOf[A, base]) => quotedScalaValueOf(v)
+              [A] => (v: ScalaValueOf[A, base]) => quotedScalaValueOfRefl(v, Rel),
+              Rel,
             ) match
-              case (tc, cs) =>
+              case (rCases, (tc, cs)) =>
+                val rel: Enum[base, cases] `Rel` Enum[base, cases] =
+                  Rel.lift_enm(rb, rCases)
                 given Type[cases] = tc
-                (Type.of[Enum[base, cases]], '{ Enumeration[G, base, cases](${b}, ${cs})})
+                (rel, (Type.of[Enum[base, cases]], '{ Enumeration[G, base, cases](${b}, ${cs})}))
   }
 
   def quotedSchemaMotifConstant[F[_], T, G[_]](
@@ -356,12 +405,22 @@ object ModelToScalaAst {
     Quotes,
     Type[G],
   ): (Type[T], Expr[SchemaMotif.Constant[G, T]]) =
+    quotedSchemaMotifConstantRefl(s, summon[Compatible[=:=]])
+      ._2
+
+  def quotedSchemaMotifConstantRefl[F[_], T, Rel[_, _], G[_]](
+    s: SchemaMotif.Constant[F, T],
+    Rel: Compatible[Rel],
+  )(using
+    Quotes,
+    Type[G],
+  ): (Rel[T, T], (Type[T], Expr[SchemaMotif.Constant[G, T]])) =
     s match
       case SchemaMotif.Constant.Primitive(value) =>
-        quotedScalaValueOf(value) match
-          case (t, e) =>
+        quotedScalaValueOfRefl(value, Rel) match
+          case (r, (t, e)) =>
             given Type[T] = t
-            (t, '{ SchemaMotif.Constant.Primitive(${e: Expr[T ScalaValueOf ?]}) })
+            (r, (t, '{ SchemaMotif.Constant.Primitive(${e: Expr[T ScalaValueOf ?]}) }))
 
   def quotedSchemaMotif[F[_], T](
     s: SchemaMotif[F, T],
@@ -380,7 +439,8 @@ object ModelToScalaAst {
   )(using
     Quotes,
     Type[G],
-    Substitutive[Rel],
+    Compatible[Rel],
+    ExprIso[Rel],
   ): Exists[[U] =>> (Rel[T, U], (Type[U], Expr[SchemaMotif[G, U]]))] =
     quotedSchemaMotifRelAA[F, T, G, Rel, [x] =>> x, [x] =>> x](s, f)
 
@@ -390,38 +450,38 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     G: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[U] =>> (Rel[T, U], (Type[U], N[Expr[SchemaMotif[G, U]]]))]] =
     s match
       case p: SchemaMotif.Primitive[F, T] =>
-        quotedSchemaMotifPrimitive(p) match
-          case (t, p) =>
-            M.pure(Indeed(Rel.refl[T], (t, N.pure(p))))
+        quotedSchemaMotifPrimitiveRefl(p, Rel) match
+          case (r, (t, p)) =>
+            M.pure(Indeed(r, (t, N.pure(p))))
       case c: SchemaMotif.Constant[F, t] =>
         summon[T =:= Const[t]]
-        quotedSchemaMotifConstant(c) match
-          case (t, c) =>
+        quotedSchemaMotifConstantRefl(c, Rel) match
+          case (r, (t, c)) =>
             given Type[t] = t
-            M.pure(Indeed(Rel.refl[T], (Type.of[Const[t]], N.pure(c))))
+            M.pure(Indeed(r.lift_const, (Type.of[Const[t]], N.pure(c))))
       case a: SchemaMotif.Array[s, a] =>
         f(a.elem) map:
           case e @ Indeed((rel, (tb, sb))) =>
             given Type[e.T] = tb
-            Exists((rel.lift[Arr], (Type.of[Arr[e.T]], sb.map { sb => '{ SchemaMotif.Array($sb) } })))
+            Exists((rel.lift_arr, (Type.of[Arr[e.T]], sb.map { sb => '{ SchemaMotif.Array($sb) } })))
       case o: SchemaMotif.Object[s, ps] =>
         quotedSchemaMotifObjectRelAA(o.value, f) map:
           case e @ Indeed((rel, (t, s))) =>
             given Type[e.T] = t
-            Exists(rel.lift[Obj], (Type.of[Obj[e.T]], s.map { s => '{ SchemaMotif.Object($s) } }))
+            Exists(rel.lift_obj, (Type.of[Obj[e.T]], s.map { s => '{ SchemaMotif.Object($s) } }))
       case o: SchemaMotif.OneOf[s, cases] =>
         quotedNamedProductRelAA(o.schemas, f)
           .map:
             case ex @ Indeed((rel, (t, nep))) =>
               given Type[ex.T] = t
               Exists((
-                rel.lift[DiscriminatedUnion],
+                rel.lift_discriminatedUnion,
                 ( Type.of[DiscriminatedUnion[ex.T]]
                 , nep.map { ep => '{ SchemaMotif.OneOf(${Expr(o.discriminatorProperty)}, $ep)} }
                 )
@@ -434,19 +494,35 @@ object ModelToScalaAst {
     Quotes,
     Type[F],
   ): (Type[Items], Expr[Items1.Product[||, Void, F, Items]]) =
+    val g = [A] => (fa: F[A]) => (summon[A =:= A], f(fa))
+    quotedProductRefl(p, g, summon[Compatible[=:=]])
+      ._2
+
+  def quotedProductRefl[F[_], Items, Rel[_, _]](
+    p: Items1.Product[||, Void, F, Items],
+    f: [A] => F[A] => (Rel[A, A], (Type[A], Expr[F[A]])),
+    Rel: Compatible[Rel],
+  )(using
+    Quotes,
+    Type[F],
+  ): (Rel[Items, Items], (Type[Items], Expr[Items1.Product[||, Void, F, Items]])) =
     p match
       case s: Items1.Product.Single[sep, nil, f, a] =>
         summon[Items =:= (Void || a)]
-        val (t, fa) = f(s.value)
+        val (ra, (t, fa)) = f(s.value)
+        val rel: (Void || a) `Rel` (Void || a) =
+          Rel.lift_||(Rel.lift_void, ra)
         given Type[a] = t
-        (Type.of[Void || a], '{ Items1.Product.Single($fa) })
+        (rel, (Type.of[Void || a], '{ Items1.Product.Single($fa) }))
       case s: Items1.Product.Snoc[sep, nil, f, init, last] =>
         summon[Items =:= (init || last)]
-        val (initTp, initExp) = quotedProduct(s.init, f)
-        val (lastTp, lastExp) = f(s.last)
+        val (rLast, (lastTp, lastExp)) = f(s.last)
+        val (rInit, (initTp, initExp)) = quotedProductRefl(s.init, f, Rel)
+        val rel: (init || last) `Rel` (init || last) =
+          Rel.lift_||(rInit, rLast)
         given Type[init] = initTp
         given Type[last] = lastTp
-        (Type.of[init || last], '{ Items1.Product.Snoc($initExp, $lastExp) })
+        (rel, (Type.of[init || last], '{ Items1.Product.Snoc($initExp, $lastExp) }))
 
   def quotedNamedProduct[F[_], Items](
     p: Items1Named.Product[||, ::, F, Items],
@@ -464,7 +540,7 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     G: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
   ): Exists[[Elems] =>> (Rel[Items, Elems], (Type[Elems], Expr[Items1Named.Product[||, ::, G, Elems]]))] =
     quotedNamedProductRelAA[F, Items, G, Rel, [x] =>> x, [x] =>> x](p, f)
 
@@ -490,7 +566,7 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     G: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[Elems] =>> (Rel[Items, Elems], (Type[Elems], N[Expr[Items1Named.Product[||, ::, G, Elems]]]))]] =
@@ -505,7 +581,7 @@ object ModelToScalaAst {
             given Type[lbl] = tl
 
             Indeed((
-              rel.lift[[x] =>> lbl :: x],
+              rel.lift_-::-[lbl](using s.label),
               (
                 Type.of[lbl :: B],
                 fb.map { fb =>
@@ -526,7 +602,7 @@ object ModelToScalaAst {
             given Type[lbl] = tl
 
             Indeed((
-              Rel.biLift(rel1, rel2)[[X, Y] =>> X || lbl :: Y],
+              Rel.lift_||(rel1, rel2.lift_-::-[lbl](using s.lastName)),
               (
                 Type.of[Elems || lbl :: B],
                 N.map2(fInit, fb) { (fInit, fb) =>
@@ -559,7 +635,7 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     tg: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
   ): Exists[[Qs] =>> (Rel[Ps, Qs], (Type[Qs], Expr[ObjectMotif[G, G, Qs]]))] =
     quotedSchemaMotifObjectRelAA[F, Ps, G, Rel, [x] =>> x, [x] =>> x](s, f)
 
@@ -569,14 +645,14 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     tg: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[Qs] =>> (Rel[Ps, Qs], (Type[Qs], N[Expr[ObjectMotif[G, G, Qs]]]))]] =
     s match
       case ObjectMotif.Empty() =>
         M.pure(
-          Exists(Rel.refl[Void], (Type.of[Void], N.pure('{ ObjectMotif.Empty() })))
+          Exists(Rel.lift_void, (Type.of[Void], N.pure('{ ObjectMotif.Empty() })))
         )
       case ne: ObjectMotif.NonEmpty[f, f_, ps] =>
         quotedSchemaMotifObjectNonEmptyRelAA(ne, f).map:
@@ -588,7 +664,7 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     tg: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[Qs] =>> (Rel[Ps, Qs], (Type[Qs], N[Expr[ObjectMotif.NonEmpty[G, G, Qs]]]))]] =
@@ -604,7 +680,7 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     G: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[Qs] =>> (
@@ -633,8 +709,11 @@ object ModelToScalaAst {
             '{ ObjectMotif.Snoc[G, G, As, PropName, B]($si, $spn, $sl) }
           }
 
+        val rel: (Init || PropName :: PropType) `Rel` (e1.T || PropName :: e2.T) =
+          Rel.lift_||(ri, rl.lift_-::-[PropName](using snoc.pname))
+
         Exists((
-          Rel.biLift(ri, rl)[[X, Y] =>> X || PropName :: Y],
+          rel,
           (Type.of[As || PropName :: B], expr)
         ))
     }
@@ -646,7 +725,7 @@ object ModelToScalaAst {
   )(using
     q: Quotes,
     G: Type[G],
-    Rel: Substitutive[Rel],
+    Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
   ): M[Exists[[Qs] =>> (
@@ -675,8 +754,11 @@ object ModelToScalaAst {
             '{ ObjectMotif.SnocOpt[G, G, As, PropName, B]($si, $spn, $sl) }
           }
 
+        val rel: (Init || PropName :? PropType) `Rel` (e1.T || PropName :? e2.T) =
+          Rel.lift_||(ri, rl.lift_-:?-[PropName](using snoc.pname))
+
         Exists((
-          Rel.biLift(ri, rl)[[X, Y] =>> X || PropName :? Y],
+          rel,
           (Type.of[As || PropName :? B], expr)
         ))
     }
