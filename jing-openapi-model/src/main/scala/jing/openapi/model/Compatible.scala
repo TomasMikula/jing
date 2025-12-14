@@ -1,6 +1,5 @@
-package jing.openapi
+package jing.openapi.model
 
-import jing.openapi.model.*
 import libretto.lambda.util.SingletonType
 
 /** Witnesses that the binary relation `Rel` on types is _compatible_ with all

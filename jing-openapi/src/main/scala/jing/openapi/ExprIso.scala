@@ -1,5 +1,6 @@
 package jing.openapi
 
+import jing.openapi.model.Compatible
 import scala.quoted.{Expr, Quotes, Type}
 
 trait ExprIso[F[_, _]] {

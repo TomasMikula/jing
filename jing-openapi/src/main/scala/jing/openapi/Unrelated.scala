@@ -1,5 +1,7 @@
 package jing.openapi
 
+import jing.openapi.model.Compatible
+
 private[openapi] opaque type Unrelated[A, B] = Unit
 
 private[openapi] object Unrelated {
