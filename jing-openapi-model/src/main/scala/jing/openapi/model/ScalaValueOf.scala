@@ -45,6 +45,14 @@ sealed infix trait ScalaValueOf[V, T] {
       case (S(a), S(b))     => SingletonType.testEqualString (a, b).map((_, summon[Str   =:= Str  ]))
       case (B(a), B(b))     => SingletonType.testEqualBoolean(a, b).map((_, summon[Bool  =:= Bool ]))
       case _ => None
+
+  def refl[Rel[_, _]](using Rel: Compatible[Rel]): Rel[V, V] =
+    this match
+      case I32(value) => Rel.lift_singletonInt(value)
+      case I64(value) => Rel.lift_singletonLong(value)
+      case S(value)   => Rel.lift_singletonString(value)
+      case B(value)   => Rel.lift_singletonBoolean(value)
+
 }
 
 object ScalaValueOf {

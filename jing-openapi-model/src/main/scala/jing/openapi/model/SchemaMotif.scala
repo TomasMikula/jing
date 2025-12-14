@@ -2,6 +2,7 @@ package jing.openapi.model
 
 import libretto.lambda.util.TypeEq.Refl
 import libretto.lambda.util.{Applicative, ClampEq, Exists, SingletonType, TypeEq}
+import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.{Items1, Items1Named}
 
 /** Schema structure parametric in the type of nested schemas.
@@ -14,7 +15,7 @@ sealed trait SchemaMotif[F[_], A] {
 
   def translate[G[_]](h: [X] => F[X] => G[X]): SchemaMotif[G, A] =
     this match
-      case p: Primitive[G, A] => p.recast[G]
+      case p: Primitive[F, A] => p.recast[G]
       case Constant.Primitive(v) => Constant.Primitive(v)
       case Array(elem) => Array(h(elem))
       case Object(value) => Object:
@@ -24,6 +25,43 @@ sealed trait SchemaMotif[F[_], A] {
         )
       case OneOf(discriminator, schemas) =>
         OneOf(discriminator, schemas.translate(h))
+
+  def relateTranslate[Rel[_, _], G[_]](
+    h: [X] => F[X] => Exists[[Y] =>> (Rel[X, Y], G[Y])],
+  )(using
+    Rel: Compatible[Rel],
+  ): Exists[[B] =>> (Rel[A, B], SchemaMotif[G, B])] =
+    relateTranslateA[Rel, G, [x] =>> x](h)
+
+  def relateTranslateA[Rel[_, _], G[_], M[_]](
+    h: [X] => F[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+  )(using
+    Rel: Compatible[Rel],
+    M: Applicative[M],
+  ): M[Exists[[B] =>> (Rel[A, B], SchemaMotif[G, B])]] =
+    this match
+      case p: Primitive[F, A] =>
+        M.pure(Indeed((p.refl[Rel], p.recast[G])))
+      case c @ Constant.Primitive(v) =>
+        M.pure(Indeed((c.refl[Rel], Constant.Primitive(v))))
+      case Array(elem) =>
+        h(elem).map:
+          case Indeed((rel, ga)) =>
+            Indeed((rel.lift_arr, Array(ga)))
+      case Object(value) =>
+        value.relateTranslateA[Rel, G, G, M](
+          [A] => fa => h(fa),
+          [A] => fa => h(fa),
+        ).map:
+          case Indeed((rel, obj)) =>
+            Indeed((rel.lift_obj, Object(obj)))
+      case OneOf(discriminator, schemas) =>
+        schemas.relateTranslateA(h)(
+          labelRelated = [K <: String, X, Y] => (k: SingletonType[K], xRy: X `Rel` Y) => xRy.lift_-::-[K](using k),
+          snocRelated = [X1, X2, Y1, Y2] => Rel.lift_||(_, _),
+        ).map:
+          case Indeed((rel, gSchemas)) =>
+            Indeed((rel.lift_discriminatedUnion, OneOf(discriminator, gSchemas)))
 
   def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
     this match
@@ -91,6 +129,7 @@ sealed trait SchemaMotif[F[_], A] {
 object SchemaMotif {
   sealed trait Primitive[F[_], T] extends SchemaMotif[F, T] {
     def recast[G[_]]: Primitive[G, T] = this.asInstanceOf
+    def refl[Rel[_, _]](using Compatible[Rel]): Rel[T, T]
   }
 
   sealed trait BasicPrimitive[F[_], T] extends Primitive[F, T] {
@@ -100,6 +139,13 @@ object SchemaMotif {
         case I64() => Value.int64(v)
         case S() => Value.str(v)
         case B() => Value.bool(v)
+
+    override def refl[Rel[_, _]](using Rel: Compatible[Rel]): Rel[T, T] =
+      this match
+        case I32() => Rel.lift_int32
+        case I64() => Rel.lift_int64
+        case S()   => Rel.lift_str
+        case B()   => Rel.lift_bool
   }
 
   case class I32[F[_]]() extends BasicPrimitive[F, Int32]
@@ -111,6 +157,17 @@ object SchemaMotif {
     baseType: BasicPrimitive[F, T],
     cases: Items1.Product[||, Void, ScalaValueOf[_, T], Cases],
   ) extends Primitive[F, Enum[T, Cases]] {
+
+    override def refl[Rel[_, _]](using Rel: Compatible[Rel]): Rel[Enum[T, Cases], Enum[T, Cases]] =
+      val rCases: Cases `Rel` Cases =
+        cases.foldMap[[x] =>> Rel[x, x]](
+          baseCase = [X] => x => Rel.lift_||(Rel.lift_void, x.refl[Rel]),
+          snocCase = [Init, X] => (rInit, x) => Rel.lift_||(rInit, x.refl[Rel]),
+        )
+      Rel.lift_enm(
+        baseType.refl[Rel],
+        rCases,
+      )
 
     def find(a: ScalaReprOf[T]): Option[ScalaValueOf[? <: a.type & ScalaUnionOf[Cases], T]] = {
 
@@ -177,7 +234,10 @@ object SchemaMotif {
   sealed trait Constant[F[_], T] extends SchemaMotif[F, Const[T]]
 
   object Constant {
-    case class Primitive[F[_], T](value: T ScalaValueOf ?) extends Constant[F, T]
+    case class Primitive[F[_], T](value: T ScalaValueOf ?) extends Constant[F, T] {
+      def refl[Rel[_, _]](using Compatible[Rel]): Rel[Const[T], Const[T]] =
+        value.refl[Rel].lift_const
+    }
   }
 
   case class Array[F[_], T](elem: F[T]) extends SchemaMotif[F, Arr[T]]

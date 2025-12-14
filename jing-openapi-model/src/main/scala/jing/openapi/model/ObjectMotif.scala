@@ -39,6 +39,22 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
   ): ObjectMotif[G, H, Props] =
     traverse[[x] =>> x, G, H](g, h)
 
+  def relateTranslate[Rel[_, _], G[_], H[_]](
+    g: [X] => Req[X] => Exists[[Y] =>> (Rel[X, Y], G[Y])],
+    h: [X] => Opt[X] => Exists[[Y] =>> (Rel[X, Y], H[Y])],
+  )(using
+    Rel: Compatible[Rel],
+  ): Exists[[Qrops] =>> (Rel[Props, Qrops], ObjectMotif[G, H, Qrops])] =
+    relateTranslateA[Rel, G, H, [x] =>> x](g, h)
+
+  def relateTranslateA[Rel[_, _], G[_], H[_], M[_]](
+    g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+    h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
+  )(using
+    Compatible[Rel],
+    Applicative[M],
+  ): M[Exists[[Qrops] =>> (Rel[Props, Qrops], ObjectMotif[G, H, Qrops])]]
+
   def wipeTranslate[G[_], H[_]](
     g: [A] => Req[A] => Exists[G],
     h: [A] => Opt[A] => Exists[H],
@@ -127,6 +143,15 @@ object ObjectMotif {
       M: Applicative[M],
     ): M[Exists[[X] =>> ObjectMotif[G, H, X]]] =
       M.pure(Indeed(Empty()))
+
+    override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
+      g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+      h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
+    )(using
+      Rel: Compatible[Rel],
+      M: Applicative[M],
+    ): M[Exists[[Qrops] =>> (Rel[Void, Qrops], ObjectMotif[G, H, Qrops])]] =
+      M.pure(Indeed((Rel.lift_void, Empty())))
 
     override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
       t: NamedTuple[PropNamesTupleAcc[Void, NAcc], PropTypesTupleFAcc[G, H, Void, TAcc]],
@@ -240,12 +265,6 @@ object ObjectMotif {
       ): (init, pval) =>
         Snoc(init, pname, pval)
 
-    override def wipeTranslate[G[_], H[_]](
-      g: [A] => Req[A] => Exists[G],
-      h: [A] => Opt[A] => Exists[H],
-    ): Exists[[X] =>> ObjectMotif[G, H, X]] =
-      Indeed(Snoc(init.wipeTranslate(g, h).value, pname, g(pval).value))
-
     override def wipeTranslateA[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[Exists[G]],
       h: [A] => Opt[A] => M[Exists[H]],
@@ -257,6 +276,21 @@ object ObjectMotif {
         g(pval),
       ): (init, pval) =>
         Indeed(Snoc(init.value, pname, pval.value))
+
+    override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
+      g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+      h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
+    )(using
+      Rel: Compatible[Rel],
+      M: Applicative[M],
+    ): M[Exists[[Qrops] =>> (Rel[Init || PropName :: PropType, Qrops], ObjectMotif[G, H, Qrops])]] =
+      M.map2(
+        init.relateTranslateA(g, h),
+        g(pval),
+      ):
+        case (Indeed(ri, init), Indeed(rv, pval)) =>
+          val rel = Rel.lift_||(ri, rv.lift_-::-(using pname))
+          Indeed((rel, Snoc(init, pname, pval)))
 
     override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :: PropType, NAcc], PropTypesTupleFAcc[G, H, Init || PropName :: PropType, TAcc]],
@@ -393,6 +427,21 @@ object ObjectMotif {
         h(pval),
       ): (init, pval) =>
         Indeed(SnocOpt(init.value, pname, pval.value))
+
+    override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
+      g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+      h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
+    )(using
+      Rel: Compatible[Rel],
+      M: Applicative[M],
+    ): M[Exists[[Qrops] =>> (Rel[Init || PropName :? PropType, Qrops], ObjectMotif[G, H, Qrops])]] =
+      M.map2(
+        init.relateTranslateA(g, h),
+        h(pval),
+      ):
+        case (Indeed((ri, init)), Indeed((rv, pval))) =>
+          val rel = Rel.lift_||(ri, rv.lift_-:?-(using pname))
+          Indeed((rel, SnocOpt(init, pname, pval)))
 
     override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :? PropType, NAcc], PropTypesTupleFAcc[G, H, Init || PropName :? PropType, TAcc]],
