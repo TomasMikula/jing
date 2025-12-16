@@ -63,35 +63,6 @@ sealed trait SchemaMotif[F[_], A] {
           case Indeed((rel, gSchemas)) =>
             Indeed((rel.lift_discriminatedUnion, OneOf(discriminator, gSchemas)))
 
-  def wipeTranslate[G[_]](h: [X] => F[X] => Exists[G]): SchemaMotif[G, ?] =
-    this match
-      case p: Primitive[F, A] => p.recast[G]
-      case Constant.Primitive(v) => Constant.Primitive(v)
-      case Array(elem) => Array(h(elem).value)
-      case Object(value) => Object:
-        value.wipeTranslate[G, G](
-          [A] => fa => h(fa),
-          [A] => fa => h(fa),
-        ).value
-      case OneOf(discriminator, schemas) =>
-        OneOf(discriminator, schemas.wipeTranslate(h))
-
-  def wipeTranslateA[M[_], G[_]](h: [X] => F[X] => M[Exists[G]])(using M: Applicative[M]): M[SchemaMotif[G, ?]] =
-    this match
-      case p: Primitive[F, A] => M.pure(p.recast[G])
-      case Constant.Primitive(v) => M.pure(Constant.Primitive(v))
-      case Array(elem) => h(elem).map(el => Array(el.value))
-      case Object(value) =>
-        value.wipeTranslateA[M, G, G](
-          [A] => fa => h(fa),
-          [A] => fa => h(fa),
-        )
-          .map(o => Object(o.value))
-      case OneOf(discriminator, schemas) =>
-        schemas
-          .wipeTranslateA(h)
-          .map(OneOf(discriminator, _))
-
   def isNotOops[S](using A =:= Oops[S]): Nothing =
     throw AssertionError("Impossible: Schemas for type Oops[S] are not representable by SchemaMotif")
 
