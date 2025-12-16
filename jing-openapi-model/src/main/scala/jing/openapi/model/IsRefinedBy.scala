@@ -1,4 +1,4 @@
-package jing.openapi
+package jing.openapi.model
 
 import jing.openapi.model.*
 import libretto.lambda.util.SingletonType

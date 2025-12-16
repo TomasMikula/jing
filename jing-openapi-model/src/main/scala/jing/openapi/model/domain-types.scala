@@ -18,6 +18,8 @@ sealed trait Enum[Base, Cases]
 sealed trait Const[A]
 sealed trait Oops[Reason]
 
+sealed trait Unknown
+
 type ScalaReprOf[T] =
   T match
     case Int32 => Int

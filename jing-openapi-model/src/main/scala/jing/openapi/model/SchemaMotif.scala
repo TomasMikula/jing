@@ -26,30 +26,27 @@ sealed trait SchemaMotif[F[_], A] {
       case OneOf(discriminator, schemas) =>
         OneOf(discriminator, schemas.translate(h))
 
-  def relateTranslate[Rel[_, _], G[_]](
-    h: [X] => F[X] => Exists[[Y] =>> (Rel[X, Y], G[Y])],
-  )(using
-    Rel: Compatible[Rel],
-  ): Exists[[B] =>> (Rel[A, B], SchemaMotif[G, B])] =
-    relateTranslateA[Rel, G, [x] =>> x](h)
+  def refineTranslate[G[_]](
+    h: [X] => F[X] => Exists[[Y] =>> (X IsRefinedBy Y, G[Y])],
+  ): Exists[[B] =>> (A IsRefinedBy B, SchemaMotif[G, B])] =
+    refineTranslateA[G, [x] =>> x](h)
 
-  def relateTranslateA[Rel[_, _], G[_], M[_]](
-    h: [X] => F[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+  def refineTranslateA[G[_], M[_]](
+    h: [X] => F[X] => M[Exists[[Y] =>> (X IsRefinedBy Y, G[Y])]],
   )(using
-    Rel: Compatible[Rel],
     M: Applicative[M],
-  ): M[Exists[[B] =>> (Rel[A, B], SchemaMotif[G, B])]] =
+  ): M[Exists[[B] =>> (A IsRefinedBy B, SchemaMotif[G, B])]] =
     this match
       case p: Primitive[F, A] =>
-        M.pure(Indeed((p.refl[Rel], p.recast[G])))
+        M.pure(Indeed((p.refl[IsRefinedBy], p.recast[G])))
       case c @ Constant.Primitive(v) =>
-        M.pure(Indeed((c.refl[Rel], Constant.Primitive(v))))
+        M.pure(Indeed((c.refl[IsRefinedBy], Constant.Primitive(v))))
       case Array(elem) =>
         h(elem).map:
           case Indeed((rel, ga)) =>
             Indeed((rel.lift_arr, Array(ga)))
       case Object(value) =>
-        value.relateTranslateA[Rel, G, G, M](
+        value.relateTranslateA[IsRefinedBy, G, G, M](
           [A] => fa => h(fa),
           [A] => fa => h(fa),
         ).map:
@@ -57,8 +54,8 @@ sealed trait SchemaMotif[F[_], A] {
             Indeed((rel.lift_obj, Object(obj)))
       case OneOf(discriminator, schemas) =>
         schemas.relateTranslateA(h)(
-          labelRelated = [K <: String, X, Y] => (k: SingletonType[K], xRy: X `Rel` Y) => xRy.lift_-::-[K](using k),
-          snocRelated = [X1, X2, Y1, Y2] => Rel.lift_||(_, _),
+          labelRelated = [K <: String, X, Y] => (k: SingletonType[K], xRy: X IsRefinedBy Y) => xRy.lift_-::-[K](using k),
+          snocRelated = [X1, X2, Y1, Y2] => IsRefinedBy.Lift_||(_, _),
         ).map:
           case Indeed((rel, gSchemas)) =>
             Indeed((rel.lift_discriminatedUnion, OneOf(discriminator, gSchemas)))

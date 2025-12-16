@@ -1,8 +1,8 @@
 package jing.openapi
 
-import jing.openapi.IsRefinedBy.UnknownRefinedByAnything
-import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, Obj, Oops, ScalaValueOf, Schema, SchemaMotif, Str}
+import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, IsRefinedBy, Obj, Oops, ScalaValueOf, Schema, SchemaMotif, Str, Unknown}
 import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
+import jing.openapi.model.IsRefinedBy.UnknownRefinedByAnything
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Applicative, Exists, NonEmptyList, SingletonType, Validated}
 import libretto.lambda.util.Applicative.traverseList
@@ -37,7 +37,7 @@ private[openapi] enum ProtoSchema[A] {
     this match
       case Proper(value) =>
         value
-          .relateTranslateA[IsRefinedBy, Schema.Labeled[String, _], F]([X] => ps => ps.resolveA[F])
+          .refineTranslateA[Schema.Labeled[String, _], F]([X] => ps => ps.resolveA[F])
           .map { case Indeed((rel, s)) => Indeed((rel, Schema.Labeled.Unlabeled(s))) }
       case OneOf(discriminatorProperty, protoSchemas, declaredMapping) =>
         Applicative
