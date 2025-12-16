@@ -13,7 +13,7 @@ private[openapi] object Unrelated {
       import libretto.lambda.util.SingletonType
 
       override def lift_||[A, B, X, Y](aRb: A `Unrelated` B, xRy: X `Unrelated` Y): (A || X) `Unrelated` (B || Y) = ()
-      override def lift_enm[A, B, Cs, Ds](aRb: A `Unrelated` B, cRd: Cs `Unrelated` Ds): Enum[A, Cs] `Unrelated` Enum[B, Ds] = ()
+      override def lift_enum[A, B, Cs, Ds](aRb: A `Unrelated` B, cRd: Cs `Unrelated` Ds): Enum[A, Cs] `Unrelated` Enum[B, Ds] = ()
 
       extension [A, B](aRb: A `Unrelated` B) {
         override def lift_const: Const[A] `Unrelated` Const[B] = ()

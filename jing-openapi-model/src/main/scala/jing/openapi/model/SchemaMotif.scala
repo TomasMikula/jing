@@ -164,7 +164,7 @@ object SchemaMotif {
           baseCase = [X] => x => Rel.lift_||(Rel.lift_void, x.refl[Rel]),
           snocCase = [Init, X] => (rInit, x) => Rel.lift_||(rInit, x.refl[Rel]),
         )
-      Rel.lift_enm(
+      Rel.lift_enum(
         baseType.refl[Rel],
         rCases,
       )

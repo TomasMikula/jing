@@ -69,7 +69,7 @@ object ExprIso {
         given Type[Y] = xRy.r
         unsafeAssert[A || X, B || Y]
 
-      override def lift_enm[A, B, Cs, Ds](
+      override def lift_enum[A, B, Cs, Ds](
         aRb: A `CompileTimeCompatible` B,
         cRd: Cs `CompileTimeCompatible` Ds,
       ): Enum[A, Cs] `CompileTimeCompatible` Enum[B, Ds] =
@@ -204,7 +204,7 @@ object ExprIso {
       import libretto.lambda.util.SingletonType
 
       override def lift_||[A, B, X, Y](aRb: A `RuntimeCoercible` B, xRy: X `RuntimeCoercible` Y): (A || X) `RuntimeCoercible` (B || Y) = ???
-      override def lift_enm[A, B, Cs, Ds](aRb: A `RuntimeCoercible` B, cRd: Cs `RuntimeCoercible` Ds): Enum[A, Cs] `RuntimeCoercible` Enum[B, Ds] = ???
+      override def lift_enum[A, B, Cs, Ds](aRb: A `RuntimeCoercible` B, cRd: Cs `RuntimeCoercible` Ds): Enum[A, Cs] `RuntimeCoercible` Enum[B, Ds] = ???
 
       extension [A, B](aRb: A `RuntimeCoercible` B) {
         override def lift_const: Const[A] `RuntimeCoercible` Const[B] = ???

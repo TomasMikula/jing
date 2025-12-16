@@ -1,12 +1,12 @@
 package jing.openapi
 
-import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
+import jing.openapi.IsRefinedBy.UnknownRefinedByAnything
+import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, Obj, Oops, ScalaValueOf, Schema, SchemaMotif, Str}
 import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
 import libretto.lambda.Items1Named
-import libretto.lambda.util.{Applicative, Exists, SingletonType, Validated}
+import libretto.lambda.util.{Applicative, Exists, NonEmptyList, SingletonType, Validated}
 import libretto.lambda.util.Applicative.traverseList
 import libretto.lambda.util.Exists.Indeed
-import libretto.lambda.util.NonEmptyList
 import libretto.lambda.util.Validated.{Invalid, Valid, invalid, valid}
 import scala.annotation.tailrec
 
@@ -17,9 +17,9 @@ private[openapi] enum ProtoSchema[A] {
     discriminatorProperty: String,
     schemas: List[ProtoSchema[?]],
     declaredMapping: Option[Map[String, String]],
-  ) extends ProtoSchema[DiscriminatedUnion[Unknown]]
+  ) extends ProtoSchema[Unknown]
   case Ref(schemaName: String) extends ProtoSchema[Unknown]
-  case Unsupported(details: String) extends ProtoSchema[Unknown]
+  case Unsupported(details: String) extends ProtoSchema[Oops[Unknown]]
 
   import ProtoSchema.*
 
@@ -28,33 +28,38 @@ private[openapi] enum ProtoSchema[A] {
   ): Schema.Labeled[String, ?] =
     resolveA[[x] =>> x](using
       Resolver.fromMap(alreadyResolved, notFound = Option.empty[Cycle])
-    )
+    ).value._2
 
   private def resolveA[F[_]](using
     r: Resolver[Schema.Labeled[String, ?], Option[Cycle], F],
     F: Applicative[F],
-  ): F[Schema.Labeled[String, ?]] =
+  ): F[Exists[[B] =>> (A IsRefinedBy B, Schema.Labeled[String, B])]] =
     this match
       case Proper(value) =>
         value
-          .wipeTranslateA[F, Schema.Labeled[String, _]]([X] => ps => ps.resolveA[F].map(Exists(_)))
-          .map(Schema.Labeled.Unlabeled(_))
+          .relateTranslateA[IsRefinedBy, Schema.Labeled[String, _], F]([X] => ps => ps.resolveA[F])
+          .map { case Indeed((rel, s)) => Indeed((rel, Schema.Labeled.Unlabeled(s))) }
       case OneOf(discriminatorProperty, protoSchemas, declaredMapping) =>
         Applicative
-          .traverseList(protoSchemas)(_.resolveA[F])
+          .traverseList(protoSchemas)(_.resolveA[F].map(_.value._2))
           .map(resolveOneOf(discriminatorProperty, _, declaredMapping))
+          .map(s => Indeed((UnknownRefinedByAnything(), s)))
       case Ref(schemaName) =>
-        r.resolve(schemaName) map:
-          case Right(schema) =>
-            Schema.Labeled.WithLabel(schemaName, schema)
-          case Left(None) =>
-            val msg = s"Unresolved schema $schemaName"
-            Schema.Labeled.Unsupported(SingletonType(msg))
-          case Left(Some(Cycle(cycle))) =>
-            val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
-            Schema.Labeled.Unsupported(SingletonType(msg))
+        summon[A =:= Unknown]
+        r.resolve(schemaName).map: res =>
+          val s: Schema.Labeled[String, ?] =
+            res match
+              case Right(schema) =>
+                Schema.Labeled.WithLabel(schemaName, schema)
+              case Left(None) =>
+                val msg = s"Unresolved schema $schemaName"
+                Schema.Labeled.Unsupported(SingletonType(msg))
+              case Left(Some(Cycle(cycle))) =>
+                val msg = s"Unsupported recursive schema: ${cycle.mkString(" -> ")}"
+                Schema.Labeled.Unsupported(SingletonType(msg))
+          Indeed((UnknownRefinedByAnything(), s))
       case Unsupported(details) =>
-        F.pure(Schema.Labeled.Unsupported(SingletonType(details)))
+        F.pure(Indeed((UnknownRefinedByAnything().lift_oops, Schema.Labeled.Unsupported(SingletonType(details)))))
 }
 
 private[openapi] object ProtoSchema {
@@ -157,7 +162,7 @@ private[openapi] object ProtoSchema {
     val protoResolver: Resolver[Schema.Labeled[String, ?], Option[Cycle], TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], _]] =
       new Resolver[Schema.Labeled[String, ?], Option[Cycle], TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], _]] { self =>
         val elemResolver: ProtoSchema[?] => TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], Schema.Labeled[String, ?]] =
-          _.resolveA(using self)
+          _.resolveA(using self).map(_.value._2)
 
         val delegate = resolver(elemResolver)
 
@@ -180,7 +185,7 @@ private[openapi] object ProtoSchema {
             schema
               .resolveA(using TopoSortF.protoResolver)
               .run(List(name), (acc, tail))
-          go(acc1 :+ (name, oriented), remaining1)
+          go(acc1 :+ (name, oriented.value._2), remaining1)
       }
 
     go(acc = Nil, remaining = schemas)

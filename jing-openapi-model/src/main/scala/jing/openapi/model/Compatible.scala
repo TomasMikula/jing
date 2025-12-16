@@ -10,7 +10,7 @@ trait Compatible[Rel[_, _]] {
   /* Compatibility with binary operations */
 
   def lift_||[A, B, X, Y](aRb: A `Rel` B, xRy: X `Rel` Y): (A || X) `Rel` (B || Y)
-  def lift_enm[A, B, Cs, Ds](aRb: A `Rel` B, cRd: Cs `Rel` Ds): Enum[A, Cs] `Rel` Enum[B, Ds]
+  def lift_enum[A, B, Cs, Ds](aRb: A `Rel` B, cRd: Cs `Rel` Ds): Enum[A, Cs] `Rel` Enum[B, Ds]
 
 
   /* Compatibility with unary operations */
@@ -41,13 +41,12 @@ trait Compatible[Rel[_, _]] {
 
 object Compatible {
   given Compatible[=:=] {
-    import jing.openapi.model.*
     import libretto.lambda.util.SingletonType
 
     override def lift_||[A, B, X, Y](aRb: A =:= B, xRy: X =:= Y): (A || X) =:= (B || Y) =
       aRb.liftCo[[a] =>> a || X] andThen xRy.liftCo[[x] =>> B || x]
 
-    override def lift_enm[A, B, Cs, Ds](aRb: A =:= B, cRd: Cs =:= Ds): Enum[A, Cs] =:= Enum[B, Ds] =
+    override def lift_enum[A, B, Cs, Ds](aRb: A =:= B, cRd: Cs =:= Ds): Enum[A, Cs] =:= Enum[B, Ds] =
       aRb.liftCo[[a] =>> Enum[a, Cs]] andThen cRd.liftCo[[cs] =>> Enum[B, cs]]
 
     extension [A, B](aRb: A =:= B) {

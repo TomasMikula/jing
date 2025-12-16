@@ -394,7 +394,7 @@ object ModelToScalaAst {
             ) match
               case (rCases, (tc, cs)) =>
                 val rel: Enum[base, cases] `Rel` Enum[base, cases] =
-                  Rel.lift_enm(rb, rCases)
+                  Rel.lift_enum(rb, rCases)
                 given Type[cases] = tc
                 (rel, (Type.of[Enum[base, cases]], '{ Enumeration[G, base, cases](${b}, ${cs})}))
   }
