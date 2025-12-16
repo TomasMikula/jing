@@ -1,6 +1,6 @@
 package jing.openapi
 
-import jing.openapi.model.{||, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
+import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, Obj, ScalaValueOf, Schema, SchemaMotif, Str}
 import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
 import libretto.lambda.Items1Named
 import libretto.lambda.util.{Applicative, Exists, SingletonType, Validated}
@@ -11,15 +11,15 @@ import libretto.lambda.util.Validated.{Invalid, Valid, invalid, valid}
 import scala.annotation.tailrec
 
 /** Schema with unresolved references to other schemas. */
-private[openapi] enum ProtoSchema {
-  case Proper(value: SchemaMotif[[A] =>> ProtoSchema, ?])
+private[openapi] enum ProtoSchema[A] {
+  case Proper(value: SchemaMotif[ProtoSchema, A])
   case OneOf(
     discriminatorProperty: String,
-    schemas: List[ProtoSchema],
+    schemas: List[ProtoSchema[?]],
     declaredMapping: Option[Map[String, String]],
-  )
-  case Ref(schemaName: String)
-  case Unsupported(details: String)
+  ) extends ProtoSchema[DiscriminatedUnion[Unknown]]
+  case Ref(schemaName: String) extends ProtoSchema[Unknown]
+  case Unsupported(details: String) extends ProtoSchema[Unknown]
 
   import ProtoSchema.*
 
@@ -60,44 +60,44 @@ private[openapi] enum ProtoSchema {
 private[openapi] object ProtoSchema {
   import jing.openapi.model.{SchemaMotif as motif}
 
-  def i32: ProtoSchema = Proper(motif.I32())
-  def i64: ProtoSchema = Proper(motif.I64())
-  def str: ProtoSchema = Proper(motif.S())
-  def bool: ProtoSchema = Proper(motif.B())
+  def i32: ProtoSchema[Int32] = Proper(motif.I32())
+  def i64: ProtoSchema[Int64] = Proper(motif.I64())
+  def str: ProtoSchema[Str] = Proper(motif.S())
+  def bool: ProtoSchema[Bool] = Proper(motif.B())
 
-  def strEnum(value: String, values: String*): ProtoSchema =
-    Proper(SchemaMotif.Enumeration.str(value, values*))
+  def strEnum(value: String, values: String*): Exists[[cases] =>> ProtoSchema[Enum[Str, cases]]] =
+    Indeed(Proper(SchemaMotif.Enumeration.str[ProtoSchema](value, values*)))
 
-  def int32Enum(value: Int, values: Int*): ProtoSchema =
-    Proper(SchemaMotif.Enumeration.int32(value, values*))
+  def int32Enum(value: Int, values: Int*): Exists[[cases] =>> ProtoSchema[Enum[Int32, cases]]] =
+    Indeed(Proper(SchemaMotif.Enumeration.int32(value, values*)))
 
-  def int64Enum(value: Long, values: Long*): ProtoSchema =
-    Proper(SchemaMotif.Enumeration.int64(value, values*))
+  def int64Enum(value: Long, values: Long*): Exists[[cases] =>> ProtoSchema[Enum[Int64, cases]]] =
+    Indeed(Proper(SchemaMotif.Enumeration.int64(value, values*)))
 
-  def boolEnum(value: Boolean, values: Boolean*): ProtoSchema =
-    Proper(SchemaMotif.Enumeration.bool(value, values*))
+  def boolEnum(value: Boolean, values: Boolean*): Exists[[cases] =>> ProtoSchema[Enum[Bool, cases]]] =
+    Indeed(Proper(SchemaMotif.Enumeration.bool(value, values*)))
 
-  def strConst(value: String): ProtoSchema =
+  def strConst(value: String): ProtoSchema[Const[value.type]] =
     Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.str(value)))
 
-  def int32Const(value: Int): ProtoSchema =
+  def int32Const(value: Int): ProtoSchema[Const[value.type]] =
     Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.i32(value)))
 
-  def int64Const(value: Long): ProtoSchema =
+  def int64Const(value: Long): ProtoSchema[Const[value.type]] =
     Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.i64(value)))
 
-  def boolConst(value: Boolean): ProtoSchema =
+  def boolConst(value: Boolean): ProtoSchema[Const[value.type]] =
     Proper(SchemaMotif.Constant.Primitive(ScalaValueOf.bool(value)))
 
-  def arr(elemSchema: ProtoSchema): ProtoSchema =
+  def arr[A](elemSchema: ProtoSchema[A]): ProtoSchema[Arr[A]] =
     Proper(motif.Array(elemSchema))
 
-  def obj(props: List[(String, Boolean, ProtoSchema)]): ProtoSchema = {
+  def obj(props: List[(String, Boolean, ProtoSchema[?])]): Exists[[props] =>> ProtoSchema[Obj[props]]] = {
     @tailrec
     def go(
-      acc: motif.Object[[A] =>> ProtoSchema, ?],
-      remaining: List[(String, Boolean, ProtoSchema)],
-    ): motif.Object[[A] =>> ProtoSchema, ?] =
+      acc: motif.Object[ProtoSchema, ?],
+      remaining: List[(String, Boolean, ProtoSchema[?])],
+    ): motif.Object[ProtoSchema, ?] =
       remaining match
         case Nil =>
           acc
@@ -106,7 +106,7 @@ private[openapi] object ProtoSchema {
           then go(motif.Object.snoc(acc, n, s), ps)
           else go(motif.Object.snocOpt(acc, n, s), ps)
 
-    Proper(go(motif.Object.empty, props))
+    Indeed(Proper(go(motif.Object.empty, props)))
   }
 
   private case class Cycle(schemas: List[String])
@@ -154,23 +154,23 @@ private[openapi] object ProtoSchema {
               }
       }
 
-    val protoResolver: Resolver[Schema.Labeled[String, ?], Option[Cycle], TopoSortF[ProtoSchema, Schema.Labeled[String, ?], _]] =
-      new Resolver[Schema.Labeled[String, ?], Option[Cycle], TopoSortF[ProtoSchema, Schema.Labeled[String, ?], _]] { self =>
-        val elemResolver: ProtoSchema => TopoSortF[ProtoSchema, Schema.Labeled[String, ?], Schema.Labeled[String, ?]] =
+    val protoResolver: Resolver[Schema.Labeled[String, ?], Option[Cycle], TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], _]] =
+      new Resolver[Schema.Labeled[String, ?], Option[Cycle], TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], _]] { self =>
+        val elemResolver: ProtoSchema[?] => TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], Schema.Labeled[String, ?]] =
           _.resolveA(using self)
 
         val delegate = resolver(elemResolver)
 
-        override def resolve(name: String): TopoSortF[ProtoSchema, Schema.Labeled[String, ?], Either[Option[Cycle], Schema.Labeled[String, ?]]] =
+        override def resolve(name: String): TopoSortF[ProtoSchema[?], Schema.Labeled[String, ?], Either[Option[Cycle], Schema.Labeled[String, ?]]] =
           delegate.resolve(name)
       }
   }
 
-  def resolveAcyclic(schemas: List[(String, ProtoSchema)]): List[(String, Schema.Labeled[String, ?])] = {
+  def resolveAcyclic(schemas: List[(String, ProtoSchema[?])]): List[(String, Schema.Labeled[String, ?])] = {
     @tailrec
     def go(
       acc: List[(String, Schema.Labeled[String, ?])],
-      remaining: List[(String, ProtoSchema)]
+      remaining: List[(String, ProtoSchema[?])]
     ): List[(String, Schema.Labeled[String, ?])] =
       remaining match {
         case Nil =>
