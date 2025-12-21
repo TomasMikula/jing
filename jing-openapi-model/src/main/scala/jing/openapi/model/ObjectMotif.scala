@@ -2,15 +2,44 @@ package jing.openapi.model
 
 import jing.openapi.model.IsPropertyOf.{IsOptionalPropertyOf, IsRequiredPropertyOf}
 import libretto.lambda.util.Exists.Indeed
-import libretto.lambda.util.TypeEq.Refl
-import libretto.lambda.util.{Applicative, BiInjective, ClampEq, Exists, SingletonType, TypeEq, TypeEqK}
+import libretto.lambda.util.{Applicative, ClampEq, Exists, SingletonType, TypeEqK}
 
 import scala.NamedTuple.NamedTuple
 
 sealed trait ObjectMotif[Req[_], Opt[_], Props] {
   import ObjectMotif.*
 
-  def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type]
+  final def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type] =
+    i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
+      caseLastProp =
+        [init] => (
+          ev1: Props =:= (init || K :: i.Type),
+          ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], F],
+        ) => {
+          val value: Req[i.Type] = ev1.substituteCo(this).unsnocReq._3
+          ev2[Req, Opt].flip.at[i.Type](value)
+        },
+      caseOptLastProp =
+        [init] => (
+          ev1: Props =:= (init || K :? i.Type),
+          ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], G],
+        ) => {
+          val value: Opt[i.Type] = ev1.substituteCo(this).unsnocOpt._3
+          ev2[Req, Opt].flip.at[i.Type](value)
+        },
+      caseInitProp =
+        [init, last] => (
+          ev1: Props =:= (init || last),
+          j:   IsPropertyOf.Aux[K, init, i.Type, i.ReqOrOpt],
+        ) => {
+          val init: ObjectMotif[Req, Opt, init] =
+            ev1.substituteCo(this).unsnoc._1
+          val ev: j.ReqOrOpt[Req, Opt][j.Type] =:= i.ReqOrOpt[Req, Opt][i.Type] =
+            summon[TypeEqK[j.ReqOrOpt[Req, Opt], i.ReqOrOpt[Req, Opt]]]
+              .atH[j.Type, i.Type]
+          ev(init.get(using j))
+        },
+    )
 
   def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]]
 
@@ -93,9 +122,6 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
 object ObjectMotif {
   case class Empty[Req[_], Opt[_]]() extends ObjectMotif[Req, Opt, Void] {
 
-    override def get[K](using i: K IsPropertyOf Void): i.ReqOrOpt[Req, Opt][i.Type] =
-      i.propertiesNotVoid
-
     override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
       None
 
@@ -162,39 +188,6 @@ object ObjectMotif {
 
     override def last: Property[Req, Opt, PropName :: PropType] =
       Property.Required(pname, pval)
-
-    override def get[K](using i: K IsPropertyOf Init || PropName :: PropType): i.ReqOrOpt[Req, Opt][i.Type] =
-      i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
-        caseLastProp =
-          [init] => (
-            ev1: (Init || PropName :: PropType) =:= (init || K :: i.Type),
-            ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], F],
-          ) => {
-            ev1 match
-              case BiInjective[||](_, BiInjective[::](_, TypeEq(Refl()))) =>
-                ev2[Req, Opt].flip.at[i.Type](pval)
-          },
-        caseOptLastProp =
-          [init] => (
-            ev1: (Init || PropName :: PropType) =:= (init || K :? i.Type),
-            ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], G],
-          ) => {
-            ev1 match
-              case BiInjective[||](_, ev) => :?.isNot_::[K, i.Type, PropName, PropType](using ev.flip)
-          },
-        caseInitProp =
-          [init, last] => (
-            ev1: (Init || PropName :: PropType) =:= (init || last),
-            j:   IsPropertyOf.Aux[K, init, i.Type, i.ReqOrOpt],
-          ) => {
-            val ev: j.ReqOrOpt[Req, Opt][j.Type] =:= i.ReqOrOpt[Req, Opt][i.Type] =
-              summon[TypeEqK[j.ReqOrOpt[Req, Opt], i.ReqOrOpt[Req, Opt]]]
-                .atH[j.Type, i.Type]
-            ev1 match
-              case BiInjective[||](TypeEq(Refl()), _) =>
-                ev(init.get[K](using j))
-          },
-      )
 
     override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
       if (k == pname.value)
@@ -303,40 +296,6 @@ object ObjectMotif {
 
     override def last: Property[Req, Opt, PropName :? PropType] =
       Property.Optional(pname, pval)
-
-    override def get[K](using i: K IsPropertyOf Init || PropName :? PropType): i.ReqOrOpt[Req, Opt][i.Type] =
-      i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
-        caseLastProp =
-          [init] => (
-            ev1: (Init || PropName :? PropType) =:= (init || K :: i.Type),
-            ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], F],
-          ) => {
-            ev1 match
-              case BiInjective[||](_, ev) =>
-                :?.isNot_::(using ev)
-          },
-        caseOptLastProp =
-          [init] => (
-            ev1: (Init || PropName :? PropType) =:= (init || K :? i.Type),
-            ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], G],
-          ) => {
-            ev1 match
-              case BiInjective[||](_, BiInjective[:?](_, TypeEq(Refl()))) =>
-                ev2[Req, Opt].flip.at[i.Type](pval)
-          },
-        caseInitProp =
-          [init, last] => (
-            ev1: (Init || PropName :? PropType) =:= (init || last),
-            j:   IsPropertyOf.Aux[K, init, i.Type, i.ReqOrOpt],
-          ) => {
-            val ev =
-              summon[TypeEqK[j.ReqOrOpt[Req, Opt], i.ReqOrOpt[Req, Opt]]]
-                .atH[j.Type, i.Type]
-            ev1 match
-              case BiInjective[||](TypeEq(Refl()), _) =>
-                ev(init.get[K](using j))
-          },
-      )
 
     override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
       if (k == pname.value)
