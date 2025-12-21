@@ -55,19 +55,6 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
     Applicative[M],
   ): M[Exists[[Qrops] =>> (Rel[Props, Qrops], ObjectMotif[G, H, Qrops])]]
 
-  def wipeTranslate[G[_], H[_]](
-    g: [A] => Req[A] => Exists[G],
-    h: [A] => Opt[A] => Exists[H],
-  ): Exists[[X] =>> ObjectMotif[G, H, X]] =
-    wipeTranslateA[[x] =>> x, G, H](g, h)
-
-  def wipeTranslateA[M[_], G[_], H[_]](
-    g: [A] => Req[A] => M[Exists[G]],
-    h: [A] => Opt[A] => M[Exists[H]],
-  )(using
-    Applicative[M],
-  ): M[Exists[[X] =>> ObjectMotif[G, H, X]]]
-
   def zipWithNamedTuple[G[_], H[_], I[_], J[_]](
     t: NamedTuple[PropNamesTuple[Props], PropTypesTupleF[G, H, Props]],
   )(
@@ -135,14 +122,6 @@ object ObjectMotif {
       M: Applicative[M],
     ): M[ObjectMotif[G, H, Void]] =
       M.pure(Empty())
-
-    override def wipeTranslateA[M[_], G[_], H[_]](
-      g: [A] => Req[A] => M[Exists[G]],
-      h: [A] => Opt[A] => M[Exists[H]],
-    )(using
-      M: Applicative[M],
-    ): M[Exists[[X] =>> ObjectMotif[G, H, X]]] =
-      M.pure(Indeed(Empty()))
 
     override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
@@ -270,18 +249,6 @@ object ObjectMotif {
         g(pval)
       ): (init, pval) =>
         SnocReq(init, pname, pval)
-
-    override def wipeTranslateA[M[_], G[_], H[_]](
-      g: [A] => Req[A] => M[Exists[G]],
-      h: [A] => Opt[A] => M[Exists[H]],
-    )(using
-      M: Applicative[M],
-    ): M[Exists[[X] =>> ObjectMotif[G, H, X]]] =
-      M.map2(
-        init.wipeTranslateA(g, h),
-        g(pval),
-      ): (init, pval) =>
-        Indeed(SnocReq(init.value, pname, pval.value))
 
     override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
@@ -424,18 +391,6 @@ object ObjectMotif {
         h(pval),
       ): (init, pval) =>
         SnocOpt(init, pname, pval)
-
-    override def wipeTranslateA[M[_], G[_], H[_]](
-      g: [A] => Req[A] => M[Exists[G]],
-      h: [A] => Opt[A] => M[Exists[H]],
-    )(using
-      M: Applicative[M],
-    ): M[Exists[[X] =>> ObjectMotif[G, H, X]]] =
-      M.map2(
-        init.wipeTranslateA(g, h),
-        h(pval),
-      ): (init, pval) =>
-        Indeed(SnocOpt(init.value, pname, pval.value))
 
     override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
