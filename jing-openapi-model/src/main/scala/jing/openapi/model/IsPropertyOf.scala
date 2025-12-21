@@ -13,8 +13,6 @@ import libretto.lambda.util.TypeEqK
  * @see [[IsCaseOf]] is an analogue for lists without optional elements, such as variants of a [[DiscriminatedUnion]].
  */
 infix sealed trait IsPropertyOf[K, Ps] {
-  import IsPropertyOf.*
-
   type Type
   type ReqOrOpt[Req[_], Opt[_]] <: [A] =>> Req[A] | Opt[A]
 
@@ -51,7 +49,31 @@ object IsPropertyOf {
     type Aux[K, Ps, T] = IsOptionalPropertyOf[K, Ps] { type Type = T }
   }
 
-  case class IsLastPropertyOf[Init, K, V]() extends IsPropertyOf[K, Init || K :: V] {
+  extension [K, Ps](i: IsRequiredPropertyOf[K, Ps]) {
+    def switchReq[R](
+      caseLastProp: [init] => (Ps =:= (init || K :: i.Type)) => R,
+      caseInitProp: [init, last] => (Ps =:= (init || last), IsRequiredPropertyOf.Aux[K, init, i.Type]) => R,
+    ): R =
+      i.switch(
+        caseLastProp = [init] => (ev1, _) => caseLastProp[init](ev1),
+        caseOptLastProp = [init] => (_, _) => throw AssertionError("Impossible"),
+        caseInitProp = [init, last] => (ev1, j) => caseInitProp(ev1, j),
+      )
+  }
+
+  extension [K, Ps](i: IsOptionalPropertyOf[K, Ps]) {
+    def switchOpt[R](
+      caseLastProp: [init] => (Ps =:= (init || K :? i.Type)) => R,
+      caseInitProp: [init, last] => (Ps =:= (init || last), IsOptionalPropertyOf.Aux[K, init, i.Type]) => R,
+    ): R =
+      i.switch(
+        caseLastProp = [init] => (_, _) => throw AssertionError("Impossible"),
+        caseOptLastProp = [init] => (ev1, _) => caseLastProp[init](ev1),
+        caseInitProp = [init, last] => (ev1, j) => caseInitProp(ev1, j),
+      )
+  }
+
+  case class IsRequiredLastPropertyOf[Init, K, V]() extends IsPropertyOf[K, Init || K :: V] {
     override type Type = V
     override type ReqOrOpt[Req[_], Opt[_]] = Req
 
@@ -98,8 +120,8 @@ object IsPropertyOf {
       ||.isNotVoid
   }
 
-  given isLastPropertyOf[Init, K, V]: (IsRequiredPropertyOf[K, Init || K :: V] { type Type = V }) =
-    IsLastPropertyOf()
+  given isRequiredLastPropertyOf[Init, K, V]: (IsRequiredPropertyOf[K, Init || K :: V] { type Type = V }) =
+    IsRequiredLastPropertyOf()
 
   given isOptionalLastPropertyOf[Init, K, V]: (IsOptionalPropertyOf[K, Init || K :? V] { type Type = V }) =
     IsOptionalLastPropertyOf()

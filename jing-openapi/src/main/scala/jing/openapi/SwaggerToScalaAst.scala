@@ -615,7 +615,7 @@ private[openapi] object SwaggerToScalaAst {
                 RequestSchema.Path.ParamSchema.unsupported("array-typed parameters not supported in path")
               case _: SchemaMotif.Object[f, ps] =>
                 RequestSchema.Path.ParamSchema.unsupported("object-typed parameters not supported in path")
-              case _: SchemaMotif.OneOf[f, cases] =>
+              case _: SchemaMotif.OneOf[f, k, cases] =>
                 RequestSchema.Path.ParamSchema.unsupported("oneOf-typed parameters not supported in path")
       case ProtoSchema.Unsupported(message) =>
         RequestSchema.Path.ParamSchema.unsupported(message)
@@ -646,7 +646,7 @@ private[openapi] object SwaggerToScalaAst {
                         RequestSchema.Params.QueryParamSchema.unsupported("nested arrays not supported in query parameters")
                       case _: SchemaMotif.Object[f, ps] =>
                         RequestSchema.Params.QueryParamSchema.unsupported("arrays of objects not supported in query parameters")
-                      case _: SchemaMotif.OneOf[f, cases] =>
+                      case _: SchemaMotif.OneOf[f, k, cases] =>
                         RequestSchema.Params.QueryParamSchema.unsupported("arrays of oneOf's not supported in query parameters")
                   case ProtoSchema.Ref(schemaName) =>
                     RequestSchema.Params.QueryParamSchema.unsupported(s"schema refs not supported in query parameters, found $schemaName")
@@ -654,7 +654,7 @@ private[openapi] object SwaggerToScalaAst {
                     RequestSchema.Params.QueryParamSchema.unsupported(message)
               case _: SchemaMotif.Object[f, ps] =>
                 RequestSchema.Params.QueryParamSchema.unsupported("object-typed parameters not supported in query")
-              case _: SchemaMotif.OneOf[f, cases] =>
+              case _: SchemaMotif.OneOf[f, k, cases] =>
                 RequestSchema.Params.QueryParamSchema.unsupported("oneOf-typed parameters not supported in path")
       case ProtoSchema.Ref(schemaName) =>
         RequestSchema.Params.QueryParamSchema.unsupported(s"schema refs not supported in query parameters, found $schemaName")

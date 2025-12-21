@@ -4,6 +4,7 @@ import libretto.lambda.util.TypeEq.Refl
 import libretto.lambda.util.{Applicative, ClampEq, Exists, SingletonType, TypeEq}
 import libretto.lambda.util.Exists.Indeed
 import libretto.lambda.{Items1, Items1Named}
+import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
 
 /** Schema structure parametric in the type of nested schemas.
  *
@@ -23,8 +24,8 @@ sealed trait SchemaMotif[F[_], A] {
           [A] => fa => h(fa),
           [A] => fa => h(fa),
         )
-      case OneOf(discriminator, schemas) =>
-        OneOf(discriminator, schemas.translate(h))
+      case o: OneOf[f, k, cases] =>
+        o.translateOneOf(h)
 
   def refineTranslate[G[_]](
     h: [X] => F[X] => Exists[[Y] =>> (X IsRefinedBy Y, G[Y])],
@@ -52,13 +53,9 @@ sealed trait SchemaMotif[F[_], A] {
         ).map:
           case Indeed((rel, obj)) =>
             Indeed((rel.lift_obj, Object(obj)))
-      case OneOf(discriminator, schemas) =>
-        schemas.relateTranslateA(h)(
-          labelRelated = [K <: String, X, Y] => (k: SingletonType[K], xRy: X IsRefinedBy Y) => xRy.lift_-::-[K](using k),
-          snocRelated = [X1, X2, Y1, Y2] => IsRefinedBy.Lift_||(_, _),
-        ).map:
-          case Indeed((rel, gSchemas)) =>
-            Indeed((rel.lift_discriminatedUnion, OneOf(discriminator, gSchemas)))
+      case o: OneOf[f, k, cases] =>
+        o.refineTranslateOneOfA(h)
+          .map { case Indeed((rel, o1)) => Indeed((rel.lift_discriminatedUnion, o1)) }
 
   def isNotOops[S](using A =:= Oops[S]): Nothing =
     throw AssertionError("Impossible: Schemas for type Oops[S] are not representable by SchemaMotif")
@@ -85,10 +82,8 @@ sealed trait SchemaMotif[F[_], A] {
         F.testEqual(x, y).map(_.liftCo[Arr])
       case (Object(x), Object(y)) =>
         (x isEqualTo y).map(_.liftCo[Obj])
-      case (OneOf(p, xs), OneOf(q, ys)) =>
-        Option
-          .when(p == q) { xs isEqualTo ys }
-          .flatten
+      case (a @ OneOf(_, _), b @ OneOf(_, _)) =>
+        (a isEqualToOneOf b)
           .map(_.liftCo[DiscriminatedUnion])
       case _ =>
         None
@@ -226,7 +221,7 @@ object SchemaMotif {
       pname: SingletonType[K],
       ptype: F[V],
     ): Object[F, Init || K :: V] =
-      Object(ObjectMotif.Snoc(asObject(init).value, pname, ptype))
+      Object(ObjectMotif.SnocReq(asObject(init).value, pname, ptype))
 
     def snoc[F[_], Init, PropType](
       init: SchemaMotif[F, Obj[Init]],
@@ -258,10 +253,96 @@ object SchemaMotif {
     def propertyList: PropertyList[Ps] =
       asObject.propertyList
 
-  case class OneOf[F[_], Cases](
-    discriminatorProperty: String,
-    schemas: Items1Named.Product[||, ::, F, Cases],
-  ) extends SchemaMotif[F, DiscriminatedUnion[Cases]]
+  case class OneOf[F[_], K <: String, Cases](
+    discriminatorProperty: SingletonType[K],
+    schemas: Items1Named.Product[||, ::, OneOf.Case[F, K, _], Cases],
+  ) extends SchemaMotif[F, DiscriminatedUnion[Cases]] {
+    def translateOneOf[G[_]](h: [X] => F[X] => G[X]): OneOf[G, K, Cases] =
+      OneOf(
+        discriminatorProperty,
+        schemas.translate(OneOf.Case.translator[F, G, K](h)),
+      )
+
+    def refineTranslateOneOfA[G[_], M[_]](
+      h: [X] => F[X] => M[Exists[[Y] =>> (X IsRefinedBy Y, G[Y])]],
+    )(using
+      M: Applicative[M],
+    ): M[Exists[[Cs] =>> (Cases IsRefinedBy Cs, OneOf[G, K, Cs])]] =
+      schemas.relateTranslateA(OneOf.Case.refineTranslatorA[F, G, K, M](h))(
+        labelRelated = [K <: String, X, Y] => (k: SingletonType[K], xRy: X IsRefinedBy Y) => xRy.lift_-::-[K](using k),
+        snocRelated = [X1, X2, Y1, Y2] => IsRefinedBy.Lift_||(_, _),
+      ).map:
+        case Indeed((rel, gSchemas)) =>
+          Indeed((rel, OneOf(discriminatorProperty, gSchemas)))
+
+    infix def isEqualToOneOf[L <: String, Ds](that: OneOf[F, L, Ds])(using ClampEq[F]): Option[Cases =:= Ds] =
+      SingletonType
+        .testEqualString(this.discriminatorProperty, that.discriminatorProperty)
+        .flatMap { ev =>
+          val schemas1: Items1Named.Product[||, ::, OneOf.Case[F, L, _], Cases] =
+            TypeEq(ev).substUpperBounded[String, [d <: String] =>> Items1Named.Product[||, ::, OneOf.Case[F, d, _], Cases]](this.schemas)
+          schemas1 isEqualTo that.schemas
+        }
+  }
+
+  object OneOf {
+    sealed trait Case[F[_], discriminatorProperty <: String, A] {
+      def payload: F[A]
+      def discriminatorPropertyValue: String
+
+      infix def isEqualTo[B](that: Case[F, discriminatorProperty, B])(using ClampEq[F]): Option[A =:= B]
+
+      def translate[G[_]](f: [X] => F[X] => G[X]): Case[G, discriminatorProperty, A]
+
+      def refineTranslateA[G[_], M[_]](
+        f: [X] => F[X] => M[Exists[[Y] =>> (X IsRefinedBy Y, G[Y])]],
+      )(using
+        Applicative[M],
+      ): M[Exists[[B] =>> (A IsRefinedBy B, Case[G, discriminatorProperty, B])]]
+    }
+
+    object Case {
+      case class Impl[F[_], K <: String, Ps, V](
+        payload: F[Obj[Ps]],
+        hasDiscriminatorProperty: IsRequiredPropertyOf.Aux[K, Ps, V],
+        isSingletonString: SingletonStringSchema[V],
+      ) extends Case[F, K, Obj[Ps]] {
+        override def isEqualTo[B](that: Case[F, K, B])(using F: ClampEq[F]): Option[Obj[Ps] =:= B] =
+          that match
+            case that: Impl[f, k, qs, w] =>
+              F.testEqual(this.payload, that.payload)
+              // TODO: should check also equality of the discriminatorProperty, because the representation of IsPropertyOf does not (yet) prevent duplicate properties
+
+        override def discriminatorPropertyValue: String =
+          isSingletonString.stringValue
+
+        override def translate[G[_]](f: [X] => F[X] => G[X]): Case[G, K, Obj[Ps]] =
+          Impl(f(payload), hasDiscriminatorProperty, isSingletonString)
+
+        override def refineTranslateA[G[_], M[_]](
+          f: [X] => F[X] => M[Exists[[Y] =>> (X IsRefinedBy Y, G[Y])]],
+        )(using
+          Applicative[M],
+        ): M[Exists[[B] =>> (Obj[Ps] IsRefinedBy B, Case[G, K, B])]] =
+          throw NotImplementedError("TODO: implement OneOf.Case#refineTranslateA")
+      }
+
+      def translator[F[_], G[_], K <: String](h: [X] => F[X] => G[X]): [X] => Case[F, K, X] => Case[G, K, X] =
+        [X] => c => c.translate(h)
+
+      def refineTranslatorA[F[_], G[_], K <: String, M[_]](
+        h: [X] => F[X] => M[Exists[[Y] =>> (X IsRefinedBy Y, G[Y])]],
+      )(using
+        Applicative[M],
+      ): [X] => Case[F, K, X] => M[Exists[[Y] =>> (X IsRefinedBy Y, Case[G, K, Y])]] =
+        [X] => c => c.refineTranslateA(h)
+
+      given [F[_], K <: String] => ClampEq[F] => ClampEq[Case[F, K, _]] {
+        override def testEqual[A, B](a: Case[F, K, A], b: Case[F, K, B]): Option[A =:= B] =
+          a isEqualTo b
+      }
+    }
+  }
 
   given [F[_]] => ClampEq[F] => ClampEq[SchemaMotif[F, _]] =
     new ClampEq[SchemaMotif[F, _]]:

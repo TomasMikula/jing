@@ -74,7 +74,7 @@ sealed trait ValueMotif[+F[_], T] {
           o match
             case ObjectMotif.Empty() =>
               false
-            case ObjectMotif.Snoc(init, lastName, lastValue) =>
+            case ObjectMotif.SnocReq(init, lastName, lastValue) =>
               if go(init) then b.append(", ")
               b.append(lastName.value: String)
               b.append(": ")
@@ -182,7 +182,7 @@ object ValueMotif {
       k: SingletonType[K],
       v: F[V],
     ): ValueMotif.Object[F, Base || K :: V] =
-      Object(ObjectMotif.Snoc(asObject(base).value, k, v))
+      Object(ObjectMotif.SnocReq(asObject(base).value, k, v))
 
     def extendOpt[F[_], Base, K <: String, V](
       base: ValueMotif[F, Obj[Base]],
@@ -200,7 +200,7 @@ object ValueMotif {
     extension [F[_], Init, K <: String, V](value: Object[F, Init || K :: V])
       def unsnoc: (Object[F, Init], F[V]) =
         value.value match
-          case ObjectMotif.Snoc(init, lastName, lastValue) => (Object(init), lastValue)
+          case ObjectMotif.SnocReq(init, lastName, lastValue) => (Object(init), lastValue)
 
     extension [F[_], Init, K <: String, V](value: Object[F, Init || K :? V])
       @targetName("unsnocOpt")

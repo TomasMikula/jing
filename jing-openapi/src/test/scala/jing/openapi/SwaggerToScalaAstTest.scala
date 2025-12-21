@@ -444,16 +444,16 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
       case Schema.Proper(value) =>
         inside(value):
           case SchemaMotif.OneOf(discriminatorProperty, schemas) =>
-            assert(discriminatorProperty == "species")
+            assert(discriminatorProperty.value == "species")
 
             inside(schemas.getOption("Cat")):
               case Some(found) =>
-                val catSchema = found.value._2
+                val catSchema = found.value._2.payload
                 assert(catSchema == Cat.schema)
 
             inside(schemas.getOption("Dog")):
               case Some(found) =>
-                val dogSchema = found.value._2
+                val dogSchema = found.value._2.payload
                 assert(dogSchema == Dog.schema)
   }
 
@@ -513,16 +513,16 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
       case Schema.Proper(value) =>
         inside(value):
           case SchemaMotif.OneOf(discriminatorProperty, schemas) =>
-            assert(discriminatorProperty == "species")
+            assert(discriminatorProperty.value == "species")
 
             inside(schemas.getOption("cat")):
               case Some(found) =>
-                val catSchema = found.value._2
+                val catSchema = found.value._2.payload
                 assert(catSchema == Cat.schema)
 
             inside(schemas.getOption("dog")):
               case Some(found) =>
-                val dogSchema = found.value._2
+                val dogSchema = found.value._2.payload
                 assert(dogSchema == Dog.schema)
   }
 

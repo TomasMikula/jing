@@ -12,6 +12,13 @@ sealed infix trait ScalaValueOf[V, T] {
       case S(value) => value.value
       case B(value) => value.value
 
+  def singletonType: SingletonType[V] =
+    this match
+      case I32(value) => value
+      case I64(value) => value
+      case S(value) => value
+      case B(value) => value
+
   def contains(that: ScalaReprOf[T]): Option[ScalaValueOf[that.type & V, T]] =
     this match
       case I32(value) =>

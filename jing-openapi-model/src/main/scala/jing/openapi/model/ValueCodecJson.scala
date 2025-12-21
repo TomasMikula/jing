@@ -101,10 +101,10 @@ object ValueCodecJson {
             builder += '{'
             encodeObjectProps(o.value, value, builder)
             builder += '}'
-          case o: OneOf[schema, cases] =>
+          case o: OneOf[schema, k, cases] =>
             (value: Value[DiscriminatedUnion[cases]]).handleDiscriminatedUnion:
               [Lbl <: String, A] => (i, caseValue) =>
-                val caseSchema = o.schemas.get(IsCaseOf.toMember(i))
+                val caseSchema = o.schemas.get(IsCaseOf.toMember(i)).payload
                 // Note: No need to encode the discriminator, as it must be part of the value.
                 encode(caseSchema, caseValue, builder)
 
@@ -120,7 +120,7 @@ object ValueCodecJson {
     schema match
       case ObjectMotif.Empty() =>
         false
-      case s: ObjectMotif.Snoc[sch1, sch2, init, pname, ptype] =>
+      case s: ObjectMotif.SnocReq[sch1, sch2, init, pname, ptype] =>
         summon[Props =:= (init || pname :: ptype)]
         val (vInit, vLast) = Value.unsnoc[init, pname, ptype](value)
         val propsWritten = encodeObjectProps(s.init, vInit, builder)
@@ -246,16 +246,17 @@ object ValueCodecJson {
               case Some(obj) => decodeObjectLenient(o.asObject.value, jsonLoc, obj)
               case None => SchemaViolation(s"Expected JSON object, got ${json.name} (${json.noSpaces}). At ${jsonLoc.printLoc}")
 
-          case o: OneOf[schema, cases] =>
+          case o: OneOf[schema, k, cases] =>
             json.asObject match
               case Some(obj) =>
-                obj(o.discriminatorProperty) match
+                obj(o.discriminatorProperty.value) match
                   case Some(discJson) =>
                     discJson.asString match
                       case Some(disc) =>
                         o.schemas.getOption(disc) match
-                          case Some(Indeed((i, s))) =>
-                            decodeLenientAt(s, jsonLoc, obj.toJson)
+                          case Some(Indeed((i, c))) =>
+                            val caseSchema = c.payload
+                            decodeLenientAt(caseSchema, jsonLoc, obj.toJson)
                               .map(Value.Lenient.discriminatedUnion(IsCaseOf.fromMember(i), _))
                           case None =>
                             SchemaViolation(s"Discriminator value '$disc' not recognized. Expected one of ${o.schemas.names.mkString("'", "', '", "'")}. At ${jsonLoc.printLoc}.${o.discriminatorProperty}")
@@ -342,7 +343,7 @@ object ValueCodecJson {
     schema match
       case ObjectMotif.Empty() =>
         Succeeded(Value.Lenient.Obj.empty)
-      case ObjectMotif.Snoc(init, pname, ptype) =>
+      case ObjectMotif.SnocReq(init, pname, ptype) =>
         DecodeResult.ParseSuccess.map2(
           decodeObjectLenient(init, jsonLoc, json),
           decodePropLenient(pname, ptype, jsonLoc, json),

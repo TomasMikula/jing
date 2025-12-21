@@ -170,13 +170,19 @@ object ObjectMotif {
 
   }
 
-  sealed trait NonEmpty[Req[_], Opt[_], Ps] extends ObjectMotif[Req, Opt, Ps]
+  sealed trait NonEmpty[Req[_], Opt[_], Init, P] extends ObjectMotif[Req, Opt, Init || P] {
+    def init: ObjectMotif[Req, Opt, Init]
+    def last: Property[Req, Opt, P]
+  }
 
-  case class Snoc[Req[_], Opt[_], Init, PropName <: String, PropType](
+  case class SnocReq[Req[_], Opt[_], Init, PropName <: String, PropType](
     init: ObjectMotif[Req, Opt, Init],
     pname: SingletonType[PropName],
     pval: Req[PropType],
-  ) extends ObjectMotif.NonEmpty[Req, Opt, Init || PropName :: PropType] {
+  ) extends ObjectMotif.NonEmpty[Req, Opt, Init, PropName :: PropType] {
+
+    override def last: Property[Req, Opt, PropName :: PropType] =
+      Property.Required(pname, pval)
 
     override def get[K](using i: K IsPropertyOf Init || PropName :: PropType): i.ReqOrOpt[Req, Opt][i.Type] =
       i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
@@ -241,7 +247,7 @@ object ObjectMotif {
       Opt: ClampEq[Opt],
     ): Option[(Init || PropName :: PropType) =:= Qrops] =
       that match
-        case that: Snoc[req, opt, init, p, t] =>
+        case that: SnocReq[req, opt, init, p, t] =>
           for
             ev1 <- this.init isEqualTo that.init
             ev2 <- SingletonType.testEqualString(this.pname, that.pname)
@@ -263,7 +269,7 @@ object ObjectMotif {
         init.traverse(g, h),
         g(pval)
       ): (init, pval) =>
-        Snoc(init, pname, pval)
+        SnocReq(init, pname, pval)
 
     override def wipeTranslateA[M[_], G[_], H[_]](
       g: [A] => Req[A] => M[Exists[G]],
@@ -275,7 +281,7 @@ object ObjectMotif {
         init.wipeTranslateA(g, h),
         g(pval),
       ): (init, pval) =>
-        Indeed(Snoc(init.value, pname, pval.value))
+        Indeed(SnocReq(init.value, pname, pval.value))
 
     override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
@@ -290,7 +296,7 @@ object ObjectMotif {
       ):
         case (Indeed(ri, init), Indeed(rv, pval)) =>
           val rel = Rel.lift_||(ri, rv.lift_-::-(using pname))
-          Indeed((rel, Snoc(init, pname, pval)))
+          Indeed((rel, SnocReq(init, pname, pval)))
 
     override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
       t: NamedTuple[PropNamesTupleAcc[Init || PropName :: PropType, NAcc], PropTypesTupleFAcc[G, H, Init || PropName :: PropType, TAcc]],
@@ -310,7 +316,7 @@ object ObjectMotif {
         fReq(pval, g)
       val acc: TAcc =
         acc1.tail
-      (Snoc(initH, pname, i), acc)
+      (SnocReq(initH, pname, i), acc)
     }
 
     override protected def toTupleAcc[G[_], H[_], TAcc <: Tuple](
@@ -326,7 +332,10 @@ object ObjectMotif {
     init: ObjectMotif[Req, Opt, Init],
     pname: SingletonType[PropName],
     pval: Opt[PropType],
-  ) extends ObjectMotif.NonEmpty[Req, Opt, Init || PropName :? PropType] {
+  ) extends ObjectMotif.NonEmpty[Req, Opt, Init, PropName :? PropType] {
+
+    override def last: Property[Req, Opt, PropName :? PropType] =
+      Property.Optional(pname, pval)
 
     override def get[K](using i: K IsPropertyOf Init || PropName :? PropType): i.ReqOrOpt[Req, Opt][i.Type] =
       i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
@@ -472,6 +481,35 @@ object ObjectMotif {
       init.toTupleAcc[G, H, H[PropType] *: TAcc](g, h, h(pval) *: acc)
 
   }
+
+  sealed trait Property[Req[_], Opt[_], P]
+
+  object Property {
+    case class Required[Req[_], Opt[_], K <: String, T](k: SingletonType[K], value: Req[T]) extends Property[Req, Opt, K :: T]
+    case class Optional[Req[_], Opt[_], K <: String, T](k: SingletonType[K], value: Opt[T]) extends Property[Req, Opt, K :? T]
+  }
+
+  extension [Req[_], Opt[_], Init, K, T](obj: ObjectMotif[Req, Opt, Init || K :: T])
+    def unsnocReq: (ObjectMotif[Req, Opt, Init], SingletonType[K], Req[T]) =
+      obj match
+        case SnocReq(init, pname, pval) => (init, pname, pval)
+
+  extension [Req[_], Opt[_], Init, K, T](obj: ObjectMotif[Req, Opt, Init || K :? T])
+    def unsnocOpt: (ObjectMotif[Req, Opt, Init], SingletonType[K], Opt[T]) =
+      obj match
+        case SnocOpt(init, pname, pval) => (init, pname, pval)
+
+  extension [Req[_], Opt[_], Init, P](obj: ObjectMotif[Req, Opt, Init || P])
+    def nonEmpty: ObjectMotif.NonEmpty[Req, Opt, Init, P] =
+      obj match
+        case o: NonEmpty[r, o, i, p] => o
+
+    def unsnoc: (ObjectMotif[Req, Opt, Init], Property[Req, Opt, P]) =
+      val ne = nonEmpty
+      (ne.init, ne.last)
+
+    def lastProperty: Property[Req, Opt, P] =
+      nonEmpty.last
 
   given [Req[_], Opt[_]] => (ClampEq[Req], ClampEq[Opt]) => ClampEq[ObjectMotif[Req, Opt, _]] =
     new ClampEq[ObjectMotif[Req, Opt, _]]:

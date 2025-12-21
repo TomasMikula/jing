@@ -1,6 +1,6 @@
 package jing.openapi
 
-import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, IsRefinedBy, Obj, Oops, ScalaValueOf, Schema, SchemaMotif, Str, Unknown}
+import jing.openapi.model.{||, Arr, Bool, Const, DiscriminatedUnion, Enum, Int32, Int64, IsRefinedBy, Obj, Oops, ScalaValueOf, Schema, SchemaMotif, SingletonStringSchema, Str, Unknown}
 import jing.openapi.model.IsPropertyOf.IsRequiredPropertyOf
 import jing.openapi.model.IsRefinedBy.UnknownRefinedByAnything
 import libretto.lambda.Items1Named
@@ -196,20 +196,23 @@ private[openapi] object ProtoSchema {
     cases: List[Schema.Labeled[String, ?]],
     declaredMapping: Option[Map[String, String]], // TODO: check against reality
   ): Schema.Labeled[String, ?] = {
-    val schemasByDiscriminatorValues: Validated[String, List[(String, Schema.Labeled[String, ?], Int)]] =
+    type Case[A] =
+      SchemaMotif.OneOf.Case[Schema.Labeled[String, _], discriminatorProperty.type, A]
+
+    val oneOfCases: Validated[String, List[(Case[?], Int)]] =
       traverseList(cases.zipWithIndex):
         case (s, i) =>
           Validated.fromEither:
-            extractDiscriminatorValue(discriminatorProperty, s)
-              .map(r => (r.value._3, s, i))
+            asDiscriminatedCase(discriminatorProperty, s)
               .left.map(err => s"Case ${i+1}: $err")
-    schemasByDiscriminatorValues match
+              .map { (_, i) }
+    oneOfCases match
       case Invalid(errors) =>
         val msg = errors.toList.map(e => if (e.last == '.') e else s"$e.").mkString(" ")
         Schema.Labeled.unsupported(msg)
       case Valid(schemasByDiscriminatorValues) =>
         val discriminatorOccurrences: Map[String, List[Int]] =
-          schemasByDiscriminatorValues.groupMap(_._1)(_._3)
+          schemasByDiscriminatorValues.groupMap(_._1.discriminatorPropertyValue)(_._2)
         discriminatorOccurrences.collectFirst { case x @ (_, _ :: _ :: _) => x } match
           case Some((value, occurrences)) =>
             Schema.Labeled.unsupported(s"Ambiguous oneOf schema: \"$discriminatorProperty\" = \"$value\" occurs in cases ${occurrences.map(_ + 1).mkString(", ")}.")
@@ -224,15 +227,15 @@ private[openapi] object ProtoSchema {
                   case Right(()) =>
                     Schema.Labeled.Unlabeled(
                       SchemaMotif.OneOf(
-                        discriminatorProperty,
-                        Items1Named.Product.fromList(nel.map { case (k, v, _) => (k, v) }.toList)[Schema.Labeled[String, _]]([R] => (s, f) => f(s))[||, model.::],
+                        SingletonType(discriminatorProperty),
+                        Items1Named.Product.fromList(nel.map { case (c, _) => c.discriminatorPropertyValue -> c }.toList)[Case]([R] => (s, f) => f(s))[||, model.::],
                       )
                     )
   }
 
   private def validateDiscriminatorMapping(
     discriminatorProperty: String,
-    schemasByDiscriminatorValues: NonEmptyList[(String, Schema.Labeled[String, ?], Int)],
+    cases: NonEmptyList[(SchemaMotif.OneOf.Case[Schema.Labeled[String, _], discriminatorProperty.type, ?], Int)],
     mapping: Option[Map[String, String]],
   ): Either[String, Unit] =
     mapping match {
@@ -243,41 +246,51 @@ private[openapi] object ProtoSchema {
         val mappingValid: Validated[String, ?] =
           traverseList(mapping.toList)[Validated[String, _], Unit]:
             case (discriminatorValue, schemaName) =>
-              schemasByDiscriminatorValues.toList.find(_._2.labelOpt.contains(schemaName)) match
+              cases.toList.find(_._1.payload.labelOpt.contains(schemaName)) match
                 case None =>
                   invalid(s"Mapping of \"$discriminatorProperty\": \"$discriminatorValue\" refers to schema $schemaName, which is not among the oneOf cases.")
-                case Some((targetDiscriminatorValue, _, _)) =>
-                  if (targetDiscriminatorValue != discriminatorValue)
-                    invalid(s"Mapping of \"$discriminatorProperty\": \"$discriminatorValue\" refers to schema $schemaName, which, however, defines \"$discriminatorProperty\": \"$targetDiscriminatorValue\".")
+                case Some((c, _)) =>
+                  if (c.discriminatorPropertyValue != discriminatorValue)
+                    invalid(s"Mapping of \"$discriminatorProperty\": \"$discriminatorValue\" refers to schema $schemaName, which, however, defines \"$discriminatorProperty\": \"${c.discriminatorPropertyValue}\".")
                   else
                     valid(())
         val mappingComplete: Validated[String, ?] =
-          schemasByDiscriminatorValues.traverse:
-            case (discriminatorValue, schema, idx) =>
-              if (mapping.contains(discriminatorValue))
+          cases.traverse:
+            case (c, idx) =>
+              if (mapping.contains(c.discriminatorPropertyValue))
                 valid(())
               else
-                val schemaNameStr = schema.labelOpt.map(schemaName => s" ($schemaName)").getOrElse("")
-                invalid(s"Mapping is missing entry for \"$discriminatorProperty\": \"$discriminatorValue\", defined by oneOf case ${idx+1}$schemaNameStr.")
+                val schemaNameStr = c.payload.labelOpt.map(schemaName => s" ($schemaName)").getOrElse("")
+                invalid(s"Mapping is missing entry for \"$discriminatorProperty\": \"${c.discriminatorPropertyValue}\", defined by oneOf case ${idx+1}$schemaNameStr.")
         (mappingValid zip mappingComplete) match
           case Invalid(errors) => Left(errors.toList.mkString(" "))
           case Valid(_) => Right(())
     }
 
+  private def asDiscriminatedCase[A](
+    discriminatorProperty: String,
+    schema: Schema.Labeled[String, A],
+  ): Either[String, SchemaMotif.OneOf.Case[Schema.Labeled[String, _], discriminatorProperty.type, A]] =
+    extractDiscriminatorValue(discriminatorProperty, schema)
+      .map:
+        case Indeed(Indeed((ev, isProp, d))) =>
+          ev.substituteContra:
+            SchemaMotif.OneOf.Case.Impl(ev.substituteCo(schema), isProp, d)
+
   private def extractDiscriminatorValue[A](
     discriminatorProperty: String,
     schema: Schema.Labeled[String, A],
-  ): Either[String, Exists[[Ps] =>> (
+  ): Either[String, Exists[[Ps] =>> Exists[[T] =>> (
     A =:= Obj[Ps],
-    discriminatorProperty.type IsRequiredPropertyOf Ps,
-    String, // the unique value of discriminatorProperty
-  )]] =
+    IsRequiredPropertyOf.Aux[discriminatorProperty.type, Ps, T],
+    SingletonStringSchema[T], // the unique value of discriminatorProperty
+  )]]] =
     schema match
       case Schema.Labeled.Unlabeled(schema) =>
         schema match
           case obj: motif.Object[sl, ps] =>
             extractDiscriminatorValue(discriminatorProperty, obj)
-              .map { case (i, propConstantValue) => Exists((summon[A =:= Obj[ps]], i, propConstantValue)) }
+              .map { case Indeed((i, propConstantValue)) => Exists(Exists((summon[A =:= Obj[ps]], i, propConstantValue))) }
 
           case other =>
             Left(s"Expected object with property $discriminatorProperty, found ${shortTypeName(other)}")
@@ -293,15 +306,15 @@ private[openapi] object ProtoSchema {
   private def extractDiscriminatorValue[Ps](
     discriminatorProperty: String,
     objSchema: SchemaMotif.Object[Schema.Labeled[String, _], Ps],
-  ): Either[String, (
-    discriminatorProperty.type IsRequiredPropertyOf Ps,
-    String, // the unique value of discriminatorProperty
-  )] =
+  ): Either[String, Exists[[T] =>> (
+    IsRequiredPropertyOf.Aux[discriminatorProperty.type, Ps, T],
+    SingletonStringSchema[T], // the unique value of discriminatorProperty
+  )]] =
     objSchema.value.getOptFull(discriminatorProperty) match
       case Some(Indeed(Left((i, propSchema)))) =>
         asConstantString(propSchema) match
           case Right(propConstantValue) =>
-            Right((i, propConstantValue))
+            Right(Indeed((i, propConstantValue)))
           case Left(actual) =>
             Left(s"discriminator property \"$discriminatorProperty\" must have a constant string type (const or enum with a single case), but was $actual")
       case Some(Indeed(Right(_))) =>
@@ -311,16 +324,16 @@ private[openapi] object ProtoSchema {
 
   private def asConstantString[A](
     schema: Schema.Labeled[String, A],
-  ): Either[String, String] =
+  ): Either[String, SingletonStringSchema[A]] =
     schema match
       case Schema.Labeled.WithLabel(label, schema) =>
         asConstantString(schema)
       case Schema.Labeled.Unlabeled(schema) =>
         schema match
           case enm @ motif.Enumeration(_, _) =>
-            asConstantString(enm)
+            enumAsConstantString(enm)
           case motif.Constant.Primitive(ScalaValueOf.S(s)) =>
-            Right(s.value)
+            Right(SingletonStringSchema.Constant(s))
           case motif.S() =>
             Left(s"unconstrained string")
           case other =>
@@ -328,16 +341,23 @@ private[openapi] object ProtoSchema {
       case Schema.Labeled.Unsupported(message) =>
         Left(s"Unsupported: ${message.value}")
 
-  private def asConstantString[F[_], Base, Cases](
+  private def enumAsConstantString[F[_], Base, Cases](
     enm: motif.Enumeration[F, Base, Cases]
-  ): Either[String, String] =
+  ): Either[String, SingletonStringSchema[Enum[Base, Cases]]] =
     val motif.Enumeration(base, cases) = enm
     base match
       case motif.S() =>
         summon[Base =:= Str]
-        cases.toList([s] => v => v.get) match
-          case s :: Nil => Right(s)
-          case ss @ (_ :: _ :: _) => Left(s"enum with ${ss.size} cases (${ss.mkString("\"", ", ", "\"")})")
+        import libretto.lambda.Items1.Product.{Single, Snoc}
+        cases match
+          case s: Single[sep, nil, f, a] =>
+            summon[Cases =:= (Void || a)]
+            s.value match
+              case ScalaValueOf.S(s) =>
+                summon[a <:< String]
+                Right(SingletonStringSchema.SingletonEnum[a](s))
+          case s @ Snoc(init, last) =>
+            Left(s"enum with ${s.size} cases (${s.toList([s] => v => v.get).mkString("\"", ", ", "\"")})")
       case other =>
         Left(shortTypeName(other))
 
