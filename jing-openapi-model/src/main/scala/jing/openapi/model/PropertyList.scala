@@ -51,12 +51,12 @@ object PropertyList {
     init: PropertyList[Init],
     k: SingletonType[K],
   ) => PropertyList[Init || K :: V] =
-    ObjectMotif.SnocReq(init, k, ())
+    ObjectMotif.snocReq(init, k, ())
 
   @targetName("propListSnocOpt")
   given [Init, K <: String, V] => (
     init: PropertyList[Init],
     k: SingletonType[K],
   ) => PropertyList[Init || K :? V] =
-    ObjectMotif.SnocOpt(init, k, ())
+    ObjectMotif.snocOpt(init, k, ())
 }

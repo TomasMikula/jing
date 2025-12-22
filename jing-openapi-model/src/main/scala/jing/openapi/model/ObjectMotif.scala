@@ -1,15 +1,16 @@
 package jing.openapi.model
 
 import jing.openapi.model.IsPropertyOf.{IsOptionalPropertyOf, IsRequiredPropertyOf}
+import libretto.lambda.util.{Applicative, ClampEq, Exists, SingletonType, TypeEq, TypeEqK}
 import libretto.lambda.util.Exists.Indeed
-import libretto.lambda.util.{Applicative, ClampEq, Exists, SingletonType, TypeEqK}
+import libretto.lambda.util.TypeEq.Refl
 
 import scala.NamedTuple.NamedTuple
 
 sealed trait ObjectMotif[Req[_], Opt[_], Props] {
   import ObjectMotif.*
 
-  final def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type] =
+  def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type] =
     i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
       caseLastProp =
         [init] => (
@@ -60,7 +61,12 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
     h: [A] => Opt[A] => M[H[A]],
   )(using
     Applicative[M],
-  ): M[ObjectMotif[G, H, Props]]
+  ): M[ObjectMotif[G, H, Props]] =
+    relateTranslateA[=:=, G, H, M](
+      [X] => rx => g(rx).map(gx => Indeed((summon[X =:= X], gx))),
+      [X] => ox => h(ox).map(hx => Indeed((summon[X =:= X], hx))),
+    ).map:
+      case Indeed((TypeEq(Refl()), res)) => res
 
   def translate[G[_], H[_]](
     g: [A] => Req[A] => G[A],
@@ -141,14 +147,6 @@ object ObjectMotif {
         case Empty() => Some(summon[Void =:= Void])
         case _ => None
 
-    override def traverse[M[_], G[_], H[_]](
-      g: [A] => Req[A] => M[G[A]],
-      h: [A] => Opt[A] => M[H[A]],
-    )(using
-      M: Applicative[M],
-    ): M[ObjectMotif[G, H, Void]] =
-      M.pure(Empty())
-
     override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
       h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
@@ -175,73 +173,51 @@ object ObjectMotif {
 
   }
 
-  sealed trait NonEmpty[Req[_], Opt[_], Init, P] extends ObjectMotif[Req, Opt, Init || P] {
-    def init: ObjectMotif[Req, Opt, Init]
-    def last: Property[Req, Opt, P]
-  }
-
-  case class SnocReq[Req[_], Opt[_], Init, PropName <: String, PropType](
+  case class Snoc[Req[_], Opt[_], Init, P](
     init: ObjectMotif[Req, Opt, Init],
-    pname: SingletonType[PropName],
-    pval: Req[PropType],
-  ) extends ObjectMotif.NonEmpty[Req, Opt, Init, PropName :: PropType] {
-
-    override def last: Property[Req, Opt, PropName :: PropType] =
-      Property.Required(pname, pval)
+    last: Property[Req, Opt, P],
+  ) extends ObjectMotif[Req, Opt, Init || P] {
 
     override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
-      if (k == pname.value)
-        Some(Exists(pval))
-      else
-        init.getOpt(k)
+      last.getOpt(k) `orElse` init.getOpt(k)
 
     override def getOptFull(k: String): Option[Exists[[A] =>>
       Either[
-        (IsRequiredPropertyOf.Aux[k.type, Init || PropName :: PropType, A], Req[A]),
-        (IsOptionalPropertyOf.Aux[k.type, Init || PropName :: PropType, A], Opt[A]),
+        (IsRequiredPropertyOf.Aux[k.type, Init || P, A], Req[A]),
+        (IsOptionalPropertyOf.Aux[k.type, Init || P, A], Opt[A]),
       ]
     ]] =
-      if (k == pname.value)
-        val ev: k.type =:= PropName = summon[k.type =:= k.type].asInstanceOf
-        val i = summon[IsRequiredPropertyOf.Aux[PropName, Init || PropName :: PropType, PropType]]
-        val j = ev.substituteContra[IsRequiredPropertyOf.Aux[_, Init || PropName :: PropType, PropType]](i)
-        Some(Exists(Left((j, pval))))
-      else
-        init
-          .getOptFull(k)
-          .map {
-            case Indeed(Left((i, v))) => Indeed(Left((i.inInit, v)))
-            case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
-          }
+      SingletonType.testEqualString(SingletonType(k), last.name) match
+        case Some(ev) =>
+          last.asLastPropertyOf[Init] match
+            case Left((isReqProp, ra)) =>
+              val i: IsRequiredPropertyOf.Aux[k.type, Init || P, last.Type] =
+                ev.substituteContra[IsRequiredPropertyOf.Aux[_, Init || P, last.Type]](isReqProp)
+              Some(Indeed(Left((i, ra))))
+            case Right((isOptProp, oa)) =>
+              val i: IsOptionalPropertyOf.Aux[k.type, Init || P, last.Type] =
+                ev.substituteContra[IsOptionalPropertyOf.Aux[_, Init || P, last.Type]](isOptProp)
+              Some(Indeed(Right((i, oa))))
+        case None =>
+          init
+            .getOptFull(k)
+            .map:
+              case Indeed(Left((i, v))) => Indeed(Left((i.inInit, v)))
+              case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
 
     override def isEqualTo[Qrops](that: ObjectMotif[Req, Opt, Qrops])(using
-      Req: ClampEq[Req],
-      Opt: ClampEq[Opt],
-    ): Option[(Init || PropName :: PropType) =:= Qrops] =
+      ClampEq[Req],
+      ClampEq[Opt],
+    ): Option[(Init || P) =:= Qrops] =
       that match
-        case that: SnocReq[req, opt, init, p, t] =>
+        case that: Snoc[req, opt, init, p] =>
           for
-            ev1 <- this.init isEqualTo that.init
-            ev2 <- SingletonType.testEqualString(this.pname, that.pname)
-            ev3 <- Req.testEqual(this.pval, that.pval)
+            evInit <- this.init isEqualTo that.init
+            evLast <- this.last isEqualTo that.last
           yield
-            ev1.liftCo[[i] =>> i || PropName :: PropType]
-              .andThen(ev2.liftCo[[p] =>> init || p :: PropType])
-              .andThen(ev3.liftCo[[t] =>> init || p :: t])
-        case _ =>
+            evInit.liftCo[||[_, P]] andThen evLast.liftCo[||[init, _]]
+        case Empty() =>
           None
-
-    override def traverse[M[_], G[_], H[_]](
-      g: [A] => Req[A] => M[G[A]],
-      h: [A] => Opt[A] => M[H[A]],
-    )(using
-      M: Applicative[M],
-    ): M[ObjectMotif[G, H, Init || PropName :: PropType]] =
-      M.map2(
-        init.traverse(g, h),
-        g(pval)
-      ): (init, pval) =>
-        SnocReq(init, pname, pval)
 
     override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
@@ -249,174 +225,229 @@ object ObjectMotif {
     )(using
       Rel: Compatible[Rel],
       M: Applicative[M],
-    ): M[Exists[[Qrops] =>> (Rel[Init || PropName :: PropType, Qrops], ObjectMotif[G, H, Qrops])]] =
+    ): M[Exists[[Qs] =>> (Rel[Init || P, Qs], ObjectMotif[G, H, Qs])]] =
       M.map2(
         init.relateTranslateA(g, h),
-        g(pval),
+        last.relateTranslateA(g, h),
       ):
-        case (Indeed(ri, init), Indeed(rv, pval)) =>
-          val rel = Rel.lift_||(ri, rv.lift_-::-(using pname))
-          Indeed((rel, SnocReq(init, pname, pval)))
-
-    override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
-      t: NamedTuple[PropNamesTupleAcc[Init || PropName :: PropType, NAcc], PropTypesTupleFAcc[G, H, Init || PropName :: PropType, TAcc]],
-    )(
-      fReq: [A] => (Req[A], G[A]) => I[A],
-      fOpt: [A] => (Opt[A], H[A]) => J[A],
-    ): (ObjectMotif[I, J, Init || PropName :: PropType], TAcc) = {
-      type NAcc1 =   PropName  *: NAcc
-      type TAcc1 = G[PropType] *: TAcc
-      val (initH, acc1) =
-        init.zipWithNamedTupleAcc[G, H, NAcc1, TAcc1, I, J](
-          t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleFAcc[G, H, Init, TAcc1]]
-        )(fReq, fOpt)
-      val g: G[PropType] =
-        acc1.head
-      val i: I[PropType] =
-        fReq(pval, g)
-      val acc: TAcc =
-        acc1.tail
-      (SnocReq(initH, pname, i), acc)
-    }
+        case (Indeed(ri, init), Indeed(rl, last)) =>
+          val rel = Rel.lift_||(ri, rl)
+          Indeed((rel, Snoc(init, last)))
 
     override protected def toTupleAcc[G[_], H[_], TAcc <: Tuple](
       g: [A] => Req[A] => G[A],
       h: [A] => Opt[A] => H[A],
       acc: TAcc,
-    ): PropTypesTupleFAcc[G, H, Init || PropName :: PropType, TAcc] =
-      init.toTupleAcc[G, H, G[PropType] *: TAcc](g, h, g(pval) *: acc)
+    ): PropTypesTupleFAcc[G, H, Init || P, TAcc] =
+      init.toTupleAcc[G, H, PropTypeF[G, H, P] *: TAcc](g, h, last.value(g, h) *: acc)
+
+    override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
+      t: NamedTuple[
+        PropNamesTupleAcc[Init, PropName[P] *: NAcc],
+        PropTypesTupleFAcc[G, H, Init, PropTypeF[G, H, P] *: TAcc]
+      ],
+    )(
+      fReq: [A] => (Req[A], G[A]) => I[A],
+      fOpt: [A] => (Opt[A], H[A]) => J[A],
+    ): (ObjectMotif[I, J, Init || P], TAcc) =
+      type NAcc1 = PropName[P]        *: NAcc
+      type TAcc1 = PropTypeF[G, H, P] *: TAcc
+      val (initH, acc1) =
+        init.zipWithNamedTupleAcc[G, H, NAcc1, TAcc1, I, J](
+          t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleFAcc[G, H, Init, TAcc1]]
+        )(fReq, fOpt)
+      val ghp: PropTypeF[G, H, P] =
+        acc1.head
+      val ijp: Property[I, J, P] =
+        last.zipWith(ghp)(fReq, fOpt)
+      val acc: TAcc =
+        acc1.tail
+      (Snoc(initH, ijp), acc)
 
   }
 
-  case class SnocOpt[Req[_], Opt[_], Init, PropName <: String, PropType](
-    init: ObjectMotif[Req, Opt, Init],
-    pname: SingletonType[PropName],
-    pval: Opt[PropType],
-  ) extends ObjectMotif.NonEmpty[Req, Opt, Init, PropName :? PropType] {
+  sealed trait Property[Req[_], Opt[_], P] {
+    type Name <: String
+    type Type
 
-    override def last: Property[Req, Opt, PropName :? PropType] =
-      Property.Optional(pname, pval)
+    def name: SingletonType[Name]
+    def value: Req[Type] | Opt[Type]
 
-    override def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
-      if (k == pname.value)
-        Some(Exists(pval))
-      else
-        init.getOpt(k)
+    def value[G[_], H[_]](
+      g: [A] => Req[A] => G[A],
+      h: [A] => Opt[A] => H[A],
+    ): PropTypeF[G, H, P]
 
-    override def getOptFull(k: String): Option[Exists[[A] =>>
-      Either[
-        (IsRequiredPropertyOf.Aux[k.type, Init || PropName :? PropType, A], Req[A]),
-        (IsOptionalPropertyOf.Aux[k.type, Init || PropName :? PropType, A], Opt[A]),
-      ]
-    ]] =
-      if (k == pname.value)
-        val ev: k.type =:= PropName = summon[k.type =:= k.type].asInstanceOf
-        val i = summon[IsOptionalPropertyOf.Aux[PropName, Init || PropName :? PropType, PropType]]
-        val j = ev.substituteContra[IsOptionalPropertyOf.Aux[_, Init || PropName :? PropType, PropType]](i)
-        Some(Exists(Right((j, pval))))
-      else
-        init
-          .getOptFull(k)
-          .map {
-            case Indeed(Left((i, v))) => Indeed(Left((i.inInit, v)))
-            case Indeed(Right((i, v))) => Indeed(Right((i.inInit, v)))
-          }
+    def getOpt(k: String): Option[Exists[[A] =>> Req[A] | Opt[A]]] =
+      Option.when(name.value == k):
+        Exists(value)
 
-    override def isEqualTo[Qrops](that: ObjectMotif[Req, Opt, Qrops])(using
+    infix def isEqualTo[Q](that: Property[Req, Opt, Q])(using
       Req: ClampEq[Req],
       Opt: ClampEq[Opt],
-    ): Option[(Init || PropName :? PropType) =:= Qrops] =
-      that match
-        case that: SnocOpt[req, opt, init, p, t] =>
-          for
-            ev1 <- this.init isEqualTo that.init
-            ev2 <- SingletonType.testEqualString(this.pname, that.pname)
-            ev3 <- Opt.testEqual(this.pval, that.pval)
-          yield
-            ev1.liftCo[[i] =>> i || PropName :? PropType]
-              .andThen(ev2.liftCo[[p] =>> init || p :? PropType])
-              .andThen(ev3.liftCo[[t] =>> init || p :? t])
-        case _ =>
-          None
+    ): Option[P =:= Q]
 
-    override def traverse[M[_], G[_], H[_]](
-      g: [A] => Req[A] => M[G[A]],
-      h: [A] => Opt[A] => M[H[A]],
-    )(using
-      M: Applicative[M],
-    ): M[ObjectMotif[G, H, Init || PropName :? PropType]] =
-      M.map2(
-        init.traverse(g, h),
-        h(pval),
-      ): (init, pval) =>
-        SnocOpt(init, pname, pval)
-
-    override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
+    def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
       g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
       h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
     )(using
       Rel: Compatible[Rel],
       M: Applicative[M],
-    ): M[Exists[[Qrops] =>> (Rel[Init || PropName :? PropType, Qrops], ObjectMotif[G, H, Qrops])]] =
-      M.map2(
-        init.relateTranslateA(g, h),
-        h(pval),
-      ):
-        case (Indeed((ri, init)), Indeed((rv, pval))) =>
-          val rel = Rel.lift_||(ri, rv.lift_-:?-(using pname))
-          Indeed((rel, SnocOpt(init, pname, pval)))
+    ): M[Exists[[Q] =>> (Rel[P, Q], Property[G, H, Q])]]
 
-    override protected def zipWithNamedTupleAcc[G[_], H[_], NAcc <: Tuple, TAcc <: Tuple, I[_], J[_]](
-      t: NamedTuple[PropNamesTupleAcc[Init || PropName :? PropType, NAcc], PropTypesTupleFAcc[G, H, Init || PropName :? PropType, TAcc]],
+    def zipWith[G[_], H[_], I[_], J[_]](
+      that: PropTypeF[G, H, P],
     )(
       fReq: [A] => (Req[A], G[A]) => I[A],
       fOpt: [A] => (Opt[A], H[A]) => J[A],
-    ): (ObjectMotif[I, J, Init || PropName :? PropType], TAcc) = {
-      type NAcc1 =   PropName  *: NAcc
-      type TAcc1 = H[PropType] *: TAcc
-      val (initH, acc1) =
-        init.zipWithNamedTupleAcc[G, H, NAcc1, TAcc1, I, J](
-          t: NamedTuple[PropNamesTupleAcc[Init, NAcc1], PropTypesTupleFAcc[G, H, Init, TAcc1]]
-        )(fReq, fOpt)
-      val h: H[PropType] =
-        acc1.head
-      val j: J[PropType] =
-        fOpt(pval, h)
-      val acc: TAcc =
-        acc1.tail
-      (SnocOpt(initH, pname, j), acc)
-    }
+    ): Property[I, J, P]
 
-    override protected def toTupleAcc[G[_], H[_], TAcc <: Tuple](
-      g: [A] => Req[A] => G[A],
-      h: [A] => Opt[A] => H[A],
-      acc: TAcc,
-    ): PropTypesTupleFAcc[G, H, Init || PropName :? PropType, TAcc] =
-      init.toTupleAcc[G, H, H[PropType] *: TAcc](g, h, h(pval) *: acc)
-
+    def asLastPropertyOf[Init]: Either[
+      (IsRequiredPropertyOf.Aux[Name, Init || P, Type], Req[Type]),
+      (IsOptionalPropertyOf.Aux[Name, Init || P, Type], Opt[Type]),
+    ]
   }
-
-  sealed trait Property[Req[_], Opt[_], P]
 
   object Property {
-    case class Required[Req[_], Opt[_], K <: String, T](k: SingletonType[K], value: Req[T]) extends Property[Req, Opt, K :: T]
-    case class Optional[Req[_], Opt[_], K <: String, T](k: SingletonType[K], value: Opt[T]) extends Property[Req, Opt, K :? T]
+    case class Required[Req[_], Opt[_], K <: String, T](name: SingletonType[K], value: Req[T]) extends Property[Req, Opt, K :: T] {
+      override type Name = K
+      override type Type = T
+
+      override def value[G[_], H[_]](
+        g: [A] => Req[A] => G[A],
+        h: [A] => Opt[A] => H[A],
+      ): PropTypeF[G, H, K :: T] =
+        g(value)
+
+      override def isEqualTo[Q](that: Property[Req, Opt, Q])(using
+        Req: ClampEq[Req],
+        Opt: ClampEq[Opt],
+      ): Option[K :: T =:= Q] =
+        that match
+          case that: Required[req, opt, k, t] =>
+            for
+              evName <- SingletonType.testEqualString(this.name, that.name)
+              evValue <- Req.testEqual(this.value, that.value)
+            yield
+              evName.liftCo[::[_, T]] andThen evValue.liftCo[::[k, _]]
+          case Optional(_, _) =>
+            None
+
+      override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
+        g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+        h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
+      )(using
+        Rel: Compatible[Rel],
+        M: Applicative[M],
+      ): M[Exists[[Q] =>> (Rel[K :: T, Q], Property[G, H, Q])]] =
+        g(value).map:
+          case Indeed((rel, gt)) =>
+            Indeed((rel.lift_-::-[K](using name), Required(name, gt)))
+
+      override def zipWith[G[_], H[_], I[_], J[_]](that: PropTypeF[G, H, K :: T])(
+        fReq: [A] => (Req[A], G[A]) => I[A],
+        fOpt: [A] => (Opt[A], H[A]) => J[A],
+      ): Property[I, J, K :: T] =
+        Required(name, fReq(this.value, that))
+
+      override def asLastPropertyOf[Init]: Either[
+        (IsRequiredPropertyOf.Aux[K, Init || K :: T, T], Req[T]),
+        (IsOptionalPropertyOf.Aux[K, Init || K :: T, T], Opt[T]),
+      ] =
+        Left((summon, value))
+    }
+
+    case class Optional[Req[_], Opt[_], K <: String, T](name: SingletonType[K], value: Opt[T]) extends Property[Req, Opt, K :? T] {
+      override type Name = K
+      override type Type = T
+
+      override def value[G[_], H[_]](
+        g: [A] => Req[A] => G[A],
+        h: [A] => Opt[A] => H[A],
+      ): PropTypeF[G, H, K :? T] =
+        h(value)
+
+      override def isEqualTo[Q](that: Property[Req, Opt, Q])(using
+        Req: ClampEq[Req],
+        Opt: ClampEq[Opt],
+      ): Option[K :? T =:= Q] =
+        that match
+          case that: Optional[req, opt, k, t] =>
+            for
+              evName <- SingletonType.testEqualString(this.name, that.name)
+              evValue <- Opt.testEqual(this.value, that.value)
+            yield
+              evName.liftCo[:?[_, T]] andThen evValue.liftCo[:?[k, _]]
+          case Required(_, _) =>
+            None
+
+      override def relateTranslateA[Rel[_,_], G[_], H[_], M[_]](
+        g: [X] => Req[X] => M[Exists[[Y] =>> (Rel[X, Y], G[Y])]],
+        h: [X] => Opt[X] => M[Exists[[Y] =>> (Rel[X, Y], H[Y])]],
+      )(using
+        Rel: Compatible[Rel],
+        M: Applicative[M],
+      ): M[Exists[[Q] =>> (Rel[K :? T, Q], Property[G, H, Q])]] =
+        h(value).map:
+          case Indeed((rel, ht)) =>
+            Indeed((rel.lift_-:?-[K](using name), Optional(name, ht)))
+
+      override def zipWith[G[_], H[_], I[_], J[_]](that: PropTypeF[G, H, K :? T])(
+        fReq: [A] => (Req[A], G[A]) => I[A],
+        fOpt: [A] => (Opt[A], H[A]) => J[A],
+      ): Property[I, J, K :? T] =
+        Optional(name, fOpt(this.value, that))
+
+      override def asLastPropertyOf[Init]: Either[
+        (IsRequiredPropertyOf.Aux[K, Init || K :? T, T], Req[T]),
+        (IsOptionalPropertyOf.Aux[K, Init || K :? T, T], Opt[T]),
+      ] =
+        Right((summon, value))
+    }
+
+    extension [Req[_], Opt[_], K, T](p: Property[Req, Opt, K :: T])
+      def nameReq: SingletonType[K] =
+        p match { case Required(name, _) => name }
+
+      def valueReq: Req[T] =
+        p match { case Required(_, value) => value }
+
+    extension [Req[_], Opt[_], K, T](p: Property[Req, Opt, K :? T])
+      def nameOpt: SingletonType[K] =
+        p match { case Optional(name, _) => name }
+
+      def valueOpt: Opt[T] =
+        p match { case Optional(_, value) => value }
   }
+
+  def snocReq[Req[_], Opt[_], Init, K <: String, T](
+    init: ObjectMotif[Req, Opt, Init],
+    pname: SingletonType[K],
+    pval: Req[T],
+  ): ObjectMotif[Req, Opt, Init || K :: T] =
+    Snoc(init, Property.Required(pname, pval))
+
+  def snocOpt[Req[_], Opt[_], Init, K <: String, T](
+    init: ObjectMotif[Req, Opt, Init],
+    pname: SingletonType[K],
+    pval: Opt[T],
+  ): ObjectMotif[Req, Opt, Init || K :? T] =
+    Snoc(init, Property.Optional(pname, pval))
 
   extension [Req[_], Opt[_], Init, K, T](obj: ObjectMotif[Req, Opt, Init || K :: T])
     def unsnocReq: (ObjectMotif[Req, Opt, Init], SingletonType[K], Req[T]) =
       obj match
-        case SnocReq(init, pname, pval) => (init, pname, pval)
+        case Snoc(init, last) => (init, last.nameReq, last.valueReq)
 
   extension [Req[_], Opt[_], Init, K, T](obj: ObjectMotif[Req, Opt, Init || K :? T])
     def unsnocOpt: (ObjectMotif[Req, Opt, Init], SingletonType[K], Opt[T]) =
       obj match
-        case SnocOpt(init, pname, pval) => (init, pname, pval)
+        case Snoc(init, last) => (init, last.nameOpt, last.valueOpt)
 
   extension [Req[_], Opt[_], Init, P](obj: ObjectMotif[Req, Opt, Init || P])
-    def nonEmpty: ObjectMotif.NonEmpty[Req, Opt, Init, P] =
+    def nonEmpty: ObjectMotif.Snoc[Req, Opt, Init, P] =
       obj match
-        case o: NonEmpty[r, o, i, p] => o
+        case o: Snoc[r, o, i, p] => o
 
     def unsnoc: (ObjectMotif[Req, Opt, Init], Property[Req, Opt, P]) =
       val ne = nonEmpty

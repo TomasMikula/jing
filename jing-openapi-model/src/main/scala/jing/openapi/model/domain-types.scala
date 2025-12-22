@@ -123,9 +123,12 @@ type PropNamesTupleAcc[Props, Acc <: Tuple] <: Tuple =
     case Void =>
       Acc
     case init || kv =>
-      kv match
-        case k :: _ => PropNamesTupleAcc[init, k *: Acc]
-        case k :? _ => PropNamesTupleAcc[init, k *: Acc]
+      PropNamesTupleAcc[init, PropName[kv] *: Acc]
+
+type PropName[P] =
+  P match
+    case k :: _ => k
+    case k :? _ => k
 
 type PropTypesTupleF[Req[_], Opt[_], Props] =
   PropTypesTupleFAcc[Req, Opt, Props, EmptyTuple]
@@ -135,9 +138,12 @@ type PropTypesTupleFAcc[Req[_], Opt[_], Props, Acc <: Tuple] <: Tuple =
     case Void =>
       Acc
     case init || kv =>
-      kv match
-        case _ :: v => PropTypesTupleFAcc[Req, Opt, init, Req[v] *: Acc]
-        case _ :? v => PropTypesTupleFAcc[Req, Opt, init, Opt[v] *: Acc]
+      PropTypesTupleFAcc[Req, Opt, init, PropTypeF[Req, Opt, kv] *: Acc]
+
+type PropTypeF[Req[_], Opt[_], Prop] =
+  Prop match
+    case _ :: v => Req[v]
+    case _ :? v => Opt[v]
 
 type Optional[F[_]] =
   [A] =>> Option[F[A]]

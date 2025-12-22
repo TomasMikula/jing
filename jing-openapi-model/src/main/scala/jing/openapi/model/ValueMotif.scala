@@ -74,23 +74,25 @@ sealed trait ValueMotif[+F[_], T] {
           o match
             case ObjectMotif.Empty() =>
               false
-            case ObjectMotif.SnocReq(init, lastName, lastValue) =>
-              if go(init) then b.append(", ")
-              b.append(lastName.value: String)
-              b.append(": ")
-              f(lastValue, b)
-              true
-            case so: ObjectMotif.SnocOpt[req, opt, init, k, v] =>
-              val isSeparatorNeeded = go(so.init)
-              (so.pval: Option[F[v]]) match
-                case None =>
-                  isSeparatorNeeded
-                case Some(v) =>
-                  if (isSeparatorNeeded) b.append(", ")
-                  b.append(so.pname.value: String)
+            case ObjectMotif.Snoc(init, last) =>
+              last match
+                case ObjectMotif.Property.Required(lastName, lastValue) =>
+                  if go(init) then b.append(", ")
+                  b.append(lastName.value: String)
                   b.append(": ")
-                  f(v, b)
+                  f(lastValue, b)
                   true
+                case p: ObjectMotif.Property.Optional[req, opt, k, v] =>
+                  val isSeparatorNeeded = go(init)
+                  (p.value: Option[F[v]]) match
+                    case None =>
+                      isSeparatorNeeded
+                    case Some(v) =>
+                      if (isSeparatorNeeded) b.append(", ")
+                      b.append(p.name.value: String)
+                      b.append(": ")
+                      f(v, b)
+                      true
         }
         go((obj: Object[f, ps]).asInstanceOf[Object[F, ps]].value) // TODO: remove unsafe cast when https://github.com/scala/scala3/issues/22993 is fixed
         b.append("}")
@@ -182,14 +184,14 @@ object ValueMotif {
       k: SingletonType[K],
       v: F[V],
     ): ValueMotif.Object[F, Base || K :: V] =
-      Object(ObjectMotif.SnocReq(asObject(base).value, k, v))
+      Object(ObjectMotif.snocReq(asObject(base).value, k, v))
 
     def extendOpt[F[_], Base, K <: String, V](
       base: ValueMotif[F, Obj[Base]],
       k: SingletonType[K],
       v: Option[F[V]],
     ): ValueMotif.Object[F, Base || K :? V] =
-      Object(ObjectMotif.SnocOpt(asObject(base).value, k, v))
+      Object(ObjectMotif.snocOpt(asObject(base).value, k, v))
 
     extension [F[_], Ps](value: ValueMotif[F, Obj[Ps]]) {
       private def asObject: ValueMotif.Object[F, Ps] =
@@ -199,14 +201,14 @@ object ValueMotif {
 
     extension [F[_], Init, K <: String, V](value: Object[F, Init || K :: V])
       def unsnoc: (Object[F, Init], F[V]) =
-        value.value match
-          case ObjectMotif.SnocReq(init, lastName, lastValue) => (Object(init), lastValue)
+        value.value.unsnocReq match
+          case (init, _, lastValue) => (Object(init), lastValue)
 
     extension [F[_], Init, K <: String, V](value: Object[F, Init || K :? V])
       @targetName("unsnocOpt")
       def unsnoc: (Object[F, Init], Option[F[V]]) =
-        value.value match
-          case ObjectMotif.SnocOpt(init, lastName, lastValue) => (Object(init), lastValue)
+        value.value.unsnocOpt match
+          case (init, _, lastValue) => (Object(init), lastValue)
   }
 
   case class DiscUnion[F[_], As](

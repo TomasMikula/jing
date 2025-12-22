@@ -120,22 +120,25 @@ object ValueCodecJson {
     schema match
       case ObjectMotif.Empty() =>
         false
-      case s: ObjectMotif.SnocReq[sch1, sch2, init, pname, ptype] =>
-        summon[Props =:= (init || pname :: ptype)]
-        val (vInit, vLast) = Value.unsnoc[init, pname, ptype](value)
-        val propsWritten = encodeObjectProps(s.init, vInit, builder)
-        appendProp(s.pval, s.pname.value, vLast, propsWritten, builder)
-        true
-      case s: ObjectMotif.SnocOpt[sch1, sch2, init, pname, ptype] =>
-        summon[Props =:= (init || pname :? ptype)]
-        val (vInit, vLastOpt) = Value.unsnoc[init, pname, ptype](value)
-        val propsWritten = encodeObjectProps(s.init, vInit, builder)
-        vLastOpt match
-          case None =>
-            propsWritten
-          case Some(vLast) =>
-            appendProp(s.pval, s.pname.value, vLast, propsWritten, builder)
+      case s: ObjectMotif.Snoc[sch1, sch2, init, prop] =>
+        summon[Props =:= (init || prop)]
+        s.last match
+          case p: ObjectMotif.Property.Required[sch1, sch2, pname, ptype] =>
+            summon[Props =:= (init || pname :: ptype)]
+            val (vInit, vLast) = Value.unsnoc[init, pname, ptype](value)
+            val propsWritten = encodeObjectProps(s.init, vInit, builder)
+            appendProp(p.value, p.name.value, vLast, propsWritten, builder)
             true
+          case p: ObjectMotif.Property.Optional[sch1, sch2, pname, ptype] =>
+            summon[Props =:= (init || pname :? ptype)]
+            val (vInit, vLastOpt) = Value.unsnoc[init, pname, ptype](value)
+            val propsWritten = encodeObjectProps(s.init, vInit, builder)
+            vLastOpt match
+              case None =>
+                propsWritten
+              case Some(vLast) =>
+                appendProp(p.value, p.name.value, vLast, propsWritten, builder)
+                true
 
   private def appendProp[T](
     schema: Schema[T],
@@ -343,20 +346,20 @@ object ValueCodecJson {
     schema match
       case ObjectMotif.Empty() =>
         Succeeded(Value.Lenient.Obj.empty)
-      case ObjectMotif.SnocReq(init, pname, ptype) =>
-        DecodeResult.ParseSuccess.map2(
-          decodeObjectLenient(init, jsonLoc, json),
-          decodePropLenient(pname, ptype, jsonLoc, json),
-        ) { (init, last) =>
-          init.extend(pname, last)
-        }
-      case ObjectMotif.SnocOpt(init, pname, ptype) =>
-        DecodeResult.ParseSuccess.map2(
-          decodeObjectLenient(init, jsonLoc, json),
-          decodePropOptLenient(pname, ptype, jsonLoc, json),
-        ) { (init, last) =>
-          init.extendOpt(pname, last)
-        }
+      case ObjectMotif.Snoc(init, last) =>
+        last match
+          case ObjectMotif.Property.Required(pname, ptype) =>
+            DecodeResult.ParseSuccess.map2(
+              decodeObjectLenient(init, jsonLoc, json),
+              decodePropLenient(pname, ptype, jsonLoc, json),
+            ): (init, last) =>
+              init.extend(pname, last)
+          case ObjectMotif.Property.Optional(pname, ptype) =>
+            DecodeResult.ParseSuccess.map2(
+              decodeObjectLenient(init, jsonLoc, json),
+              decodePropOptLenient(pname, ptype, jsonLoc, json),
+            ): (init, last) =>
+              init.extendOpt(pname, last)
 
   private def decodePropLenient[K <: String, V](
     propName: SingletonType[K],

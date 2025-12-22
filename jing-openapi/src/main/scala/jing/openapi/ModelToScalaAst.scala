@@ -644,11 +644,11 @@ object ModelToScalaAst {
   ): Type[P] =
     p match
       case p: ObjectMotif.Property.Required[f, f_, k, t] =>
-        given Type[k] = quotedSingletonString(p.k)._1
+        given Type[k] = quotedSingletonString(p.name)._1
         given Type[t] = p.value.getType
         Type.of[k :: t]
       case p: ObjectMotif.Property.Optional[f, f_, k, t] =>
-        given Type[k] = quotedSingletonString(p.k)._1
+        given Type[k] = quotedSingletonString(p.name)._1
         given Type[t] = p.value.getType
         Type.of[k :? t]
 
@@ -844,31 +844,20 @@ object ModelToScalaAst {
         M.pure(
           Exists(Rel.lift_void, (Type.of[Void], N.pure('{ ObjectMotif.Empty() })))
         )
-      case ne: ObjectMotif.NonEmpty[f, f_, init, p] =>
-        quotedSchemaMotifObjectNonEmptyRelAA(ne, f).map:
-          case ex1 @ Indeed(ex2 @ Indeed((ri, rp, ti, tp, s))) =>
-            given Type[ex1.T] = ti
-            given t2: Type[ex2.T] = tp
-            Indeed((Rel.lift_||(ri, rp), (Type.of[ex1.T || ex2.T], s.widen)))
+      case ne: ObjectMotif.Snoc[f, f_, init, p] =>
+        M.map2(
+          quotedSchemaMotifObjectRelAA(ne.init, f),
+          quotedObjectPropertyRelAA(ne.last, f),
+        ):
+          case (ex1 @ Indeed((ri, (tqs, init))), ex2 @ Indeed((pRq, tq, q))) =>
+            type QInit = ex1.T
+            given Type[QInit] = tqs
+            type Q = ex2.T
+            given Type[Q] = tq
+            Indeed((Rel.lift_||(ri, pRq), (Type.of[QInit || Q], N.map2(init, q) { (init, q) => '{ ObjectMotif.Snoc($init, $q) } })))
 
-  def quotedSchemaMotifObjectNonEmptyRelAA[F[_], Ps, P, G[_], Rel[_, _], M[_], N[_]](
-    s: ObjectMotif.NonEmpty[F, F, Ps, P],
-    f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
-  )(using
-    q: Quotes,
-    tg: Type[G],
-    Rel: Compatible[Rel],
-    M: Applicative[M],
-    N: Applicative[N],
-  ): M[Exists[[Qs] =>> Exists[[Q] =>> (Rel[Ps, Qs], Rel[P, Q], Type[Qs], Type[Q], N[Expr[ObjectMotif.NonEmpty[G, G, Qs, Q]]])]]] =
-    s match
-      case snoc @ ObjectMotif.SnocReq(init, pname, ptype) =>
-        quotedSchemaMotifObjectSnocRelAA(snoc, f)
-      case snoc @ ObjectMotif.SnocOpt(init, pname, ptype) =>
-        quotedSchemaMotifObjectSnocOptRelAA(snoc, f)
-
-  private def quotedSchemaMotifObjectSnocRelAA[F[_], Init, PropName <: String, PropType, G[_], Rel[_, _], M[_], N[_]](
-    snoc: ObjectMotif.SnocReq[F, F, Init, PropName, PropType],
+  private def quotedObjectPropertyRelAA[F[_], P, G[_], Rel[_, _], M[_], N[_]](
+    p: ObjectMotif.Property[F, F, P],
     f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
   )(using
     q: Quotes,
@@ -876,47 +865,54 @@ object ModelToScalaAst {
     Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
-  ): M[Exists[[Qs] =>> Exists[[Q] =>> (
-    Rel[Init, Qs],
-    Rel[PropName :: PropType, Q],
-    Type[Qs],
+  ): M[Exists[[Q] =>> (
+    Rel[P, Q],
     Type[Q],
-    N[Expr[ObjectMotif.NonEmpty[G, G, Qs, Q]]],
-  )]]] = {
-    M.map2(
-      quotedSchemaMotifObjectRelAA(snoc.init, f),
-      f(snoc.pval),
-    ) {
-      case (e1 @ Indeed((ri, (ti, si))), e2 @ Indeed((rl, (tl, sl)))) =>
-        type As = e1.T
-        type B  = e2.T
-        given Type[As] = ti
+    N[Expr[ObjectMotif.Property[G, G, Q]]],
+  )]] =
+    p match
+      case req @ ObjectMotif.Property.Required(_, _) =>
+        quotedObjectPropertyReqRelAA(req, f)
+      case opt @ ObjectMotif.Property.Optional(_, _) =>
+        quotedObjectPropertyOptRelAA(opt, f)
+
+  private def quotedObjectPropertyReqRelAA[F[_], PropName <: String, PropType, G[_], Rel[_, _], M[_], N[_]](
+    p: ObjectMotif.Property.Required[F, F, PropName, PropType],
+    f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
+  )(using
+    q: Quotes,
+    G: Type[G],
+    Rel: Compatible[Rel],
+    M: Applicative[M],
+    N: Applicative[N],
+  ): M[Exists[[Q] =>> (
+    Rel[PropName :: PropType, Q],
+    Type[Q],
+    N[Expr[ObjectMotif.Property[G, G, Q]]],
+  )]] =
+    f(p.value).map {
+      case ex @ Indeed((rl, (tl, sl))) =>
+        type B  = ex.T
         given Type[B] = tl
-
-        val (nt, spn) = quotedSingletonString(snoc.pname)
-
+        val (nt, spn) = quotedSingletonString(p.name)
         given Type[PropName] = nt
 
-        val expr: N[Expr[ObjectMotif.NonEmpty[G, G, As, PropName :: B]]] =
-          N.map2(si, sl) { (si, sl) =>
-            '{ ObjectMotif.SnocReq[G, G, As, PropName, B]($si, $spn, $sl) }
-          }
+        val expr: N[Expr[ObjectMotif.Property[G, G, PropName :: B]]] =
+          sl.map: sl =>
+            '{ ObjectMotif.Property.Required[G, G, PropName, B]($spn, $sl) }
 
-        val pRq: (PropName :: PropType) `Rel` (PropName :: e2.T) =
-          rl.lift_-::-[PropName](using snoc.pname)
+        val pRq: (PropName :: PropType) `Rel` (PropName :: B) =
+          rl.lift_-::-[PropName](using p.name)
 
-        Exists(Exists((
-          ri,
+        Exists((
           pRq,
-          Type.of[As],
           Type.of[PropName :: B],
           expr,
-        )))
+        ))
     }
-  }
 
-  private def quotedSchemaMotifObjectSnocOptRelAA[F[_], Init, PropName <: String, PropType, G[_], Rel[_, _], M[_], N[_]](
-    snoc: ObjectMotif.SnocOpt[F, F, Init, PropName, PropType],
+  private def quotedObjectPropertyOptRelAA[F[_], PropName <: String, PropType, G[_], Rel[_, _], M[_], N[_]](
+    p: ObjectMotif.Property.Optional[F, F, PropName, PropType],
     f: [A] => F[A] => M[Exists[[B] =>> (Rel[A, B], (Type[B], N[Expr[G[B]]]))]],
   )(using
     q: Quotes,
@@ -924,42 +920,30 @@ object ModelToScalaAst {
     Rel: Compatible[Rel],
     M: Applicative[M],
     N: Applicative[N],
-  ): M[Exists[[Qs] =>> Exists[[Q] =>> (
-    Rel[Init, Qs],
+  ): M[Exists[[Q] =>> (
     Rel[PropName :? PropType, Q],
-    Type[Qs],
     Type[Q],
-    N[Expr[ObjectMotif.NonEmpty[G, G, Qs, Q]]],
-  )]]] =
-    M.map2(
-      quotedSchemaMotifObjectRelAA(snoc.init, f),
-      f(snoc.pval),
-    ) {
-      case (e1 @ Indeed((ri, (ti, si))), e2 @ Indeed((rl, (tl, sl)))) =>
-        type As = e1.T
-        type B  = e2.T
-        given Type[As] = ti
+    N[Expr[ObjectMotif.Property[G, G, Q]]],
+  )]] =
+    f(p.value).map {
+      case ex @ Indeed((rl, (tl, sl))) =>
+        type B  = ex.T
         given Type[B] = tl
-
-        val (nt, spn) = quotedSingletonString(snoc.pname)
-
+        val (nt, spn) = quotedSingletonString(p.name)
         given Type[PropName] = nt
 
-        val expr: N[Expr[ObjectMotif.NonEmpty[G, G, As, PropName :? B]]] =
-          N.map2(si, sl) { (si, sl) =>
-            '{ ObjectMotif.SnocOpt[G, G, As, PropName, B]($si, $spn, $sl) }
-          }
+        val expr: N[Expr[ObjectMotif.Property[G, G, PropName :? B]]] =
+          sl.map: sl =>
+            '{ ObjectMotif.Property.Optional[G, G, PropName, B]($spn, $sl) }
 
-        val pRq: (PropName :? PropType) `Rel` (PropName :? e2.T) =
-          rl.lift_-:?-[PropName](using snoc.pname)
+        val pRq: (PropName :? PropType) `Rel` (PropName :? B) =
+          rl.lift_-:?-[PropName](using p.name)
 
-        Exists(Exists((
-          ri,
+        Exists((
           pRq,
-          Type.of[As],
           Type.of[PropName :? B],
           expr,
-        )))
+        ))
     }
 
   private def prodSingle[F[_], Label <: String, T](

@@ -221,7 +221,7 @@ object SchemaMotif {
       pname: SingletonType[K],
       ptype: F[V],
     ): Object[F, Init || K :: V] =
-      Object(ObjectMotif.SnocReq(asObject(init).value, pname, ptype))
+      Object(ObjectMotif.snocReq(asObject(init).value, pname, ptype))
 
     def snoc[F[_], Init, PropType](
       init: SchemaMotif[F, Obj[Init]],
@@ -235,7 +235,7 @@ object SchemaMotif {
       pname: SingletonType[K],
       ptype: F[V],
     ): Object[F, Init || K :? V] =
-      Object(ObjectMotif.SnocOpt(asObject(init).value, pname, ptype))
+      Object(ObjectMotif.snocOpt(asObject(init).value, pname, ptype))
 
     def snocOpt[F[_], Init, PropType](
       init: SchemaMotif[F, Obj[Init]],
