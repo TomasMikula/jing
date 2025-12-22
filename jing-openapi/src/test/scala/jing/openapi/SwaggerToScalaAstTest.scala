@@ -1,6 +1,7 @@
 package jing.openapi
 
 import jing.openapi.model.*
+import libretto.lambda.util.Exists.Indeed
 import org.scalatest.Inside
 import org.scalatest.funsuite.AnyFunSuite
 
@@ -443,18 +444,20 @@ class SwaggerToScalaAstTest extends AnyFunSuite with Inside {
     inside(Animal.schema):
       case Schema.Proper(value) =>
         inside(value):
-          case SchemaMotif.OneOf(discriminatorProperty, schemas) =>
-            assert(discriminatorProperty.value == "species")
+          case oneOf: SchemaMotif.OneOf[Schema, k, cases] =>
+            assert(oneOf.discriminatorProperty.value == "species")
 
-            inside(schemas.getOption("Cat")):
+            inside(oneOf.schemas.getOption("Cat")):
               case Some(found) =>
-                val catSchema = found.value._2.payload
+                val catSchema: Schema[?] = found.value._2.payload
                 assert(catSchema == Cat.schema)
+                assert(catSchema eq Cat.schema) // testing reuse of the exact same Schema object
 
-            inside(schemas.getOption("Dog")):
+            inside(oneOf.schemas.getOption("Dog")):
               case Some(found) =>
-                val dogSchema = found.value._2.payload
+                val dogSchema: Schema[?] = found.value._2.payload
                 assert(dogSchema == Dog.schema)
+                assert(dogSchema eq Dog.schema) // testing reuse of the exact same Schema object
   }
 
   test("oneOf with discriminator mapping") {
