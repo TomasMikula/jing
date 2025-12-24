@@ -12,7 +12,7 @@ sealed trait ObjectMotif[Req[_], Opt[_], Props] {
 
   def get[K](using i: IsPropertyOf[K, Props]): i.ReqOrOpt[Req, Opt][i.Type] =
     i.switch[i.ReqOrOpt[Req, Opt][i.Type]](
-      caseLastProp =
+      caseReqLastProp =
         [init] => (
           ev1: Props =:= (init || K :: i.Type),
           ev2: [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], F],

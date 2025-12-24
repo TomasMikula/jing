@@ -324,7 +324,15 @@ object SchemaMotif {
         )(using
           Applicative[M],
         ): M[Exists[[B] =>> (Obj[Ps] IsRefinedBy B, Case[G, K, B])]] =
-          throw NotImplementedError("TODO: implement OneOf.Case#refineTranslateA")
+          f(payload).map:
+            case Indeed((r, payloadG)) =>
+              r.preservesObj match
+                case ex2 @ Indeed((TypeEq(Refl()), pRq)) =>
+                  hasDiscriminatorProperty.refined(pRq) match
+                    case Indeed((vRw, i)) =>
+                      isSingletonString.isFullyRefined(vRw) match
+                        case TypeEq(Refl()) =>
+                          Indeed((r, Impl[G, K, ex2.T, V](payloadG, i, isSingletonString)))
       }
 
       def translator[F[_], G[_], K <: String](h: [X] => F[X] => G[X]): [X] => Case[F, K, X] => Case[G, K, X] =

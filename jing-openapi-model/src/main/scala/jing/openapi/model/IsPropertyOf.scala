@@ -1,6 +1,8 @@
 package jing.openapi.model
 
-import libretto.lambda.util.TypeEqK
+import libretto.lambda.util.{Exists, TypeEq, TypeEqK}
+import libretto.lambda.util.Exists.Indeed
+      import libretto.lambda.util.TypeEq.Refl
 
 /** Witnesses that `K` is a name of a property in the list of properties `Ps`.
  *
@@ -17,7 +19,7 @@ infix sealed trait IsPropertyOf[K, Ps] {
   type ReqOrOpt[Req[_], Opt[_]] <: [A] =>> Req[A] | Opt[A]
 
   def switch[R](
-    caseLastProp:    [init] => (Ps =:= (init || K :: Type), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[ReqOrOpt[F, G], F]) => R,
+    caseReqLastProp: [init] => (Ps =:= (init || K :: Type), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[ReqOrOpt[F, G], F]) => R,
     caseOptLastProp: [init] => (Ps =:= (init || K :? Type), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[ReqOrOpt[F, G], G]) => R,
     caseInitProp:    [init, last] => (Ps =:= (init || last), IsPropertyOf.Aux[K, init, Type, ReqOrOpt]) => R,
   ): R
@@ -26,6 +28,10 @@ infix sealed trait IsPropertyOf[K, Ps] {
 
   def inInit[Last]: IsPropertyOf.Aux[K, Ps || Last, Type, ReqOrOpt] =
     IsPropertyOf.IsInitPropertyOf(this)
+
+  def refined[Qs](
+    pRq: Ps IsRefinedBy Qs,
+  ): Exists[[U] =>> (Type IsRefinedBy U, IsPropertyOf.Aux[K, Qs, U, ReqOrOpt])]
 }
 
 object IsPropertyOf {
@@ -55,7 +61,7 @@ object IsPropertyOf {
       caseInitProp: [init, last] => (Ps =:= (init || last), IsRequiredPropertyOf.Aux[K, init, i.Type]) => R,
     ): R =
       i.switch(
-        caseLastProp = [init] => (ev1, _) => caseLastProp[init](ev1),
+        caseReqLastProp = [init] => (ev1, _) => caseLastProp[init](ev1),
         caseOptLastProp = [init] => (_, _) => throw AssertionError("Impossible"),
         caseInitProp = [init, last] => (ev1, j) => caseInitProp(ev1, j),
       )
@@ -67,7 +73,7 @@ object IsPropertyOf {
       caseInitProp: [init, last] => (Ps =:= (init || last), IsOptionalPropertyOf.Aux[K, init, i.Type]) => R,
     ): R =
       i.switch(
-        caseLastProp = [init] => (_, _) => throw AssertionError("Impossible"),
+        caseReqLastProp = [init] => (_, _) => throw AssertionError("Impossible"),
         caseOptLastProp = [init] => (ev1, _) => caseLastProp[init](ev1),
         caseInitProp = [init, last] => (ev1, j) => caseInitProp(ev1, j),
       )
@@ -78,14 +84,23 @@ object IsPropertyOf {
     override type ReqOrOpt[Req[_], Opt[_]] = Req
 
     override def switch[R](
-      caseLastProp: [init] => ((Init || K :: V) =:= (init || K :: V), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[F, F]) => R,
+      caseReqLastProp: [init] => ((Init || K :: V) =:= (init || K :: V), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[F, F]) => R,
       caseOptLastProp: [init] => ((Init || K :: V) =:= (init || K :? V), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[F, G]) => R,
       caseInitProp: [init, last] => ((Init || K :: V) =:= (init || last), IsPropertyOf.Aux[K, init, V, [Req[_], Opt[_]] =>> Req]) => R,
     ): R =
-      caseLastProp[Init](summon, [F[_], G[_]] => DummyImplicit ?=> summon)
+      caseReqLastProp[Init](summon, [F[_], G[_]] => DummyImplicit ?=> summon)
 
     override def propertiesNotVoid(using (Init || K :: V) =:= Void): Nothing =
       ||.isNotVoid
+
+    override def refined[Qs](
+      pRq: (Init || K :: V) IsRefinedBy Qs,
+    ): Exists[[W] =>> (V IsRefinedBy W, IsRequiredPropertyOf.Aux[K, Qs, W])] =
+      pRq.preserves_|| match
+        case ex1 @ Indeed(Indeed((TypeEq(Refl()), _, rkv))) =>
+          rkv.preserves_-:: match
+            case ex3 @ Indeed((TypeEq(Refl()), vRw)) =>
+              Indeed((vRw, IsRequiredLastPropertyOf[ex1.T, K, ex3.T]()))
   }
 
   case class IsOptionalLastPropertyOf[Init, K, V]() extends IsPropertyOf[K, Init || K :? V] {
@@ -93,7 +108,7 @@ object IsPropertyOf {
     override type ReqOrOpt[Req[_], Opt[_]] = Opt
 
     override def switch[R](
-      caseLastProp: [init] => ((Init || K :? V) =:= (init || K :: V), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[G, F]) => R,
+      caseReqLastProp: [init] => ((Init || K :? V) =:= (init || K :: V), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[G, F]) => R,
       caseOptLastProp: [init] => ((Init || K :? V) =:= (init || K :? V), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[G, G]) => R,
       caseInitProp: [init, last] => ((Init || K :? V) =:= (init || last), IsPropertyOf.Aux[K, init, V, [Req[_], Opt[_]] =>> Opt]) => R,
     ): R =
@@ -101,6 +116,15 @@ object IsPropertyOf {
 
     override def propertiesNotVoid(using (Init || K :? V) =:= Void): Nothing =
       ||.isNotVoid
+
+    override def refined[Qs](
+      pRq: (Init || K :? V) IsRefinedBy Qs,
+    ): Exists[[W] =>> (V IsRefinedBy W, IsOptionalPropertyOf.Aux[K, Qs, W])] =
+      pRq.preserves_|| match
+        case ex1 @ Indeed(Indeed((TypeEq(Refl()), _, rkv))) =>
+          rkv.preserves_-:? match
+            case ex3 @ Indeed((TypeEq(Refl()), vRw)) =>
+              Indeed((vRw, IsOptionalLastPropertyOf[ex1.T, K, ex3.T]()))
   }
 
   case class IsInitPropertyOf[K, Init, Last, T, RoO <: [Req[_], Opt[_]] =>> [A] =>> Req[A] | Opt[A]](
@@ -110,7 +134,7 @@ object IsPropertyOf {
     override type ReqOrOpt[Req[_], Opt[_]] = i.ReqOrOpt[Req, Opt]
 
     override def switch[R](
-      caseLastProp:    [init] => ((Init || Last) =:= (init || K :: T), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], F]) => R,
+      caseReqLastProp: [init] => ((Init || Last) =:= (init || K :: T), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], F]) => R,
       caseOptLastProp: [init] => ((Init || Last) =:= (init || K :? T), [F[_], G[_]] => DummyImplicit ?=> TypeEqK[i.ReqOrOpt[F, G], G]) => R,
       caseInitProp:    [init, last] => ((Init || Last) =:= (init || last), IsPropertyOf.Aux[K, init, T, RoO]) => R,
     ): R =
@@ -118,6 +142,15 @@ object IsPropertyOf {
 
     override def propertiesNotVoid(using (Init || Last) =:= Void): Nothing =
       ||.isNotVoid
+
+    override def refined[Qs](
+      pRq: (Init || Last) IsRefinedBy Qs,
+    ): Exists[[W] =>> (i.Type IsRefinedBy W, IsPropertyOf.Aux[K, Qs, W, i.ReqOrOpt])] =
+      pRq.preserves_|| match
+        case ex1 @ Indeed(ex2 @ Indeed((TypeEq(Refl()), rInit, _))) =>
+          i.refined(rInit) match
+            case ex3 @ Indeed((r, j)) =>
+              Indeed((r, IsInitPropertyOf[K, ex1.T, ex2.T, ex3.T, i.ReqOrOpt](j)))
   }
 
   given isRequiredLastPropertyOf[Init, K, V]: (IsRequiredPropertyOf[K, Init || K :: V] { type Type = V }) =
